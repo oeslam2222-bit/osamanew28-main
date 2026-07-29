@@ -46,10 +46,10 @@ import {
   startTitleFlash,
   stopTitleFlash,
   speakText,
-  startLoudRepeatingAlarm,
   stopLoudRepeatingAlarm,
   triggerVibration,
   notifyDriverWithAudioFirst,
+  notifyRideRequest,
   unlockAudioContext
 } from './utils/notifications';
 import {
@@ -469,6 +469,7 @@ export default function App() {
   // Driver selected inside the Driver role screen
   const [selectedDriverId, setSelectedDriverId] = useState<string>('drv_1');
 
+  const [networkConnected, setNetworkConnected] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const lastNavDriverLatRef = useRef<number | null>(null);
   const lastNavDriverLngRef = useRef<number | null>(null);
   const lastLocationSavedAtRef = useRef<Record<string, number>>({});
@@ -667,6 +668,68 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('ezz_driver_logged_in', driverIsLoggedIn ? 'true' : 'false');
   }, [driverIsLoggedIn]);
+
+  // Reset driver to AVAILABLE when driver session is restored or login occurs
+  useEffect(() => {
+    if (!driverIsLoggedIn || !selectedDriverId || !supabaseConnected) return;
+
+    const resetDriverToAvailable = async () => {
+      let driver = drivers.find(d => d.id === selectedDriverId);
+      
+      if (!driver) {
+        try {
+          const freshDrivers = await fetchDrivers();
+          driver = freshDrivers?.find(d => d.id === selectedDriverId);
+        } catch (e) {
+          console.warn('[DriverReset] Could not fetch driver:', e);
+        }
+      }
+      
+      if (!driver) return;
+
+      if (driver.status === 'BUSY' || !driver.isOnline) {
+        const updated = { ...driver, isOnline: true, status: 'AVAILABLE' as const };
+        setDrivers(prev => prev.map(d => d.id === selectedDriverId ? updated : d));
+        await saveDriver(updated);
+        triggerToast(
+          lang === 'ar' ? 'تم إعادة تعيين الحالة' : 'Status reset',
+          lang === 'ar' ? 'تم إعادة تعيين حالتك إلى متاح' : 'Your status has been reset to available',
+          'success'
+        );
+      }
+    };
+
+    resetDriverToAvailable();
+  }, [driverIsLoggedIn, selectedDriverId, supabaseConnected, drivers]);
+
+  // Online/Offline connectivity detection
+  useEffect(() => {
+    const handleOnline = () => {
+      setNetworkConnected(true);
+      triggerToast(
+        lang === 'ar' ? '✅ تم استعادة الاتصال' : '✅ Back Online',
+        lang === 'ar' ? 'أنت متصل الآن' : 'You are back online',
+        'success'
+      );
+    };
+
+    const handleOffline = () => {
+      setNetworkConnected(false);
+      triggerToast(
+        lang === 'ar' ? '📡 أنت غير متصل' : '📡 Offline',
+        lang === 'ar' ? 'لا يوجد اتصال بالإنترنت' : 'No internet connection',
+        'warning'
+      );
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [lang]);
 
   useEffect(() => {
     localStorage.setItem('ezz_admin_logged_in', adminIsLoggedIn ? 'true' : 'false');
@@ -1342,23 +1405,13 @@ export default function App() {
        }
      }
 
-    // Chat Message Notifications
+    // Chat Message Notifications — short tone only, no native push, no toast
     if (activeTrip.chatMessages && activeTrip.chatMessages.length > 0) {
       activeTrip.chatMessages.forEach((msg) => {
         const msgEventKey = `${currentTripId}_msg_${msg.id}`;
         if (!notifiedEventsRef.current.has(msgEventKey)) {
           notifiedEventsRef.current.add(msgEventKey);
           playNotificationSound('chat_message');
-          sendNativeNotification(
-            `💬 رسالة جديدة من ${msg.sender === 'DRIVER' ? 'الكابتن' : 'العميل'}`,
-            msg.text,
-            '💬'
-          );
-          triggerToast(
-            `💬 رسالة جديدة من ${msg.sender === 'DRIVER' ? 'الكابتن' : 'العميل'}`,
-            msg.text,
-            'info'
-          );
         }
       });
     }
@@ -1377,14 +1430,19 @@ export default function App() {
       if (lastNotifiedTripIdRef.current !== activeTrip.id || lastNotifiedOfferedDriverIdRef.current !== activeTrip.currentOfferedDriverId) {
         lastNotifiedTripIdRef.current = activeTrip.id;
         lastNotifiedOfferedDriverIdRef.current = activeTrip.currentOfferedDriverId || null;
-        startLoudRepeatingAlarm(
+        notifyRideRequest(
+          lang === 'ar' ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!',
           lang === 'ar'
-            ? `يوجد رحلة جديدة من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr}`
-            : `New ride from ${activeTrip.pickup.nameEn} to ${activeTrip.dropoff.nameEn}`,
-          'new_trip',
+            ? `من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr} | ${activeTrip.fare} ج.م`
+            : `${activeTrip.pickup.nameEn} → ${activeTrip.dropoff.nameEn} | ${activeTrip.fare} EGP`,
+          lang === 'ar' ? 'ar-EG' : 'en-US'
+        );
+        triggerToast(
+          lang === 'ar' ? 'يوجد رحلة جديدة' : 'New trip available',
           lang === 'ar'
-            ? `يوجد رحلة جديدة من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr}`
-            : undefined
+            ? `العميل ${activeTrip.riderName} يطلب رحلة من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr}.`
+            : `Rider ${activeTrip.riderName} requests a ride from ${activeTrip.pickup.nameEn} to ${activeTrip.dropoff.nameEn}.`,
+          'new_trip'
         );
       }
     } else {
@@ -1435,7 +1493,7 @@ export default function App() {
       if (document.hidden) {
         resetNotified();
       } else {
-        // App just became visible, immediately check for pending trip and notify
+        // App just became visible, immediately check for pending trip
         const remoteActiveTrip = activeTrip;
         if (remoteActiveTrip && remoteActiveTrip.status === 'SEARCHING') {
           const isEligible = remoteActiveTrip.offeredDriverIds?.includes(selectedDriverId);
@@ -1443,18 +1501,6 @@ export default function App() {
           const needsNotify = lastNotifiedTripIdRef.current !== remoteActiveTrip.id ||
             lastNotifiedOfferedDriverIdRef.current !== remoteActiveTrip.currentOfferedDriverId;
           if (isEligible && needsNotify && isNewlyOffered) {
-            const speechMsg = lang === 'ar'
-              ? `يوجد رحلة جديدة من ${remoteActiveTrip.pickup.nameAr} إلى ${remoteActiveTrip.dropoff.nameAr} بقيمة ${remoteActiveTrip.fare} جنيه.`
-              : `New ride available from ${remoteActiveTrip.pickup.nameEn} to ${remoteActiveTrip.dropoff.nameEn} for ${remoteActiveTrip.fare} EGP.`;
-
-            notifyDriverWithAudioFirst({
-              title: lang === 'ar' ? 'يوجد رحلة جديدة' : 'New trip available',
-              body: `${remoteActiveTrip.pickup.nameAr || remoteActiveTrip.pickup.nameEn} ← ${remoteActiveTrip.dropoff.nameAr || remoteActiveTrip.dropoff.nameEn} | ${remoteActiveTrip.fare} EGP`,
-              soundType: 'new_trip',
-              speechText: speechMsg,
-              lang: lang === 'ar' ? 'ar-EG' : 'en-US',
-              tag: `trip-${remoteActiveTrip.id}`,
-            });
             lastNotifiedTripIdRef.current = remoteActiveTrip.id;
             lastNotifiedOfferedDriverIdRef.current = remoteActiveTrip.currentOfferedDriverId || null;
           }
@@ -1491,18 +1537,6 @@ export default function App() {
           const needsNotify = lastNotifiedTripIdRef.current !== remoteActiveTrip.id ||
             lastNotifiedOfferedDriverIdRef.current !== remoteActiveTrip.currentOfferedDriverId;
           if (isEligible && needsNotify && isNewlyOffered) {
-            const speechMsg = lang === 'ar'
-              ? `يوجد رحلة جديدة من ${remoteActiveTrip.pickup.nameAr} إلى ${remoteActiveTrip.dropoff.nameAr} بقيمة ${remoteActiveTrip.fare} جنيه.`
-              : `New ride available from ${remoteActiveTrip.pickup.nameEn} to ${remoteActiveTrip.dropoff.nameEn} for ${remoteActiveTrip.fare} EGP.`;
-
-            notifyDriverWithAudioFirst({
-              title: lang === 'ar' ? 'يوجد رحلة جديدة' : 'New trip available',
-              body: `${remoteActiveTrip.pickup.nameAr || remoteActiveTrip.pickup.nameEn} ← ${remoteActiveTrip.dropoff.nameAr || remoteActiveTrip.dropoff.nameEn} | ${remoteActiveTrip.fare} EGP`,
-              soundType: 'new_trip',
-              speechText: speechMsg,
-              lang: lang === 'ar' ? 'ar-EG' : 'en-US',
-              tag: `trip-${remoteActiveTrip.id}`,
-            });
             lastNotifiedTripIdRef.current = remoteActiveTrip.id;
             lastNotifiedOfferedDriverIdRef.current = remoteActiveTrip.currentOfferedDriverId || null;
           }
@@ -2688,7 +2722,7 @@ export default function App() {
         }, 1000);
       }
 
-      // Announce rating to both driver and rider via speech
+      // Announce rating to driver only (internal feedback)
       const riderName = activeTrip.riderName || 'العميل';
      speakText(
        lang === 'ar'
@@ -2696,16 +2730,7 @@ export default function App() {
          : `Thank you for your rating. You rated ${riderName} ${rating} stars.`,
        lang === 'ar' ? 'ar-EG' : 'en-US'
      );
-
-     // Notify rider about the rating via native notification
-     sendNativeNotification(
-       lang === 'ar' ? '⭐ تقييم جديد من الكابتن' : '⭐ New Rating from Driver',
-       lang === 'ar'
-         ? `لقد قيّمك الكابتن ${activeTrip.driverName || 'عز الدين'} بـ ${rating} نجوم.`
-         : `Driver ${activeTrip.driverName || 'Ezz'} rated you ${rating} stars.`,
-       '⭐'
-     );
-   };
+    };
 
    // Handler: Dismiss completed trip and reset active view
   const handleDismissCompletedTrip = () => {

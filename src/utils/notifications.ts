@@ -381,8 +381,54 @@ export const notifyDriverWithAudioFirst = async ({
 let alarmInterval: ReturnType<typeof setInterval> | null = null;
 
 /**
- * Loud repeating driver alarm that rings periodically until trip is accepted or dismissed.
- * Follows strict priority: Audio -> Speech -> Vibration -> Title Flash -> Background Push Notification.
+ * Ring twice (2 short beeps like WhatsApp), then show one notification + toast.
+ * Use this for driver ride-request alerts — NOT repeating.
+ */
+export const notifyRideRequest = (title: string, body: string, lang = 'ar-EG') => {
+  if (alarmInterval) {
+    clearInterval(alarmInterval);
+    alarmInterval = null;
+  }
+
+  const isAr = lang === 'ar-EG';
+
+  try {
+    const ctx = getAudioContext();
+    const now = ctx.currentTime;
+
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(880, now);
+    gain1.gain.setValueAtTime(0.35, now);
+    gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.2);
+
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(880, now + 0.25);
+    gain2.gain.setValueAtTime(0.35, now + 0.25);
+    gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.43);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.25);
+    osc2.stop(now + 0.45);
+  } catch (e) {
+    console.warn('[notifyRideRequest] Audio failed:', e);
+  }
+
+  triggerVibration([200, 80, 200]);
+  sendNativeNotification(title, body, '🚖', 'ride-request-' + Date.now());
+  startTitleFlash(`🚨 ${title}`);
+  setTimeout(stopTitleFlash, 4000);
+};
+
+/**
+ * Old repeating alarm — kept for compatibility but now rings ONCE and stops.
  */
 export const startLoudRepeatingAlarm = (
   messageEn: string,
@@ -391,32 +437,13 @@ export const startLoudRepeatingAlarm = (
 ) => {
   if (alarmInterval) {
     clearInterval(alarmInterval);
+    alarmInterval = null;
   }
 
   const voiceMsg = arabicMessage || messageEn;
   const displayTitle = arabicMessage ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!';
 
-  // Execute immediate Audio-First alert
-  notifyDriverWithAudioFirst({
-    title: displayTitle,
-    body: voiceMsg,
-    soundType,
-    speechText: voiceMsg,
-    lang: arabicMessage ? 'ar-EG' : 'en-US',
-    tag: 'new-driver-trip-alarm',
-  });
-
-  // Set repeating interval every 1.8 seconds
-  alarmInterval = setInterval(() => {
-    // 1. Audio sound
-    playNotificationSound(soundType);
-    // 2. Speech synthesis
-    speakText(voiceMsg, arabicMessage ? 'ar-EG' : 'en-US');
-    // 3. Vibration
-    triggerVibration([300, 100, 300, 100, 400]);
-    // 4. Background notification
-    sendNativeNotification(displayTitle, voiceMsg, '🚖', 'new-driver-trip-alarm');
-  }, 1800);
+  notifyRideRequest(displayTitle, voiceMsg, arabicMessage ? 'ar-EG' : 'en-US');
 };
 
 export const stopLoudRepeatingAlarm = () => {
