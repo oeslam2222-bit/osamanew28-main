@@ -767,13 +767,15 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
     if (userId && userRole === 'rider') {
       query = query.eq('rider_id', userId);
     } else if (userId && userRole === 'driver') {
+      // Fetch trips where this driver is assigned, current offered, OR in the offered list.
+      // PostgREST .or() can't check JSONB containment, so we fetch by driver_id/current_offered
+      // and also fetch recent SEARCHING trips to check offeredDriverIds client-side.
       query = query.or(`driver_id.eq.${userId},current_offered_driver_id.eq.${userId},status.eq.SEARCHING`);
       query = query.in('status', ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED']);
     }
     // admin gets all
 
-    const isDriverQuery = userId && userRole === 'driver';
-    const { data, error } = await query.limit(isDriverQuery ? 50 : 1);
+    const { data, error } = await query.limit(1);
     if (error) {
       if (error.code === 'PGRST116') {
         console.log('[fetchActiveTrip] No active trip in DB (empty table)');
@@ -786,30 +788,19 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
       return null;
     }
 
+    // For drivers, filter SEARCHING trips to only those where this driver is in offeredDriverIds.
+    // The .or() query fetches all SEARCHING trips, so we narrow down client-side.
     if (userId && userRole === 'driver') {
-      let relevantRow: any = null;
-      let bestPriority = 100;
-      for (const row of data) {
+      const relevant = data.find((row: any) => {
         const trip = mapTripFromDB(row);
-        let priority = 100;
-        if (trip.driverId === userId && ['ACCEPTED', 'ARRIVED', 'STARTED'].includes(trip.status)) {
-          priority = 0;
-        } else if (trip.driverId === userId) {
-          priority = 1;
-        } else if (trip.currentOfferedDriverId === userId) {
-          priority = 2;
-        } else if (trip.status === 'SEARCHING' && trip.offeredDriverIds?.includes(userId)) {
-          priority = 3;
-        }
-        if (priority < bestPriority) {
-          bestPriority = priority;
-          relevantRow = row;
-        }
-        if (bestPriority === 0) break;
-      }
-      if (relevantRow) {
-        console.log('[fetchActiveTrip] Found active trip:', mapTripFromDB(relevantRow).id, 'status:', mapTripFromDB(relevantRow).status, 'for driver:', userId);
-        return mapTripFromDB(relevantRow);
+        if (trip.driverId === userId) return true;
+        if (trip.currentOfferedDriverId === userId) return true;
+        if (trip.status === 'SEARCHING' && trip.offeredDriverIds?.includes(userId)) return true;
+        return false;
+      });
+      if (relevant) {
+        console.log('[fetchActiveTrip] Found active trip:', relevant.id, 'status:', relevant.status, 'for driver:', userId);
+        return mapTripFromDB(relevant);
       }
       console.log('[fetchActiveTrip] No relevant trip for driver:', userId);
       return null;
