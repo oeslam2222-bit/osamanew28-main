@@ -117,12 +117,15 @@ self.addEventListener('message', (event) => {
   }
 });
 
-// Listen to incoming Web Push API events
+// Listen to incoming Web Push API events (FCM)
 self.addEventListener('push', (event) => {
   let data = { title: 'تطبيق عز 🚖', body: 'تحديث جديد لرحلتك حالاً!' };
+  
   if (event.data) {
     try {
-      data = event.data.json();
+      const parsed = event.data.json();
+      // FCM wraps message in .data property, direct push may use root
+      data = parsed.data || parsed;
     } catch (e) {
       data = { title: 'تطبيق عز 🚖', body: event.data.text() };
     }
@@ -131,23 +134,28 @@ self.addEventListener('push', (event) => {
   const iconDataUrl = 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚖</text></svg>';
 
   const options = {
-    body: data.body,
+    body: data.body || data.message || 'تحديث جديد',
     icon: iconDataUrl,
     badge: iconDataUrl,
-    tag: data.tag || 'ezz-push-alert',
+    tag: data.tag || data.rideId || 'ezz-push-alert',
     renotify: true,
     requireInteraction: true,
     silent: false,
     sound: 'default',
-    vibrate: [300, 100, 300, 100, 400],
+    vibrate: data.vibrate || [300, 100, 300, 100, 400],
     data: {
       dateOfArrival: Date.now(),
-      url: '/'
-    }
+      url: data.url || '/',
+      rideId: data.rideId || null,
+    },
+    actions: data.actions || [
+      { action: 'open_app', title: 'عرض المشوار 🚖' },
+      { action: 'dismiss', title: 'إغلاق ✖' }
+    ]
   };
 
   event.waitUntil(
-    self.registration.showNotification(data.title, options)
+    self.registration.showNotification(data.title || 'تطبيق عز 🚖', options)
   );
 });
 

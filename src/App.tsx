@@ -52,6 +52,7 @@ import {
   notifyRideRequest,
   unlockAudioContext
 } from './utils/notifications';
+import { getFCMToken, onFCMForegroundMessage } from './firebase';
 import {
   getInitialDataSaverState,
   setDataSaverState,
@@ -1473,6 +1474,46 @@ export default function App() {
         });
     }
   }, []);
+
+  // FCM foreground message listener
+  useEffect(() => {
+    if (!driverIsLoggedIn) return;
+
+    const unsubscribe = onFCMForegroundMessage((payload) => {
+      console.log('[FCM] Received foreground message:', payload);
+      
+      // Handle the FCM message
+      const data = payload.data || {};
+      const title = data.title || 'New Notification';
+      const body = data.body || data.message || '';
+      const rideId = data.rideId;
+      
+      // Play notification sound
+      if (data.soundType) {
+        playNotificationSound(data.soundType as any);
+      } else {
+        playNotificationSound('new_trip');
+      }
+      
+      // Show toast
+      triggerToast(title, body, 'info');
+      
+      // If it's a new trip notification, update the active trip
+      if (rideId && data.status === 'SEARCHING') {
+        fetchActiveTrip(selectedDriverId, 'driver').then((trip) => {
+          if (trip && trip !== 'NO_TABLE') {
+            setActiveTripWithTracking(trip);
+          }
+        });
+      }
+    });
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [driverIsLoggedIn, selectedDriverId, lang]);
 
    // 3. Background notification poller — keeps driver alerts alive even when tab is hidden
   useEffect(() => {
@@ -3143,6 +3184,19 @@ export default function App() {
         const updatedDriver = { ...found, isOnline: true, status: 'AVAILABLE' as const };
         await saveDriver(updatedDriver);
         setDrivers(prev => prev.map(d => d.id === found.id ? updatedDriver : d));
+        
+        // Register FCM token for push notifications
+        try {
+          const fcmToken = await getFCMToken();
+          if (fcmToken) {
+            const driverWithToken = { ...updatedDriver, fcmToken };
+            await saveDriver(driverWithToken);
+            setDrivers(prev => prev.map(d => d.id === found.id ? driverWithToken : d));
+            console.log('[FCM] Token saved for driver:', found.id);
+          }
+        } catch (err) {
+          console.warn('[FCM] Could not register token:', err);
+        }
         
         const freshDrivers = await fetchDrivers();
         if (freshDrivers && freshDrivers.length > 0) {

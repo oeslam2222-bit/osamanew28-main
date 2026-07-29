@@ -492,6 +492,7 @@ export const mapDriverFromDB = (row: any): Driver => ({
   autoAccept: !!row.auto_accept,
   autoShowMap: !!row.auto_show_map,
   lastSeen: row.last_seen || undefined,
+  fcmToken: row.fcm_token || undefined,
 });
 
 export const mapDriverToDB = (drv: Driver) => ({
@@ -523,6 +524,7 @@ export const mapDriverToDB = (drv: Driver) => ({
   auto_accept: drv.autoAccept || false,
   auto_show_map: drv.autoShowMap || false,
   last_seen: drv.lastSeen || new Date().toISOString(),
+  fcm_token: drv.fcmToken || null,
 });
 
 // --- RIDER TRANSFORMS ---

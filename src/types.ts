@@ -104,6 +104,7 @@ export interface Driver {
   autoAccept?: boolean; // هل يقبل الرحلات أوتوماتيكياً
   autoShowMap?: boolean; // هل يعرض الخريطة تلقائياً عند قبول الرحلة
   lastSeen?: string; // آخر مرة تم رؤية السائق متصل (Heartbeat)
+  fcmToken?: string; // Firebase Cloud Messaging token for push notifications
 }
 
 export interface RiderPreferences {
