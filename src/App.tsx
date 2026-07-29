@@ -1826,39 +1826,45 @@ export default function App() {
     let currentOfferedDriverId: string | undefined = undefined;
     let offeredDriverIds: string[] = [];
     
-    // Always fetch latest drivers from Supabase to avoid stale empty list
-    let eligibleDrivers: Driver[] = [];
-    if (supabaseConnected) {
-      try {
-        const freshDrivers = await fetchDrivers();
-        if (freshDrivers && freshDrivers.length > 0) {
-          const now = Date.now();
-          const staleThreshold = 60000;
-          eligibleDrivers = freshDrivers.filter(d => {
-            if (d.approvalStatus !== 'APPROVED') return false;
-            if (d.lastSeen && now - new Date(d.lastSeen).getTime() > staleThreshold) return false;
-            return true;
-          });
-        }
-      } catch (e) {
-        console.warn('Could not fetch fresh drivers for dispatch, falling back to local list:', e);
-        const now = Date.now();
-        const staleThreshold = 60000;
-        eligibleDrivers = drivers.filter(d => {
-          if (d.approvalStatus !== 'APPROVED') return false;
-          if (d.lastSeen && now - new Date(d.lastSeen).getTime() > staleThreshold) return false;
-          return true;
-        });
-      }
-    } else {
-      const now = Date.now();
-      const staleThreshold = 60000;
-      eligibleDrivers = drivers.filter(d => {
-        if (d.approvalStatus !== 'APPROVED') return false;
-        if (d.lastSeen && now - new Date(d.lastSeen).getTime() > staleThreshold) return false;
-        return true;
-      });
-    }
+     // Always fetch latest drivers from Supabase to avoid stale empty list
+     let eligibleDrivers: Driver[] = [];
+     if (supabaseConnected) {
+       try {
+         const freshDrivers = await fetchDrivers();
+         if (freshDrivers && freshDrivers.length > 0) {
+           const now = Date.now();
+           const staleThreshold = 60000;
+           eligibleDrivers = freshDrivers.filter(d => {
+             if (d.approvalStatus !== 'APPROVED') return false;
+             if (!d.isOnline) return false;
+             if (d.status === 'BUSY') return false;
+             if (d.lastSeen && now - new Date(d.lastSeen).getTime() > staleThreshold) return false;
+             return true;
+           });
+         }
+       } catch (e) {
+         console.warn('Could not fetch fresh drivers for dispatch, falling back to local list:', e);
+         const now = Date.now();
+         const staleThreshold = 60000;
+         eligibleDrivers = drivers.filter(d => {
+           if (d.approvalStatus !== 'APPROVED') return false;
+           if (!d.isOnline) return false;
+           if (d.status === 'BUSY') return false;
+           if (d.lastSeen && now - new Date(d.lastSeen).getTime() > staleThreshold) return false;
+           return true;
+         });
+       }
+     } else {
+       const now = Date.now();
+       const staleThreshold = 60000;
+       eligibleDrivers = drivers.filter(d => {
+         if (d.approvalStatus !== 'APPROVED') return false;
+         if (!d.isOnline) return false;
+         if (d.status === 'BUSY') return false;
+         if (d.lastSeen && now - new Date(d.lastSeen).getTime() > staleThreshold) return false;
+         return true;
+       });
+     }
 
     // Filter drivers by the pickup region selected by rider.
     // Only drivers whose coverage areas include the selected region receive the request.
@@ -1965,6 +1971,159 @@ export default function App() {
     }
     return false;
   };
+
+  // Refresh a waiting trip: re-evaluate eligible drivers and re-dispatch
+  const refreshWaitingTrip = async (): Promise<boolean> => {
+    const trip = activeTrip;
+    if (!trip || trip.status !== 'SEARCHING' || !rider.isLoggedIn || !selectedPickup || !selectedDropoff) return false;
+
+    const pLoc = locations.find((l) => l.id === selectedPickup);
+    const dLoc = locations.find((l) => l.id === selectedDropoff);
+    const selectedRegion = regions.find(r => r.id === selectedPickupRegion);
+    if (!pLoc || !dLoc) return false;
+
+    let eligibleDrivers: Driver[] = [];
+    if (supabaseConnected) {
+      try {
+        const freshDrivers = await fetchDrivers();
+        if (freshDrivers && freshDrivers.length > 0) {
+          const now = Date.now();
+          const staleThreshold = 60000;
+          eligibleDrivers = freshDrivers.filter(d => {
+            if (d.approvalStatus !== 'APPROVED') return false;
+            if (!d.isOnline) return false;
+            if (d.status === 'BUSY') return false;
+            if (d.lastSeen && now - new Date(d.lastSeen).getTime() > staleThreshold) return false;
+            return true;
+          });
+        }
+      } catch {
+        const now = Date.now();
+        const staleThreshold = 60000;
+        eligibleDrivers = drivers.filter(d => {
+          if (d.approvalStatus !== 'APPROVED') return false;
+          if (!d.isOnline) return false;
+          if (d.status === 'BUSY') return false;
+          if (d.lastSeen && now - new Date(d.lastSeen).getTime() > staleThreshold) return false;
+          return true;
+        });
+      }
+    } else {
+      const now = Date.now();
+      const staleThreshold = 60000;
+      eligibleDrivers = drivers.filter(d => {
+        if (d.approvalStatus !== 'APPROVED') return false;
+        if (!d.isOnline) return false;
+        if (d.status === 'BUSY') return false;
+        if (d.lastSeen && now - new Date(d.lastSeen).getTime() > staleThreshold) return false;
+        return true;
+      });
+    }
+
+    if (selectedRegion && selectedRegion.id !== 'all') {
+      eligibleDrivers = eligibleDrivers.filter(d => {
+        if (!d.serviceAreas || d.serviceAreas.length === 0) return true;
+        return d.serviceAreas.some(
+          sa =>
+            sa === selectedRegion.nameAr ||
+            sa === selectedRegion.nameEn ||
+            sa === selectedRegion.id ||
+            sa === 'جميع المناطق' ||
+            sa === 'All Regions' ||
+            sa === 'كل المناطق' ||
+            sa.includes('بني سويف')
+        );
+      });
+    }
+
+    if (eligibleDrivers.length === 0) return false;
+
+    const sortedDrivers = eligibleDrivers
+      .map((d) => {
+        const dCoords = getCoordsFromXY(d.currentX, d.currentY);
+        const dist = calculateHaversineDistance(dCoords.lat, dCoords.lng, pLoc.lat, pLoc.lng);
+        return { driver: d, distance: dist };
+      })
+      .sort((a, b) => a.distance - b.distance);
+
+    const newOfferedIds = sortedDrivers.slice(0, 50).map((item) => item.driver.id);
+    const newFirstId = newOfferedIds[0];
+
+    const updatedTrip: Trip = {
+      ...trip,
+      offeredDriverIds: newOfferedIds,
+      currentOfferedDriverId: newFirstId,
+      dispatchTimer: trip.dispatchTimerMax || trip.dispatchTimer || 600,
+    };
+
+    setActiveTripWithTracking(updatedTrip);
+    if (supabaseConnected) {
+      await saveWithRetry(updatedTrip);
+    }
+
+    return true;
+  };
+
+  // Dispatch timer countdown: decrements while trip is SEARCHING, cancels on timeout
+  useEffect(() => {
+    if (!activeTrip || activeTrip.status !== 'SEARCHING') {
+      return;
+    }
+
+    const interval = setInterval(async () => {
+      setActiveTripWithTracking((prev) => {
+        if (!prev || prev.status !== 'SEARCHING') {
+          clearInterval(interval);
+          return prev;
+        }
+
+        const currentTimer = prev.dispatchTimer ?? 600;
+        if (currentTimer <= 1) {
+          clearInterval(interval);
+          const cancelled = { ...prev, status: 'CANCELLED' as TripStatus, completedAt: new Date().toISOString() };
+          setTripsHistory((history) => [cancelled, ...history]);
+          if (supabaseConnected) {
+            saveTripToHistory(cancelled);
+            saveActiveTrip(null).catch(() => {});
+          }
+          playNotificationSound('alert');
+          speakText(
+            lang === 'ar'
+              ? 'انتهت مهلة انتظار الرحلة. يمكنك طلب رحلة جديدة.'
+              : 'The ride waiting time has expired. You can request a new ride.',
+            lang === 'ar' ? 'ar-EG' : 'en-US'
+          );
+          triggerToast(
+            lang === 'ar' ? 'انتهت مهلة الانتظار' : 'Waiting time expired',
+            lang === 'ar'
+              ? 'لم يقبل أي سائق الرحلة في الوقت المحدد. يمكنك المحاولة مرة أخرى.'
+              : 'No driver accepted the ride in time. You can try again.',
+            'warning'
+          );
+          return null;
+        }
+
+        return { ...prev, dispatchTimer: currentTimer - 1 };
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeTrip?.id, activeTrip?.status, lang, supabaseConnected]);
+
+  // Auto-refresh waiting trip every 2 minutes to re-dispatch to new online drivers
+  useEffect(() => {
+    if (!activeTrip || activeTrip.status !== 'SEARCHING' || !rider.isLoggedIn) return;
+
+    const refreshInterval = setInterval(() => {
+      refreshWaitingTrip().then((ok) => {
+        if (ok) {
+          console.log('[WaitingTripRefresh] Trip refreshed successfully');
+        }
+      });
+    }, 120000);
+
+    return () => clearInterval(refreshInterval);
+  }, [activeTrip?.id, activeTrip?.status, rider.isLoggedIn, supabaseConnected]);
 
   // Handler: Send Chat Message in Active Trip
   const handleSendChatMessage = (text: string, sender: 'RIDER' | 'DRIVER') => {
