@@ -1891,10 +1891,10 @@ export default function App() {
     const { baseFare, commission, finalFare } = calculateFullTripFare(distance, requestedVehicleType, stats, appliedDiscount);
     const fare = finalFare;
 
-    // Broadcast dispatch to up to 50 available drivers in the region simultaneously.
-    // The first driver to accept wins the ride. 10-minute acceptance window.
-    const MAX_OFFERED_DRIVERS = 50;
-    const DISPATCH_TIMER_SECONDS = 600;
+    // Broadcast dispatch to up to 5 available drivers in the region simultaneously.
+    // The first driver to accept wins the ride. 3-minute acceptance window.
+    const MAX_OFFERED_DRIVERS = 5;
+    const DISPATCH_TIMER_SECONDS = 180;
 
     let currentOfferedDriverId: string | undefined = undefined;
     let offeredDriverIds: string[] = [];
@@ -2135,7 +2135,7 @@ export default function App() {
       ...trip,
       offeredDriverIds: newOfferedIds,
       currentOfferedDriverId: newFirstId,
-      dispatchTimer: trip.dispatchTimerMax || trip.dispatchTimer || 600,
+      dispatchTimer: trip.dispatchTimerMax || trip.dispatchTimer || 180,
     };
 
     setActiveTripWithTracking(updatedTrip);
@@ -2160,7 +2160,7 @@ export default function App() {
           return prev;
         }
 
-        const currentTimer = prev.dispatchTimer ?? 600;
+        const currentTimer = prev.dispatchTimer ?? 180;
         if (currentTimer <= 1) {
           clearInterval(interval);
           const cancelled = { ...prev, status: 'CANCELLED' as TripStatus, completedAt: new Date().toISOString() };
