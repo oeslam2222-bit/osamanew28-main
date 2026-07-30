@@ -14,25 +14,41 @@ const missingFields = Object.entries(firebaseConfig)
   .filter(([, v]) => !v)
   .map(([k]) => k);
 
-if (missingFields.length > 0) {
+let app: ReturnType<typeof initializeApp> | null = null;
+let messagingInstance: ReturnType<typeof getMessaging> | null = null;
+
+if (missingFields.length === 0) {
+  try {
+    app = initializeApp(firebaseConfig);
+  } catch (e) {
+    console.warn('[Firebase] Initialization failed:', e);
+  }
+} else {
   console.warn(
     `[Firebase] Missing config: ${missingFields.join(', ')}. Notifications will be disabled.`
   );
 }
 
-const app = initializeApp(firebaseConfig);
-
-let messagingInstance: ReturnType<typeof getMessaging> | null = null;
-
 export const getMessagingInstance = () => {
+  if (!app || !messagingInstance) {
+    return null;
+  }
   if (!messagingInstance) {
-    messagingInstance = getMessaging(app);
+    try {
+      messagingInstance = getMessaging(app);
+    } catch (e) {
+      console.warn('[Firebase] Messaging not available:', e);
+      return null;
+    }
   }
   return messagingInstance;
 };
 
 export const getFCMToken = async (): Promise<string | null> => {
   try {
+    const messaging = getMessagingInstance();
+    if (!messaging) return null;
+
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
       console.warn('[FCM] Notification permission denied');
@@ -45,7 +61,7 @@ export const getFCMToken = async (): Promise<string | null> => {
       return null;
     }
 
-    const token = await getToken(getMessagingInstance(), {
+    const token = await getToken(messaging, {
       vapidKey,
     });
 
@@ -63,7 +79,11 @@ export const getFCMToken = async (): Promise<string | null> => {
 };
 
 export const onFCMForegroundMessage = (callback: (payload: any) => void) => {
-  return onMessage(getMessagingInstance(), (payload) => {
+  const messaging = getMessagingInstance();
+  if (!messaging) {
+    return () => {};
+  }
+  return onMessage(messaging, (payload) => {
     console.log('[FCM] Foreground message:', payload);
     callback(payload);
   });
