@@ -1299,16 +1299,6 @@ export const RiderView: React.FC<RiderViewProps> = ({
                   <MapPin className="w-4 h-4" />
                   {lang === 'ar' ? 'عرض الخريطة لاختيار نقطة الالتقاء / الوصول' : 'Show map to pick pickup / destination'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = !rider.preferences?.autoShowMap;
-                    persistPreferences({ autoShowMap: next });
-                    setShowMap(next);
-                  }}
-                  className={`px-3 py-2 rounded-xl text-[11px] font-bold border ${rider.preferences?.autoShowMap ? 'bg-blue-600 text-white border-blue-700' : 'bg-white text-slate-700 border-slate-200'}`}>
-                  {rider.preferences?.autoShowMap ? (lang === 'ar' ? 'خريطة تلقائياً' : 'Auto Map') : (lang === 'ar' ? 'خريطة يدوي' : 'Manual Map')}
-                </button>
               </div>
             ) : (
               <Suspense
