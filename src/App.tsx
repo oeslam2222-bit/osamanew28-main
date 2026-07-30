@@ -1137,7 +1137,7 @@ export default function App() {
         console.log('[Drivers Polling] Fetched', remoteDrivers?.length || 0, 'drivers from DB');
         if (remoteDrivers && remoteDrivers.length > 0) {
           const now = Date.now();
-          const staleThreshold = 60000; // 60 seconds
+          const staleThreshold = 15000; // 15 seconds — stale driver cutoff by lastSeen
           const availableCount = remoteDrivers.filter(d => {
             if (d.approvalStatus !== 'APPROVED' || !d.isOnline || d.status !== 'AVAILABLE') return false;
             if (d.lastSeen) {
@@ -1174,7 +1174,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, [supabaseConnected, dataSaverMode]);
 
-  // Heartbeat: update driver lastSeen every 30s so stale drivers can be detected
+  // Heartbeat: update driver lastSeen every 10s so stale drivers can be detected quickly
   useEffect(() => {
     if (!supabaseConnected || !driverIsLoggedIn || !selectedDriverId) return;
 
@@ -1187,7 +1187,7 @@ export default function App() {
       try {
         await supabase
           .from('ezz_drivers')
-          .update({ last_seen: now })
+          .update({ last_seen: now, last_heartbeat: now })
           .eq('id', selectedDriverId);
       } catch (e) {
         // Heartbeat failure is non-critical
@@ -1195,8 +1195,38 @@ export default function App() {
     };
 
     updateLastSeen();
-    const interval = setInterval(updateLastSeen, 30000);
-    return () => clearInterval(interval);
+    const interval = setInterval(updateLastSeen, 10000);
+
+    // Mark offline immediately when app/tab is closed
+    const markOffline = async () => {
+      try {
+        await supabase
+          .from('ezz_drivers')
+          .update({ status: 'OFFLINE' })
+          .eq('id', selectedDriverId);
+      } catch (e) {
+        // best-effort
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        markOffline();
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('beforeunload', markOffline);
+      document.addEventListener('visibilitychange', onVisibilityChange);
+    }
+
+    return () => {
+      clearInterval(interval);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('beforeunload', markOffline);
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+      }
+    };
   }, [supabaseConnected, driverIsLoggedIn, selectedDriverId]);
 
   // 2. General-purpose sync (riders + stats) — still paused when tab hidden to save bandwidth
@@ -1892,9 +1922,9 @@ export default function App() {
     const fare = finalFare;
 
     // Broadcast dispatch to up to 5 available drivers in the region simultaneously.
-    // The first driver to accept wins the ride. 3-minute acceptance window.
+    // The first driver to accept wins the ride. 5-minute acceptance window.
     const MAX_OFFERED_DRIVERS = 5;
-    const DISPATCH_TIMER_SECONDS = 180;
+    const DISPATCH_TIMER_SECONDS = 300;
 
     let currentOfferedDriverId: string | undefined = undefined;
     let offeredDriverIds: string[] = [];
@@ -2017,13 +2047,8 @@ export default function App() {
             markPromoCodeAsUsed(promoCodeId, newTrip.id).catch(() => {});
           }
           if (ok) {
-            sendNewTripNotification({
-              tripId: newTrip.id,
-              origin: lang === 'ar' ? pLoc.nameAr : pLoc.nameEn,
-              destination: lang === 'ar' ? dLoc.nameAr : dLoc.nameEn,
-              fare,
-              distance,
-            }).catch(() => {});
+            // FCM push is optional; enable after Firebase config + Edge Function deploy
+            // sendNewTripNotification({...}).catch(() => {});
           }
         });
 
@@ -2135,7 +2160,7 @@ export default function App() {
       ...trip,
       offeredDriverIds: newOfferedIds,
       currentOfferedDriverId: newFirstId,
-      dispatchTimer: trip.dispatchTimerMax || trip.dispatchTimer || 180,
+      dispatchTimer: trip.dispatchTimerMax || trip.dispatchTimer || 300,
     };
 
     setActiveTripWithTracking(updatedTrip);
@@ -2160,7 +2185,7 @@ export default function App() {
           return prev;
         }
 
-        const currentTimer = prev.dispatchTimer ?? 180;
+        const currentTimer = prev.dispatchTimer ?? 300;
         if (currentTimer <= 1) {
           clearInterval(interval);
           const cancelled = { ...prev, status: 'CANCELLED' as TripStatus, completedAt: new Date().toISOString() };
@@ -2644,7 +2669,7 @@ export default function App() {
     }
   };
 
-   // Handler: Rider rates driver
+    // Handler: Rider rates driver
    const handleRateDriver = (rating: number, tags?: string[], comment?: string) => {
      if (!activeTrip || !activeTrip.driverId) return;
 
@@ -2708,7 +2733,12 @@ export default function App() {
         '⭐',
         'rating-internal',
       );
-   };
+
+      setTimeout(() => {
+        setCurrentScreen('RIDER_DASHBOARD');
+        setActiveTripWithTracking(null);
+      }, 1500);
+    };
 
    // Handler: Driver rates rider
    const handleRateRider = (rating: number, tags?: string[], comment?: string) => {
@@ -2764,12 +2794,19 @@ export default function App() {
 
       // Announce rating to driver only (internal feedback)
       const riderName = activeTrip.riderName || 'العميل';
-     speakText(
-       lang === 'ar'
-         ? `شكراً لتقييمك. لقد قمت بتقييم ${riderName} بـ ${rating} نجوم.`
-         : `Thank you for your rating. You rated ${riderName} ${rating} stars.`,
-       lang === 'ar' ? 'ar-EG' : 'en-US'
-     );
+      speakText(
+        lang === 'ar'
+          ? `شكراً لتقييمك. لقد قمت بتقييم ${riderName} بـ ${rating} نجوم.`
+          : `Thank you for your rating. You rated ${riderName} ${rating} stars.`,
+        lang === 'ar' ? 'ar-EG' : 'en-US'
+      );
+
+      setTimeout(() => {
+        if (driverIsLoggedIn) {
+          setCurrentScreen('DRIVER_DASHBOARD');
+        }
+        setActiveTripWithTracking(null);
+      }, 1500);
     };
 
    // Handler: Dismiss completed trip and reset active view
