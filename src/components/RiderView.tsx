@@ -595,10 +595,6 @@ export const RiderView: React.FC<RiderViewProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="text-right">
-            <p className="text-[10px] text-slate-400">{lang === 'ar' ? 'الرصيد' : 'Balance'}</p>
-            <p className="text-xs font-black text-slate-800">{rider.balance} {lang === 'ar' ? 'ج.م' : 'EGP'}</p>
-          </div>
           <button
             type="button"
             onClick={() => {

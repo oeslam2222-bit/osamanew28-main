@@ -71,7 +71,6 @@ CREATE TABLE IF NOT EXISTS ezz_riders (
   name TEXT NOT NULL,
   phone TEXT NOT NULL UNIQUE,
   password TEXT,
-  balance DOUBLE PRECISION DEFAULT 0,
   rating DOUBLE PRECISION DEFAULT 5.0,
   total_trips INTEGER DEFAULT 0,
   approval_status TEXT DEFAULT 'APPROVED',
@@ -595,7 +594,6 @@ export const mapRiderFromDB = (row: any): Rider => ({
   name: row.name,
   phone: row.phone,
   password: row.password,
-  balance: row.balance || 0,
   rating: row.rating || 5.0,
   totalTrips: row.total_trips || 0,
   approvalStatus: row.approval_status || 'APPROVED',
@@ -608,7 +606,6 @@ export const mapRiderToDB = (r: Rider) => {
     name: r.name,
     phone: r.phone,
     password: r.password,
-    balance: r.balance,
     rating: r.rating || 5.0,
     total_trips: r.totalTrips || 0,
   } as any;
@@ -1799,5 +1796,35 @@ export const incrementAdImpression = async (id: string): Promise<void> => {
     await supabase.rpc('increment_ad_impression', { ad_id: id });
   } catch (err: any) {
     console.warn('incrementAdImpression failed:', err.message);
+  }
+};
+
+export const sendNewTripNotification = async (params: {
+  tripId: string;
+  origin?: string;
+  destination?: string;
+  fare?: number;
+  distance?: number;
+}): Promise<{ sent: number; results: any[] }> => {
+  try {
+    const { data, error } = await supabase.functions.invoke('send-fcm-notification', {
+      body: {
+        tripId: params.tripId,
+        origin: params.origin,
+        destination: params.destination,
+        fare: params.fare,
+        distance: params.distance,
+      },
+    });
+
+    if (error) {
+      console.warn('sendNewTripNotification Edge Function error:', error.message);
+      return { sent: 0, results: [] };
+    }
+
+    return data as { sent: number; results: any[] };
+  } catch (err: any) {
+    console.warn('sendNewTripNotification failed:', err.message);
+    return { sent: 0, results: [] };
   }
 };

@@ -2,7 +2,9 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ErrorBoundary from './components/ErrorBoundary';
 import NetworkStatusBar from './components/NetworkStatusBar';
 import InitializingOverlay from './components/InitializingOverlay';
+import NotificationSettings from './components/NotificationSettings';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
+import { loadNotificationSettings, NotificationSettings as NotificationSettingsType } from './utils/notificationSettings';
 import { Location, Driver, Trip, Rider, SystemStats, TripStatus, Region, Ad } from './types';
 import { RiderView } from './components/RiderView';
 import { DriverView } from './components/DriverView';
@@ -41,7 +43,8 @@ import {
   markPromoCodeAsUsed,
   fetchRegions,
   fetchAds,
-  fetchActiveAdsForPlacement
+  fetchActiveAdsForPlacement,
+  sendNewTripNotification
 } from './supabaseService';
 import {
   requestNotificationPermission,
@@ -54,7 +57,8 @@ import {
   triggerVibration,
   notifyDriverWithAudioFirst,
   notifyRideRequest,
-  unlockAudioContext
+  unlockAudioContext,
+  isNotificationRateLimited
 } from './utils/notifications';
 import { getFCMToken, onFCMForegroundMessage } from './firebase';
 import {
@@ -115,7 +119,7 @@ export default function App() {
   const [locations, setLocations] = useState<Location[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [rider, setRider] = useState<Rider & { isLoggedIn: boolean }>({
-    id: '', name: '', phone: '', password: '', balance: 0, rating: 5.0, totalTrips: 0, isLoggedIn: false,
+    id: '', name: '', phone: '', password: '', rating: 5.0, totalTrips: 0, isLoggedIn: false,
   });
   const [activeTrip, setActiveTrip] = useState<Trip | null>(null);
   const dismissedTripIdsRef = useRef<Set<string>>(new Set());
@@ -210,17 +214,20 @@ export default function App() {
             d.id === nextDriverId ? { ...d, status: 'AVAILABLE' } : d
           )
         );
-        notifyDriverWithAudioFirst({
-          title: lang === 'ar' ? 'يوجد رحلة جديدة' : 'New trip available',
-          body: `${currentTrip.pickup.nameAr || currentTrip.pickup.nameEn} ← ${currentTrip.dropoff.nameAr || currentTrip.dropoff.nameEn} | ${currentTrip.fare} EGP`,
-          soundType: 'new_trip',
-          speechText:
-            lang === 'ar'
-              ? `يوجد رحلة جديدة من ${currentTrip.pickup.nameAr} إلى ${currentTrip.dropoff.nameAr} بقيمة ${currentTrip.fare} جنيه.`
-              : `New ride available from ${currentTrip.pickup.nameEn} to ${currentTrip.dropoff.nameEn} for ${currentTrip.fare} EGP.`,
-          lang: lang === 'ar' ? 'ar-EG' : 'en-US',
-          tag: `trip-${currentTrip.id}`,
-        });
+        const rateKey = `transfer_${currentTrip.id}_${nextDriverId}`;
+        if (!isNotificationRateLimited(rateKey)) {
+          notifyDriverWithAudioFirst({
+            title: lang === 'ar' ? 'يوجد رحلة جديدة' : 'New trip available',
+            body: `${currentTrip.pickup.nameAr || currentTrip.pickup.nameEn} ← ${currentTrip.dropoff.nameAr || currentTrip.dropoff.nameEn} | ${currentTrip.fare} EGP`,
+            soundType: 'new_trip',
+            speechText:
+              lang === 'ar'
+                ? `يوجد رحلة جديدة من ${currentTrip.pickup.nameAr} إلى ${currentTrip.dropoff.nameAr} بقيمة ${currentTrip.fare} جنيه.`
+                : `New ride available from ${currentTrip.pickup.nameEn} to ${currentTrip.dropoff.nameEn} for ${currentTrip.fare} EGP.`,
+            lang: lang === 'ar' ? 'ar-EG' : 'en-US',
+            tag: `trip-${currentTrip.id}`,
+          });
+        }
       }
     } else {
       // No next driver -> cancel the trip
@@ -476,6 +483,7 @@ export default function App() {
   const [selectedDriverId, setSelectedDriverId] = useState<string>('drv_1');
 
   const networkConnected = useNetworkStatus();
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettingsType>(loadNotificationSettings);
   const lastNavDriverLatRef = useRef<number | null>(null);
   const lastNavDriverLngRef = useRef<number | null>(null);
   const lastLocationSavedAtRef = useRef<Record<string, number>>({});
@@ -940,6 +948,13 @@ export default function App() {
             }
             return null;
           }
+
+          // Verify trip has required fields before processing
+          if (!trip.id || !trip.status || !trip.pickup || !trip.dropoff) {
+            console.warn('[Realtime] Received invalid trip payload, ignoring');
+            return prev;
+          }
+
           if (dismissedTripIdsRef.current.has(trip.id)) {
             return null;
           }
@@ -1437,16 +1452,19 @@ export default function App() {
     const isCurrentOffered = activeTrip?.currentOfferedDriverId === selectedDriverId;
     
     if (hasTrip && isCurrentOffered) {
+      const rateKey = `ride_request_${activeTrip.id}`;
       if (lastNotifiedTripIdRef.current !== activeTrip.id || lastNotifiedOfferedDriverIdRef.current !== activeTrip.currentOfferedDriverId) {
         lastNotifiedTripIdRef.current = activeTrip.id;
         lastNotifiedOfferedDriverIdRef.current = activeTrip.currentOfferedDriverId || null;
-        notifyRideRequest(
-          lang === 'ar' ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!',
-          lang === 'ar'
-            ? `من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr} | ${activeTrip.fare} ج.م`
-            : `${activeTrip.pickup.nameEn} → ${activeTrip.dropoff.nameEn} | ${activeTrip.fare} EGP`,
-          lang === 'ar' ? 'ar-EG' : 'en-US'
-        );
+        if (!isNotificationRateLimited(rateKey)) {
+          notifyRideRequest(
+            lang === 'ar' ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!',
+            lang === 'ar'
+              ? `من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr} | ${activeTrip.fare} ج.م`
+              : `${activeTrip.pickup.nameEn} → ${activeTrip.dropoff.nameEn} | ${activeTrip.fare} EGP`,
+            lang === 'ar' ? 'ar-EG' : 'en-US'
+          );
+        }
         triggerToast(
           lang === 'ar' ? 'يوجد رحلة جديدة' : 'New trip available',
           lang === 'ar'
@@ -1471,9 +1489,13 @@ export default function App() {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js')
         .then((registration) => {
+          if (registration.scope && new URL(registration.scope).origin !== window.location.origin) {
+            console.warn('[SW] Service Worker registered from a different origin, unregistering for security');
+            registration.unregister();
+            return;
+          }
           console.log('Service Worker registered successfully with scope:', registration.scope);
 
-          // Request push notification permission
           if ('Notification' in window && Notification.permission === 'default') {
             Notification.requestPermission();
           }
@@ -1993,6 +2015,15 @@ export default function App() {
           console.log('[handleRequestRide] saveActiveTrip result:', ok);
           if (ok && promoCodeId) {
             markPromoCodeAsUsed(promoCodeId, newTrip.id).catch(() => {});
+          }
+          if (ok) {
+            sendNewTripNotification({
+              tripId: newTrip.id,
+              origin: lang === 'ar' ? pLoc.nameAr : pLoc.nameEn,
+              destination: lang === 'ar' ? dLoc.nameAr : dLoc.nameEn,
+              fare,
+              distance,
+            }).catch(() => {});
           }
         });
 
@@ -2540,11 +2571,6 @@ export default function App() {
     const { driverId, fare, commission } = activeTrip;
     const netEarnings = fare - commission;
 
-    setRider((r) => ({
-      ...r,
-      balance: Math.max(0, r.balance - fare),
-    }));
-
     if (driverId) {
       setDrivers((prev) => {
         const updated = prev.map((d) => {
@@ -2663,29 +2689,24 @@ export default function App() {
        saveTripToHistory(updatedTrip);
      }
 
-     // Announce rating to both driver and rider via speech
-     const driverName = activeTrip.driverName || 'الكابتن';
-     speakText(
-       lang === 'ar'
-         ? `شكراً لتقييمك. لقد قمت بتقييم ${driverName} بـ ${rating} نجوم.`
-         : `Thank you for your rating. You rated ${driverName} ${rating} stars.`,
-       lang === 'ar' ? 'ar-EG' : 'en-US'
-     );
-
-      // Notify driver about the rating via native notification + audio cue
-      playNotificationSound('rating');
+      // Announce rating to both driver and rider via speech
+      const driverName = activeTrip.driverName || 'الكابتن';
       speakText(
         lang === 'ar'
-          ? `لديك تقييم جديد من العميل ${activeTrip.riderName} بدرجة ${rating} من 5.`
-          : `You have a new rating from rider ${activeTrip.riderName}: ${rating} out of 5.`,
+          ? `شكراً لثقتك. لقد قمت بتقييم ${driverName} بـ ${rating} نجوم.`
+          : `Thank you for your trust. You rated ${driverName} ${rating} stars.`,
         lang === 'ar' ? 'ar-EG' : 'en-US'
       );
+
+      // Quiet internal rating acknowledgement
+      playNotificationSound('rating');
       sendNativeNotification(
-        lang === 'ar' ? '⭐ تقييم جديد من العميل' : '⭐ New Rating from Rider',
+        lang === 'ar' ? '⭐ شكراً لتقييمك' : '⭐ شكراً لتقييمك',
         lang === 'ar'
-          ? `لقد قيّمك العميل ${activeTrip.riderName} بـ ${rating} نجوم.`
-          : `Rider ${activeTrip.riderName} rated you ${rating} stars.`,
-        '⭐'
+          ? `تقييمك م valued`
+          : `Your rating is valued`,
+        '⭐',
+        'rating-internal',
       );
    };
 
@@ -2956,14 +2977,6 @@ export default function App() {
     await deleteRiderInDB(riderId);
   };
 
-  const handleAddBalanceToRider = async (riderId: string, amount: number) => {
-    setRegisteredRiders(prev => prev.map(r => r.id === riderId ? { ...r, balance: r.balance + amount } : r));
-    const targetRider = registeredRiders.find(r => r.id === riderId);
-    if (targetRider) {
-      await saveRider({ ...targetRider, balance: targetRider.balance + amount });
-    }
-  };
-
   const handleClearAllFakeData = async () => {
     if (!confirm(lang === 'ar' ? 'تحذير: هذا سيمسح جميع بيانات الركاب والسائقين الوهمية نهائياً من السيرفر والجهاز. هل أنت متأكد؟' : 'WARNING: This will permanently delete ALL fake riders and drivers data from server and device. Are you sure?')) {
       return;
@@ -3082,7 +3095,6 @@ export default function App() {
         name: riderFormName.trim(),
         phone: riderFormPhone.trim(),
         password: hashedPassword,
-        balance: 0,
         rating: 5.0,
         totalTrips: 0
       };
@@ -3291,10 +3303,11 @@ export default function App() {
 
   const footerText = lang === 'ar' ? 'برمجة: أسامه إسلام بسيوني' : 'Developed by: Osama Islam Basiony';
 
-  return (
+   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-amber-400 selection:text-black">
       <NetworkStatusBar isOnline={networkConnected} isConnected={supabaseConnected} lang={lang} />
       <InitializingOverlay isInitializing={isInitializing} lang={lang} />
+      <NotificationSettings lang={lang} onSettingsChange={setNotificationSettings} />
       {/* Top Header */}
       <header className="bg-slate-950 border-b border-slate-800 py-3.5 px-4 md:px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shrink-0">
         <div>
@@ -4418,9 +4431,8 @@ if (activeTrip) {
                        onUnfreezeRider={handleUnfreezeRider}
                        onBlockRider={handleBlockRider}
                        onUnblockRider={handleUnblockRider}
-                        onDeleteRider={handleDeleteRider}
-                        onAddBalanceToRider={handleAddBalanceToRider}
-                        onClearAllFakeData={handleClearAllFakeData}
+                         onDeleteRider={handleDeleteRider}
+                         onClearAllFakeData={handleClearAllFakeData}
                         lang={lang}
                          onLogout={() => {
                             setAdminIsLoggedIn(false);

@@ -15,6 +15,7 @@ import {
   triggerVibration,
   notifyRideRequest,
   stopLoudRepeatingAlarm,
+  isNotificationRateLimited,
 } from '../utils/notifications';
 
 export const useNotifications = (
@@ -193,8 +194,11 @@ export const useNotifications = (
     if (!activeTrip || !activeTrip.chatMessages || activeTrip.chatMessages.length === 0) return;
     const lastMsg = activeTrip.chatMessages[activeTrip.chatMessages.length - 1];
     if (lastMsg.sender !== (driverIsLoggedIn ? 'RIDER' : 'DRIVER')) {
-      playNotificationSound('chat_message');
-      sendNativeNotification('💬 رسالة جديدة', lastMsg.text, '💬');
+      const rateKey = `chat_${activeTrip.id}_${lastMsg.id}`;
+      if (!isNotificationRateLimited(rateKey)) {
+        playNotificationSound('chat_message');
+        sendNativeNotification('💬 رسالة جديدة', lastMsg.text, '💬');
+      }
     }
   }, [activeTrip?.chatMessages, driverIsLoggedIn]);
 
@@ -207,8 +211,15 @@ export const useNotifications = (
     const tripKey = `alarm_${activeTrip.id}`;
     if (!notifiedEventsRef.current.has(tripKey)) {
       notifiedEventsRef.current.add(tripKey);
+      const MAX_ALARM_RETRIES = 4;
+      let alarmRetryCount = 0;
       const playLoop = () => {
         if (!activeTrip) return;
+        if (alarmRetryCount >= MAX_ALARM_RETRIES) {
+          stopAlarm();
+          return;
+        }
+        alarmRetryCount++;
         notifyRideRequest(
           lang === 'ar' ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!',
           lang === 'ar'

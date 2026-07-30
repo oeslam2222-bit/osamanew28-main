@@ -122,7 +122,6 @@ export interface Rider {
   name: string; // الاسم الثنائي
   phone: string;
   password?: string; // كلمة المرور
-  balance: number;
   rating?: number;
   totalTrips?: number;
   approvalStatus?: 'PENDING' | 'APPROVED' | 'FROZEN' | 'REJECTED' | 'BLOCKED';
