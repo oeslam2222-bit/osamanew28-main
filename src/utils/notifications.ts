@@ -189,6 +189,147 @@ export const getAudioContext = (): AudioContext => {
   return audioCtx;
 };
 
+let audioElement: HTMLAudioElement | null = null;
+
+const getAudioElement = (): HTMLAudioElement => {
+  if (!audioElement) {
+    audioElement = new Audio();
+    audioElement.preload = 'auto';
+  }
+  return audioElement;
+};
+
+const generateToneBlobUrl = (
+  frequency: number,
+  duration: number,
+  volume: number = 0.5,
+  sampleRate: number = 44100
+): string => {
+  const numSamples = Math.floor(sampleRate * duration);
+  const buffer = new ArrayBuffer(44 + numSamples * 2);
+  const view = new DataView(buffer);
+  const writeString = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + numSamples * 2, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, numSamples * 2, true);
+  const fadeSamples = Math.min(Math.floor(sampleRate * 0.01), 100);
+  for (let i = 0; i < numSamples; i++) {
+    const t = i / sampleRate;
+    let sample = Math.sin(2 * Math.PI * frequency * t) * volume;
+    if (i < fadeSamples) sample *= i / fadeSamples;
+    if (i > numSamples - fadeSamples) sample *= (numSamples - i) / fadeSamples;
+    const s = Math.max(-1, Math.min(1, sample));
+    view.setInt16(44 + i * 2, s * 0x7fff, true);
+  }
+  const blob = new Blob([buffer], { type: 'audio/wav' });
+  return URL.createObjectURL(blob);
+};
+
+const generateRingtoneBlobUrl = (): string => {
+  const sampleRate = 44100;
+  const tone1Freq = 880;
+  const tone2Freq = 1100;
+  const toneDuration = 0.18;
+  const gapDuration = 0.07;
+  const totalDuration = toneDuration * 2 + gapDuration;
+  const numSamples = Math.floor(sampleRate * totalDuration);
+  const fadeSamples = Math.floor(sampleRate * 0.008);
+  const buffer = new ArrayBuffer(44 + numSamples * 2);
+  const view = new DataView(buffer);
+  const writeString = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + numSamples * 2, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, numSamples * 2, true);
+  for (let i = 0; i < numSamples; i++) {
+    const t = i / sampleRate;
+    let sample = 0;
+    const vol = 0.5;
+    if (t < toneDuration) {
+      sample = Math.sin(2 * Math.PI * tone1Freq * t) * vol;
+      if (i < fadeSamples) sample *= i / fadeSamples;
+      if (i > numSamples - toneDuration * sampleRate - fadeSamples) sample *= (numSamples - i) / fadeSamples;
+    } else if (t < toneDuration + gapDuration) {
+      sample = 0;
+    } else if (t < totalDuration) {
+      const t2 = t - toneDuration - gapDuration;
+      sample = Math.sin(2 * Math.PI * tone2Freq * t2) * vol;
+      if (i > numSamples - fadeSamples) sample *= (numSamples - i) / fadeSamples;
+    }
+    const s = Math.max(-1, Math.min(1, sample));
+    view.setInt16(44 + i * 2, s * 0x7fff, true);
+  }
+  const blob = new Blob([buffer], { type: 'audio/wav' });
+  return URL.createObjectURL(blob);
+};
+
+const playAudioFallback = (type: 'new_trip' | 'trip_accepted' | 'chat_message' | 'trip_completed' | 'rating' | 'alert'): boolean => {
+  try {
+    const el = getAudioElement();
+    let url: string;
+    switch (type) {
+      case 'new_trip':
+      case 'alert':
+        url = generateRingtoneBlobUrl();
+        break;
+      case 'trip_accepted':
+        url = generateToneBlobUrl(783.99, 0.5, 0.4 * getVolume());
+        break;
+      case 'trip_completed':
+        url = generateToneBlobUrl(1046.50, 0.6, 0.35 * getVolume());
+        break;
+      case 'chat_message':
+        url = generateToneBlobUrl(1200, 0.15, 0.15 * getVolume());
+        break;
+      case 'rating':
+        url = generateToneBlobUrl(880, 0.4, 0.4 * getVolume());
+        break;
+      default:
+        url = generateRingtoneBlobUrl();
+    }
+    el.src = url;
+    el.volume = getVolume();
+    const playPromise = el.play();
+    if (playPromise !== undefined) {
+      playPromise.catch((err) => {
+        console.warn('[Audio Fallback] Play prevented:', err.message);
+      });
+    }
+    setTimeout(() => {
+      try { URL.revokeObjectURL(url); } catch {}
+    }, 2000);
+    return true;
+  } catch (err) {
+    console.warn('[Audio Fallback] Failed:', err);
+    return false;
+  }
+};
+
 /**
  * Prime and unlock AudioContext on user interaction so background alerts play without browser blockage
  */
@@ -239,20 +380,19 @@ export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat
     const now = ctx.currentTime;
 
     if (type === 'new_trip') {
-      // Powerful alternating double-chime siren (attention grabber for driver)
       const osc1 = ctx.createOscillator();
       const osc2 = ctx.createOscillator();
       const gainNode = ctx.createGain();
 
       osc1.type = 'triangle';
-      osc1.frequency.setValueAtTime(587.33, now); // D5
-      osc1.frequency.setValueAtTime(659.25, now + 0.15); // E5
-      osc1.frequency.setValueAtTime(587.33, now + 0.3); // D5
-      osc1.frequency.setValueAtTime(659.25, now + 0.45); // E5
+      osc1.frequency.setValueAtTime(587.33, now);
+      osc1.frequency.setValueAtTime(659.25, now + 0.15);
+      osc1.frequency.setValueAtTime(587.33, now + 0.3);
+      osc1.frequency.setValueAtTime(659.25, now + 0.45);
 
       osc2.type = 'sine';
-      osc2.frequency.setValueAtTime(293.66, now); // D4
-      osc2.frequency.setValueAtTime(329.63, now + 0.15); // E4
+      osc2.frequency.setValueAtTime(293.66, now);
+      osc2.frequency.setValueAtTime(329.63, now + 0.15);
 
       gainNode.gain.setValueAtTime(0.25 * getVolume(), now);
       gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
@@ -269,15 +409,14 @@ export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat
       osc2.onended = () => { osc2.disconnect(); gainNode.disconnect(); };
 
     } else if (type === 'trip_accepted') {
-      // Upward major arpeggio chime (for rider)
       const osc = ctx.createOscillator();
       const gainNode = ctx.createGain();
 
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(523.25, now); // C5
-      osc.frequency.setValueAtTime(659.25, now + 0.12); // E5
-      osc.frequency.setValueAtTime(783.99, now + 0.24); // G5
-      osc.frequency.setValueAtTime(1046.50, now + 0.36); // C6
+      osc.frequency.setValueAtTime(523.25, now);
+      osc.frequency.setValueAtTime(659.25, now + 0.12);
+      osc.frequency.setValueAtTime(783.99, now + 0.24);
+      osc.frequency.setValueAtTime(1046.50, now + 0.36);
 
       gainNode.gain.setValueAtTime(0.25 * getVolume(), now);
       gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.65);
@@ -290,13 +429,12 @@ export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat
       osc.onended = () => { osc.disconnect(); gainNode.disconnect(); };
 
     } else if (type === 'chat_message') {
-      // Quick bubble double-pop (very quiet for non-intrusive chat messages)
       const osc = ctx.createOscillator();
       const gainNode = ctx.createGain();
 
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, now); // A5
-      osc.frequency.setValueAtTime(1200, now + 0.08); // High pop
+      osc.frequency.setValueAtTime(880, now);
+      osc.frequency.setValueAtTime(1200, now + 0.08);
 
       gainNode.gain.setValueAtTime(0.03 * getVolume(), now);
       gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
@@ -309,7 +447,6 @@ export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat
       osc.onended = () => { osc.disconnect(); gainNode.disconnect(); };
 
     } else if (type === 'trip_completed') {
-      // Warm, rich multi-tone success chime
       const osc1 = ctx.createOscillator();
       const osc2 = ctx.createOscillator();
       const gainNode = ctx.createGain();
@@ -338,7 +475,6 @@ export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat
       osc2.onended = () => { osc2.disconnect(); gainNode.disconnect(); };
 
     } else if (type === 'rating') {
-      // Bright single chime for driver rating notification
       const osc = ctx.createOscillator();
       const gainNode = ctx.createGain();
 
@@ -355,7 +491,6 @@ export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat
       osc.stop(now + 0.65);
       osc.onended = () => { osc.disconnect(); gainNode.disconnect(); };
     } else if (type === 'alert') {
-      // Strong dual-frequency caution chime
       const osc1 = ctx.createOscillator();
       const osc2 = ctx.createOscillator();
       const gainNode = ctx.createGain();
@@ -381,6 +516,7 @@ export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat
     }
   } catch (err) {
     console.warn('Web Audio Playback issue:', err);
+    playAudioFallback(type);
   }
 };
 
@@ -519,6 +655,7 @@ export const notifyRideRequest = (title: string, body: string, lang = 'ar-EG') =
     osc2.onended = () => { osc2.disconnect(); gain2.disconnect(); };
   } catch (e) {
     console.warn('[notifyRideRequest] Audio failed:', e);
+    playAudioFallback('new_trip');
   }
 
   triggerVibration([200, 80, 200]);

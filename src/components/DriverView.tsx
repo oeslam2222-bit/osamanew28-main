@@ -100,12 +100,18 @@ export const DriverView: React.FC<DriverViewProps> = ({
   const onCalculateNavigationRouteRef = useRef(onCalculateNavigationRoute);
   onCalculateNavigationRouteRef.current = onCalculateNavigationRoute;
 
-  let geoWatchId: number | null = null;
+   let geoWatchId: number | null = null;
+
+  const [stableOnline, setStableOnline] = useState(currentDriver?.isOnline ?? false);
 
   React.useEffect(() => {
-    if (!currentDriverId || !onUpdateDriverLocationRef.current) return;
-    const trip = activeTripRef.current;
-    if (!trip || trip.driverId !== currentDriverId) return;
+    setStableOnline(currentDriver?.isOnline ?? false);
+  }, [currentDriver?.isOnline]);
+
+   React.useEffect(() => {
+     if (!currentDriverId || !onUpdateDriverLocationRef.current) return;
+     const trip = activeTripRef.current;
+     if (!trip || trip.driverId !== currentDriverId) return;
 
     if (!('geolocation' in navigator)) {
       console.warn('[GPS] Geolocation not supported in this browser');

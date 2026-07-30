@@ -826,7 +826,7 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
     let query = supabase.from('ezz_active_trip').select('*').order('created_at', { ascending: false });
 
     if (userId && userRole === 'rider') {
-      query = query.eq('rider_id', userId);
+      query = query.eq('rider_id', userId).in('status', ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED']);
     } else if (userId && userRole === 'driver') {
       // Fetch trips where this driver is assigned, current offered, OR in the offered list.
       // PostgREST .or() can't check JSONB containment, so we fetch by driver_id/current_offered
