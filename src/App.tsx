@@ -58,7 +58,8 @@ import {
   notifyDriverWithAudioFirst,
   notifyRideRequest,
   unlockAudioContext,
-  isNotificationRateLimited
+  isNotificationRateLimited,
+  setNotificationSettings,
 } from './utils/notifications';
 import { getFCMToken, onFCMForegroundMessage } from './firebase';
 import {
@@ -483,7 +484,12 @@ export default function App() {
   const [selectedDriverId, setSelectedDriverId] = useState<string>('drv_1');
 
   const networkConnected = useNetworkStatus();
-  const [notificationSettings, setNotificationSettings] = useState<NotificationSettingsType>(loadNotificationSettings);
+  const [notificationSettings, setNotificationSettingsState] = useState<NotificationSettingsType>(loadNotificationSettings);
+
+  useEffect(() => {
+    setNotificationSettings(notificationSettings);
+  }, [notificationSettings]);
+
   const lastNavDriverLatRef = useRef<number | null>(null);
   const lastNavDriverLngRef = useRef<number | null>(null);
   const lastLocationSavedAtRef = useRef<Record<string, number>>({});
@@ -2040,6 +2046,22 @@ export default function App() {
 
       setActiveTripWithTracking(newTrip);
 
+      playNotificationSound('new_trip');
+      triggerToast(
+        lang === 'ar' ? 'تم طلب الرحلة بنجاح' : 'Ride request sent',
+        lang === 'ar'
+          ? `رحلتك من ${pLoc.nameAr} إلى ${dLoc.nameAr} | ${fare} ج.م`
+          : `Ride from ${pLoc.nameEn} to ${dLoc.nameEn} | ${fare} EGP`,
+        'new_trip'
+      );
+      sendNativeNotification(
+        '🚖 تم طلب رحلة جديدة',
+        lang === 'ar'
+          ? `رحلتك من ${pLoc.nameAr} إلى ${dLoc.nameAr} | ${fare} ج.م`
+          : `Ride from ${pLoc.nameEn} to ${dLoc.nameEn} | ${fare} EGP`,
+        '🚖'
+      );
+
       if (supabaseConnected) {
         saveActiveTrip(newTrip).then((ok) => {
           console.log('[handleRequestRide] saveActiveTrip result:', ok);
@@ -2047,8 +2069,13 @@ export default function App() {
             markPromoCodeAsUsed(promoCodeId, newTrip.id).catch(() => {});
           }
           if (ok) {
-            // FCM push is optional; enable after Firebase config + Edge Function deploy
-            // sendNewTripNotification({...}).catch(() => {});
+            sendNewTripNotification({
+              tripId: newTrip.id,
+              origin: pLoc.nameAr,
+              destination: dLoc.nameAr,
+              fare,
+              distance,
+            }).catch(() => {});
           }
         });
 
@@ -2320,8 +2347,7 @@ export default function App() {
       const updated = prev.map((d) => {
         if (d.id !== driverId) return d;
         const nextOnline = !d.isOnline;
-        // When going online, also set status to AVAILABLE so the rider sees the driver as available
-        return { ...d, isOnline: nextOnline, status: nextOnline ? 'AVAILABLE' as const : d.status };
+        return { ...d, isOnline: nextOnline, status: nextOnline ? 'AVAILABLE' as const : 'OFFLINE' as const };
       });
       const driver = updated.find((d) => d.id === driverId);
       if (driver && supabaseConnected) {
@@ -2602,7 +2628,8 @@ export default function App() {
           if (d.id !== driverId) return d;
           return {
             ...d,
-            status: 'AVAILABLE' as const,
+            status: 'OFFLINE' as const,
+            isOnline: false,
             totalTrips: d.totalTrips + 1,
             totalEarnings: d.totalEarnings + netEarnings,
             totalCommissionPaid: d.totalCommissionPaid + commission,
@@ -2735,7 +2762,7 @@ export default function App() {
       );
 
       setTimeout(() => {
-        setCurrentScreen('RIDER_DASHBOARD');
+        setCurrentScreen('HOME');
         setActiveTripWithTracking(null);
       }, 1500);
     };
@@ -3344,7 +3371,7 @@ export default function App() {
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-amber-400 selection:text-black">
       <NetworkStatusBar isOnline={networkConnected} isConnected={supabaseConnected} lang={lang} />
       <InitializingOverlay isInitializing={isInitializing} lang={lang} />
-      <NotificationSettings lang={lang} onSettingsChange={setNotificationSettings} />
+      <NotificationSettings lang={lang} onSettingsChange={setNotificationSettingsState} />
       {/* Top Header */}
       <header className="bg-slate-950 border-b border-slate-800 py-3.5 px-4 md:px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shrink-0">
         <div>

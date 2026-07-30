@@ -389,7 +389,6 @@ export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat
  */
 export const speakText = (text: string, lang = 'ar-EG') => {
   if (!shouldSpeak()) return;
-  if (text.includes('شكراً لثقتك') || text.includes('Thank you for your trust')) return;
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
     try {
       window.speechSynthesis.cancel(); // Cancel active speech

@@ -232,7 +232,7 @@ export const useNotifications = (
       playLoop();
     }
     return stopAlarm;
-  }, [driverIsLoggedIn, activeTrip?.status]);
+  }, [driverIsLoggedIn, activeTrip]);
 
   // Background notification poller (visibility-aware)
   useEffect(() => {
