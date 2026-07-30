@@ -1,4 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import ErrorBoundary from './components/ErrorBoundary';
+import NetworkStatusBar from './components/NetworkStatusBar';
+import InitializingOverlay from './components/InitializingOverlay';
+import { useNetworkStatus } from './hooks/useNetworkStatus';
 import { Location, Driver, Trip, Rider, SystemStats, TripStatus, Region, Ad } from './types';
 import { RiderView } from './components/RiderView';
 import { DriverView } from './components/DriverView';
@@ -101,6 +105,7 @@ export default function App() {
     return 'HOME';
   });
   const [sessionLoaded, setSessionLoaded] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
   // Guards the stats auto-save effect: it must NOT run until the initial
   // stats have been loaded from Supabase, otherwise the default values would
   // overwrite the admin's saved prices on every refresh.
@@ -470,7 +475,7 @@ export default function App() {
   // Driver selected inside the Driver role screen
   const [selectedDriverId, setSelectedDriverId] = useState<string>('drv_1');
 
-  const [networkConnected, setNetworkConnected] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const networkConnected = useNetworkStatus();
   const lastNavDriverLatRef = useRef<number | null>(null);
   const lastNavDriverLngRef = useRef<number | null>(null);
   const lastLocationSavedAtRef = useRef<Record<string, number>>({});
@@ -703,10 +708,9 @@ export default function App() {
     resetDriverToAvailable();
   }, [driverIsLoggedIn, selectedDriverId, supabaseConnected, drivers]);
 
-  // Online/Offline connectivity detection
+  // Online/Offline connectivity toast notifications (state tracking is handled by useNetworkStatus hook)
   useEffect(() => {
     const handleOnline = () => {
-      setNetworkConnected(true);
       triggerToast(
         lang === 'ar' ? '✅ تم استعادة الاتصال' : '✅ Back Online',
         lang === 'ar' ? 'أنت متصل الآن' : 'You are back online',
@@ -715,7 +719,6 @@ export default function App() {
     };
 
     const handleOffline = () => {
-      setNetworkConnected(false);
       triggerToast(
         lang === 'ar' ? '📡 أنت غير متصل' : '📡 Offline',
         lang === 'ar' ? 'لا يوجد اتصال بالإنترنت' : 'No internet connection',
@@ -765,118 +768,119 @@ export default function App() {
   // 1. Initial Load from Supabase on mount
   useEffect(() => {
     requestNotificationPermission();
+    setIsInitializing(true);
 
     const initSupabase = async () => {
-      const isConnected = await checkSupabaseConnection();
-      if (isConnected) {
-        setSupabaseConnected(true);
-        console.log('⚡ Connected to Supabase directly!');
+      try {
+        const isConnected = await checkSupabaseConnection();
+        if (isConnected) {
+          setSupabaseConnected(true);
+          console.log('⚡ Connected to Supabase directly!');
 
-        const dbLocations = await fetchLocations();
-        if (dbLocations && dbLocations.length > 0) {
-          setLocations(dbLocations);
-        }
+          const dbLocations = await fetchLocations();
+          if (dbLocations && dbLocations.length > 0) {
+            setLocations(dbLocations);
+          }
 
-        const dbDrivers = await fetchDrivers();
-        if (dbDrivers && dbDrivers.length > 0) {
-          setDrivers(dbDrivers);
-        }
+          const dbDrivers = await fetchDrivers();
+          if (dbDrivers && dbDrivers.length > 0) {
+            setDrivers(dbDrivers);
+          }
 
-        const dbRiders = await fetchRiders();
-        if (dbRiders && dbRiders.length > 0) {
-          setRegisteredRiders(dbRiders);
-        }
+          const dbRiders = await fetchRiders();
+          if (dbRiders && dbRiders.length > 0) {
+            setRegisteredRiders(dbRiders);
+          }
 
-        // Load regions so they appear for admin, riders, and drivers everywhere
-        const dbRegions = await fetchRegions();
-        if (dbRegions) {
-          setRegions(dbRegions);
-        }
+          // Load regions so they appear for admin, riders, and drivers everywhere
+          const dbRegions = await fetchRegions();
+          if (dbRegions) {
+            setRegions(dbRegions);
+          }
 
-        const dbAds = await fetchAds();
-        if (dbAds) {
-          setAds(dbAds);
-        }
+          const dbAds = await fetchAds();
+          if (dbAds) {
+            setAds(dbAds);
+          }
 
-        const dbActiveTrip = await fetchActiveTrip(driverIsLoggedIn ? selectedDriverId : (rider.id || undefined), driverIsLoggedIn ? 'driver' : (rider.id ? 'rider' : undefined));
-        if (dbActiveTrip && dbActiveTrip !== 'NO_TABLE') {
-          setActiveTripWithTracking(dbActiveTrip);
-        }
+          const dbActiveTrip = await fetchActiveTrip(driverIsLoggedIn ? selectedDriverId : (rider.id || undefined), driverIsLoggedIn ? 'driver' : (rider.id ? 'rider' : undefined));
+          if (dbActiveTrip && dbActiveTrip !== 'NO_TABLE') {
+            setActiveTripWithTracking(dbActiveTrip);
+          }
 
-        // Load session BEFORE fetching trips so we can filter by user
-        const session = await loadSession();
+          // Load session BEFORE fetching trips so we can filter by user
+          const session = await loadSession();
 
-        if (session) {
-          if (session.role === 'ADMIN') {
-            // Admin uses their own filtered queries in AdminView
-          } else {
-            const userRole = session.role.toLowerCase() as 'rider' | 'driver';
-            const dbHistory = await fetchTripsHistory({ userId: session.userId, role: userRole });
-            if (dbHistory && dbHistory.length > 0) {
-              setTripsHistory(dbHistory);
+          if (session) {
+            if (session.role === 'ADMIN') {
+              // Admin uses their own filtered queries in AdminView
+            } else {
+              const userRole = session.role.toLowerCase() as 'rider' | 'driver';
+              const dbHistory = await fetchTripsHistory({ userId: session.userId, role: userRole });
+              if (dbHistory && dbHistory.length > 0) {
+                setTripsHistory(dbHistory);
+              }
             }
           }
-        }
 
-        const dbStats = await fetchStats();
-       if (dbStats) {
-         // Merge remote stats over the local defaults so any missing/new columns
-         // are backfilled, then persist the merged row once so saved admin
-         // values never fall back to defaults after a refresh.
-         const merged = { ...stats, ...dbStats };
-         // Mark stats as loaded BEFORE setStats so the auto-save effect that
-         // fires on this state change persists the loaded values, not defaults.
-         statsLoadedRef.current = true;
-         setStats(merged);
-         setLowDataMode(!!dbStats.lowDataMode);
-         if (JSON.stringify(merged) !== JSON.stringify(dbStats)) {
-           await saveStats(merged);
+          const dbStats = await fetchStats();
+         if (dbStats) {
+           const merged = { ...stats, ...dbStats };
+           statsLoadedRef.current = true;
+           setStats(merged);
+           setLowDataMode(!!dbStats.lowDataMode);
+           if (JSON.stringify(merged) !== JSON.stringify(dbStats)) {
+             await saveStats(merged);
+           }
+         } else {
+           try {
+             const { data, error } = await supabase
+               .from('ezz_stats')
+               .upsert({ id: 'singleton', commission_rate: 15, total_revenue: 0, total_commission: 0, total_completed_trips: 0, fixed_commission: 10, price_per_km: 8, base_fare: 20, distance_buffer: 1.25, created_at: new Date().toISOString() })
+               .select('id')
+               .single();
+             if (error) throw error;
+            } catch (err: any) {
+              console.warn('Could not create singleton stats row:', err?.message || err);
+            }
+            statsLoadedRef.current = true;
          }
-       } else {
-         // If we can't fetch stats, ensure we have a singleton row
-         try {
-           const { data, error } = await supabase
-             .from('ezz_stats')
-             .upsert({ id: 'singleton', commission_rate: 15, total_revenue: 0, total_commission: 0, total_completed_trips: 0, fixed_commission: 10, price_per_km: 8, base_fare: 20, distance_buffer: 1.25, created_at: new Date().toISOString() })
-             .select('id')
-             .single();
-           if (error) throw error;
-          } catch (err: any) {
-            console.warn('Could not create singleton stats row:', err?.message || err);
-          }
-          // No saved stats existed; the singleton row above holds defaults.
-          // Allow future admin edits to persist.
-          statsLoadedRef.current = true;
-       }
 
-        // Restore last login session info for convenience,
-        // and restore the last viewed screen if the session is still valid.
-        if (session) {
-          if (session.role === 'RIDER') {
-            const r = dbRiders?.find(x => x.id === session.userId);
-            if (r) {
-              setRider({ ...r, isLoggedIn: true });
-            }
-          } else if (session.role === 'DRIVER') {
-            const d = dbDrivers?.find(x => x.id === session.userId);
-            if (d) {
-              setSelectedDriverId(d.id);
-              setDriverIsLoggedIn(true);
-              (async () => {
-                const driverTrip = await fetchActiveTrip(d.id, 'driver');
-                if (driverTrip && driverTrip !== 'NO_TABLE') {
-                  setActiveTripWithTracking(driverTrip);
-                }
-              })();
-            }
-          } else if (session.role === 'ADMIN') {
-            setAdminIsLoggedIn(true);
-          }
+         // Restore last login session info for convenience,
+         // and restore the last viewed screen if the session is still valid.
+         if (session) {
+           if (session.role === 'RIDER') {
+             const r = dbRiders?.find(x => x.id === session.userId);
+             if (r) {
+               setRider({ ...r, isLoggedIn: true });
+             }
+           } else if (session.role === 'DRIVER') {
+             const d = dbDrivers?.find(x => x.id === session.userId);
+             if (d) {
+               setSelectedDriverId(d.id);
+               setDriverIsLoggedIn(true);
+               (async () => {
+                 const driverTrip = await fetchActiveTrip(d.id, 'driver');
+                 if (driverTrip && driverTrip !== 'NO_TABLE') {
+                   setActiveTripWithTracking(driverTrip);
+                 }
+               })();
+             }
+           } else if (session.role === 'ADMIN') {
+             setAdminIsLoggedIn(true);
+           }
+         }
+         setSessionLoaded(true);
+        } else {
+          setSupabaseConnected(false);
+          console.warn('⚠️ Supabase tables not created yet or credentials offline. Using secure LocalStorage engine.');
         }
-        setSessionLoaded(true);
-      } else {
+      } catch (err: any) {
+        console.warn('[initSupabase] Failed:', err?.message || err);
         setSupabaseConnected(false);
-        console.warn('⚠️ Supabase tables not created yet or credentials offline. Using secure LocalStorage engine.');
+        setSessionLoaded(true);
+      } finally {
+        setIsInitializing(false);
       }
     };
 
@@ -990,8 +994,10 @@ export default function App() {
     const pollInterval = getAdaptivePollingInterval(3000, dataSaverMode, !!activeTrip);
 
     const interval = setInterval(async () => {
+      if (!isMountedRef.current) return;
       try {
         const remoteActiveTrip = await fetchActiveTrip(driverIsLoggedIn ? selectedDriverId : (rider.id || undefined), driverIsLoggedIn ? 'driver' : (rider.id ? 'rider' : undefined));
+        if (!isMountedRef.current) return;
         if (!remoteActiveTrip || remoteActiveTrip === 'NO_TABLE') {
           setActiveTripWithTracking((prev) => {
             if (prev && prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
@@ -1109,8 +1115,10 @@ export default function App() {
     const pollInterval = getAdaptivePollingInterval(3000, dataSaverMode, false);
 
     const interval = setInterval(async () => {
+      if (!isMountedRef.current) return;
       try {
         const remoteDrivers = await fetchDrivers();
+        if (!isMountedRef.current) return;
         console.log('[Drivers Polling] Fetched', remoteDrivers?.length || 0, 'drivers from DB');
         if (remoteDrivers && remoteDrivers.length > 0) {
           const now = Date.now();
@@ -1156,6 +1164,7 @@ export default function App() {
     if (!supabaseConnected || !driverIsLoggedIn || !selectedDriverId) return;
 
     const updateLastSeen = async () => {
+      if (!isMountedRef.current) return;
       const now = new Date().toISOString();
       setDrivers((prev) =>
         prev.map((d) => (d.id === selectedDriverId ? { ...d, lastSeen: now } : d))
@@ -1559,6 +1568,7 @@ export default function App() {
     const pollInterval = getBackgroundPollingInterval(3000, dataSaverMode, !!activeTrip && activeTrip.status === 'SEARCHING');
 
     const interval = setInterval(async () => {
+      if (!isMountedRef.current) return;
       try {
         const remoteActiveTrip = await fetchActiveTrip(selectedDriverId, 'driver');
         if (!remoteActiveTrip || remoteActiveTrip === 'NO_TABLE') return;
@@ -1645,6 +1655,13 @@ export default function App() {
 
   const lastSavedTripRef = useRef<string | null>(null);
   const lastSavedTripSnapshotRef = useRef<string>('');
+  const isMountedRef = useRef(true);
+  const activePollingLockRef = useRef(false);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
 
    useEffect(() => {
      if (!supabaseConnected || !activeTrip) return;
@@ -1705,48 +1722,6 @@ export default function App() {
     }
   }, [locations, supabaseConnected]);
 
-  useEffect(() => {
-    if (!activeTrip || activeTrip.status !== 'SEARCHING' || !activeTrip.currentOfferedDriverId) return;
-
-    const timer = setInterval(() => {
-      setActiveTripWithTracking((prev) => {
-        if (!prev || prev.status !== 'SEARCHING' || !prev.currentOfferedDriverId) {
-          clearInterval(timer);
-          return prev;
-        }
-
-        const currentTimer = prev.dispatchTimer !== undefined ? prev.dispatchTimer : 600;
-
-         if (currentTimer <= 1) {
-           clearInterval(timer);
-           return {
-             ...prev,
-             status: 'CANCELLED' as TripStatus,
-             currentOfferedDriverId: undefined,
-             dispatchTimer: 0,
-           };
-         }
-
-         if (currentTimer === 30) {
-           sendNativeNotification(
-             '⏰ الرحلة ستلغى قريباً',
-             lang === 'ar'
-               ? 'لم يقبل أي سائق الرحلة خلال 30 ثانية. ستلغى الرحلة قريباً.'
-               : 'No driver accepted the ride within 30 seconds. The ride will be cancelled soon.',
-             '⏰'
-           );
-         }
-
-         return {
-           ...prev,
-           dispatchTimer: currentTimer - 1,
-         };
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [activeTrip?.status, activeTrip?.currentOfferedDriverId]);
-
   // GPS Movement Simulation loop (remains active background feature)
   useEffect(() => {
     if (!activeTrip || !activeTrip.driverId) return;
@@ -1767,6 +1742,7 @@ export default function App() {
     let saveCounter = 0;
 
     const interval = setInterval(() => {
+      if (!isMountedRef.current) return;
       setDrivers((prevDrivers) => {
         let reached = false;
         const next = prevDrivers.map((drv) => {
@@ -2146,6 +2122,7 @@ export default function App() {
     }
 
     const interval = setInterval(async () => {
+      if (!isMountedRef.current) return;
       setActiveTripWithTracking((prev) => {
         if (!prev || prev.status !== 'SEARCHING') {
           clearInterval(interval);
@@ -2190,6 +2167,7 @@ export default function App() {
     if (!activeTrip || activeTrip.status !== 'SEARCHING' || !rider.isLoggedIn) return;
 
     const refreshInterval = setInterval(() => {
+      if (!isMountedRef.current) return;
       refreshWaitingTrip().then((ok) => {
         if (ok) {
           console.log('[WaitingTripRefresh] Trip refreshed successfully');
@@ -3315,6 +3293,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-amber-400 selection:text-black">
+      <NetworkStatusBar isOnline={networkConnected} isConnected={supabaseConnected} lang={lang} />
+      <InitializingOverlay isInitializing={isInitializing} lang={lang} />
       {/* Top Header */}
       <header className="bg-slate-950 border-b border-slate-800 py-3.5 px-4 md:px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shrink-0">
         <div>
@@ -3841,7 +3821,8 @@ export default function App() {
 
                 {/* 3. RIDER VIEW (DASHBOARD) */}
                 {currentScreen === 'RIDER_DASHBOARD' && (
-                     <RiderView
+                  <ErrorBoundary>
+                      <RiderView
                        rider={rider}
                        stats={stats}
                        locations={locations}
@@ -3874,7 +3855,8 @@ export default function App() {
                             clearSession('RIDER');
                             setCurrentScreen('HOME');
                           }}
-                      />
+                       />
+                  </ErrorBoundary>
                   )}
 
                 {/* 4. DRIVER ONBOARDING / VERIFICATION FORM */}
@@ -4272,8 +4254,9 @@ export default function App() {
                 )}
 
                  {/* 5. DRIVER VIEW */}
-                {currentScreen === 'DRIVER_DASHBOARD' && (
-                    <DriverView
+                 {currentScreen === 'DRIVER_DASHBOARD' && (
+                    <ErrorBoundary>
+                        <DriverView
                       drivers={drivers}
                       tripsHistory={tripsHistory}
                       selectedDriverId={selectedDriverId}
@@ -4322,8 +4305,9 @@ if (activeTrip) {
                            clearSession('DRIVER');
                            setCurrentScreen('HOME');
                          }}
-                   />
-                 )}
+                    />
+                  </ErrorBoundary>
+                  )}
 
                 {/* 6. ADMIN PANEL VIEW */}
                 {currentScreen === 'ADMIN' && (
@@ -4411,7 +4395,8 @@ if (activeTrip) {
                       </button>
                     </div>
                   ) : (
-                      <AdminView
+                    <ErrorBoundary>
+                        <AdminView
                         stats={stats}
                         drivers={drivers}
                         locations={locations}
@@ -4441,9 +4426,10 @@ if (activeTrip) {
                             setAdminIsLoggedIn(false);
                             if (supabaseConnected) clearSession('ADMIN');
                           }}
-                        onTriggerToast={triggerToast}
-                     />
-                  )
+                         onTriggerToast={triggerToast}
+                      />
+                        </ErrorBoundary>
+                   )
                 )}
 
               </div>

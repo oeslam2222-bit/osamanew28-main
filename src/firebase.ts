@@ -2,13 +2,23 @@ import { initializeApp } from 'firebase/app';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 
 const firebaseConfig = {
-  apiKey: 'AIzaSyDNuhL_OpNMq2HSFJ6Pz871mSkXCXYwFXA',
-  authDomain: 'symmetric-setup-kcf5x.firebaseapp.com',
-  projectId: 'symmetric-setup-kcf5x',
-  storageBucket: 'symmetric-setup-kcf5x.firebasestorage.app',
-  messagingSenderId: '963124202476',
-  appId: '1:963124202476:web:6342dc6bb0696b81fa8ec9',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
+
+const missingFields = Object.entries(firebaseConfig)
+  .filter(([, v]) => !v)
+  .map(([k]) => k);
+
+if (missingFields.length > 0) {
+  console.warn(
+    `[Firebase] Missing config: ${missingFields.join(', ')}. Notifications will be disabled.`
+  );
+}
 
 const app = initializeApp(firebaseConfig);
 
@@ -29,8 +39,14 @@ export const getFCMToken = async (): Promise<string | null> => {
       return null;
     }
 
+    const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY as string | undefined;
+    if (!vapidKey) {
+      console.warn('[FCM] VAPID key not configured');
+      return null;
+    }
+
     const token = await getToken(getMessagingInstance(), {
-      vapidKey: 'BN1RdGpPkYc3zBE7QxJKfGyHZmSnG5x-IyrJ9gQRmGW0RqHqPPpPgI6nQj6I9T9Q9W9Q9W9Q9W9Q9W9Q9W9Q9W9',
+      vapidKey,
     });
 
     if (token) {
