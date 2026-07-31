@@ -186,6 +186,18 @@ export default function App() {
     }
   };
 
+  const maybeEnableLowData = async () => {
+    try {
+      if (typeof navigator === 'undefined') return;
+      const connection = (navigator as any).connection;
+      if (!connection) return;
+      const isSlow = connection.saveData || ['slow-2g', '2g', '3g'].includes(connection.effectiveType);
+      if (isSlow) {
+        await enableLowData();
+      }
+    } catch {}
+  };
+
   // Handler: Transfer trip to next offered driver when current driver cancels/requests transfer
   const handleTransferTrip = () => {
     const currentTrip = activeTrip;
@@ -766,6 +778,36 @@ export default function App() {
     localStorage.setItem('ezz_current_screen', currentScreen);
   }, [currentScreen]);
 
+  // Auto-logout when the same account logs in from another device.
+  useEffect(() => {
+    if (!supabaseConnected) return;
+    if (!rider.isLoggedIn && !driverIsLoggedIn && !adminIsLoggedIn) return;
+
+    const checkSession = async () => {
+      try {
+        const session = await loadSession();
+        if (!session) {
+          if (rider.isLoggedIn) {
+            await clearSession('RIDER');
+            setRider(prev => ({ ...prev, isLoggedIn: false }));
+            setCurrentScreen('HOME');
+          } else if (driverIsLoggedIn) {
+            await clearSession('DRIVER');
+            setDriverIsLoggedIn(false);
+            setCurrentScreen('HOME');
+          } else if (adminIsLoggedIn) {
+            await clearSession('ADMIN');
+            setAdminIsLoggedIn(false);
+            setCurrentScreen('HOME');
+          }
+        }
+      } catch {}
+    };
+
+    const id = setInterval(checkSession, 15000);
+    return () => clearInterval(id);
+  }, [supabaseConnected, rider.isLoggedIn, driverIsLoggedIn, adminIsLoggedIn]);
+
   // Screen access guard: redirect to HOME if user tries to access a protected screen without login
   useEffect(() => {
     if (!sessionLoaded) return;
@@ -797,6 +839,8 @@ export default function App() {
 
         setSupabaseConnected(true);
         console.log('⚡ Connected to Supabase directly!');
+
+        maybeEnableLowData();
 
         const [
           dbLocations,

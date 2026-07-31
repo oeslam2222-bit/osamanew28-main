@@ -89,7 +89,7 @@ export interface Driver {
   driverLicenseImage?: string;
   vehicleLicenseImage?: string;
   isOnline: boolean;
-  status: 'AVAILABLE' | 'BUSY';
+  status: 'AVAILABLE' | 'BUSY' | 'OFFLINE';
   approvalStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'FROZEN';
   rating: number;
   totalTrips: number;

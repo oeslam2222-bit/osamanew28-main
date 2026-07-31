@@ -1571,16 +1571,25 @@ export const saveSession = async (role: 'RIDER' | 'DRIVER' | 'ADMIN', userId: st
       localStorage.setItem('ezz_device_id', deviceId);
     } catch {}
 
-    const id = `session_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    const { error } = await supabase.from('ezz_sessions').upsert({
-      id,
-      role,
-      user_id: userId,
-      device_id: deviceId,
-      updated_at: new Date().toISOString(),
-    });
-    if (error) throw error;
-    return true;
+  // Allow at most one active session per (role, user_id).
+  const { error: deleteError } = await supabase
+    .from('ezz_sessions')
+    .delete()
+    .eq('role', role)
+    .eq('user_id', userId);
+  if (deleteError) throw deleteError;
+
+  const id = `session_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const { error } = await supabase.from('ezz_sessions').insert({
+    id,
+    role,
+    user_id: userId,
+    device_id: deviceId,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+  localStorage.setItem(`ezz_session_${role.toLowerCase()}`, JSON.stringify({ userId, deviceId, updatedAt: new Date().toISOString() }));
+  return true;
   } catch (err: any) {
     console.warn('Could not save session to Supabase:', err.message);
     return false;
