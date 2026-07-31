@@ -205,6 +205,7 @@ CREATE TABLE IF NOT EXISTS ezz_promo_codes (
   rider_id TEXT,
   trip_id TEXT,
   used BOOLEAN DEFAULT FALSE,
+  is_active BOOLEAN DEFAULT TRUE,
   used_at TEXT,
   created_at TEXT DEFAULT NOW()::TEXT,
   expires_at TEXT
@@ -335,8 +336,31 @@ CREATE TABLE IF NOT EXISTS ads (
   start_date TEXT,
   end_date TEXT,
   clicks INTEGER DEFAULT 0,
+  whatsapp_clicks INTEGER DEFAULT 0,
+  ad_fee DOUBLE PRECISION DEFAULT 0,
+  daily_impression_limit INTEGER DEFAULT 0,
+  impressions INTEGER DEFAULT 0,
   created_at TEXT DEFAULT NOW()::TEXT
 );
+
+-- دوال زيادة عدادات الإعلانات (تستخدمها الواجهة عند الضغط/المشاهدة)
+CREATE OR REPLACE FUNCTION increment_ad_click(ad_id TEXT)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  UPDATE ads SET clicks = clicks + 1 WHERE id = ad_id;
+END $$;
+
+CREATE OR REPLACE FUNCTION increment_ad_whatsapp(ad_id TEXT)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  UPDATE ads SET whatsapp_clicks = COALESCE(whatsapp_clicks, 0) + 1 WHERE id = ad_id;
+END $$;
+
+CREATE OR REPLACE FUNCTION increment_ad_impression(ad_id TEXT)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  UPDATE ads SET impressions = COALESCE(impressions, 0) + 1 WHERE id = ad_id;
+END $$;
 
 ALTER TABLE IF EXISTS ads ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow public read ads" ON ads;
@@ -416,7 +440,18 @@ CREATE POLICY "admin_delete_riders" ON ezz_riders FOR DELETE TO anon USING (
 
 -- Drivers: السائقين الموثقين فقط للقراءة العامة
 DROP POLICY IF EXISTS "Allow public read approved drivers" ON ezz_drivers;
+DROP POLICY IF EXISTS "public_read_approved_drivers" ON ezz_drivers;
 CREATE POLICY "public_read_approved_drivers" ON ezz_drivers FOR SELECT USING (approval_status = 'APPROVED');
+-- السائق يقدر يقرأ سجله حتى لو PENDING (مهم لتسجيل الدخول)
+DROP POLICY IF EXISTS "driver_read_own" ON ezz_drivers;
+CREATE POLICY "driver_read_own" ON ezz_drivers FOR SELECT TO anon USING (
+  id IN (SELECT user_id FROM ezz_sessions WHERE role = 'DRIVER')
+);
+-- الإدمن يقرأ كل السائقين بمن فيهم PENDING/REJECTED/FROZEN للمراجعة
+DROP POLICY IF EXISTS "admin_read_all_drivers" ON ezz_drivers;
+CREATE POLICY "admin_read_all_drivers" ON ezz_drivers FOR SELECT TO anon USING (
+  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+);
 DROP POLICY IF EXISTS "Allow public write drivers" ON ezz_drivers;
 CREATE POLICY "anon_insert_drivers" ON ezz_drivers FOR INSERT TO anon WITH CHECK (true);
 DROP POLICY IF EXISTS "Allow public update drivers" ON ezz_drivers;
@@ -465,11 +500,10 @@ CREATE POLICY "admin_write_stats" ON ezz_stats FOR ALL TO anon USING (
   EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
 ) WITH CHECK (true);
 
--- Admin: الإدمن فقط يقرأ ويكتب
+-- Admin: القراءة متاحة لتسجيل الدخول الأول (كلمة السر مشفرة PBKDF2 والتحقق يتم في الـ client)
 DROP POLICY IF EXISTS "Allow public read admin" ON ezz_admin;
-CREATE POLICY "admin_read_admin" ON ezz_admin FOR SELECT TO anon USING (
-  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
-);
+DROP POLICY IF EXISTS "admin_read_admin" ON ezz_admin;
+CREATE POLICY "admin_read_admin" ON ezz_admin FOR SELECT TO anon USING (true);
 DROP POLICY IF EXISTS "Allow public write admin" ON ezz_admin;
 DROP POLICY IF EXISTS "Allow public update admin" ON ezz_admin;
 DROP POLICY IF EXISTS "Allow public delete admin" ON ezz_admin;
@@ -739,7 +773,7 @@ export const mapTripToDB = (trip: Trip) => ({
 export const fetchDrivers = async (): Promise<Driver[] | null> => {
   try {
     // Include `service_areas` in the select so remote fetch preserves driver coverage areas
-    const { data, error } = await supabase.from('ezz_drivers').select('id,name,phone,password,car_model,car_plate,vehicle_type,vehicle_name,national_id,driver_license,personal_photo,national_id_image,driver_license_image,vehicle_license_image,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,agreed_to_terms,service_areas');
+    const { data, error } = await supabase.from('ezz_drivers').select('id,name,phone,password,car_model,car_plate,vehicle_type,vehicle_name,national_id,driver_license,personal_photo,national_id_image,driver_license_image,vehicle_license_image,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,agreed_to_terms,service_areas,last_seen,auto_accept,auto_show_map,fcm_token');
     if (error) throw error;
     return data.map(mapDriverFromDB);
   } catch (err: any) {
@@ -781,7 +815,7 @@ export const deleteDriverInDB = async (driverId: string): Promise<boolean> => {
 // Fetch Registered Riders
 export const fetchRiders = async (): Promise<Rider[] | null> => {
   try {
-    const { data, error } = await supabase.from('ezz_riders').select('id,name,phone,password,balance,rating,total_trips,approval_status');
+    const { data, error } = await supabase.from('ezz_riders').select('id,name,phone,password,rating,total_trips,approval_status,preferences');
     if (error) throw error;
     return data.map(mapRiderFromDB);
   } catch (err: any) {

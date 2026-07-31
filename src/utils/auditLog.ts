@@ -75,10 +75,12 @@ class AuditLogger {
     }
 
     // Persist to Supabase audit_logs table (no local storage)
-    // Deduplicate failed writes: if the same userId + action failed within the last minute,
+    // Deduplicate failed writes: if the same userId + action + details failed within the last minute,
     // skip writing to the DB to prevent audit spam from rapid double-submits / retries.
-    if (!success && entry.errorMessage) {
-      const key = `${action}::${userId}::${entry.errorMessage}`;
+    // Note: works even when errorMessage is omitted (many Login failed calls don't pass it),
+    // so the cooldown actually prevents audit-table flooding from repeated invalid attempts.
+    if (!success) {
+      const key = `${action}::${userId}::${entry.details}`;
       const now = Date.now();
       const last = this.lastWriteTimestamps.get(key) || 0;
       if (now - last < AuditLogger.COOLDOWN_MS) {
