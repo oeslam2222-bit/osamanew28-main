@@ -4,6 +4,31 @@ import { PAGINATION_PAGE_SIZE } from './constants';
 import { verifyPassword, isSecureHash, hashPassword, generateUUID } from './utils/security';
 
 const PAGE_SIZE = PAGINATION_PAGE_SIZE;
+const DEFAULT_TIMEOUT_MS = 5000;
+const LOW_DATA_TIMEOUT_MS = 10000;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error('Supabase request timeout')), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+const selectDriversLight = 'id,name,phone,car_model,car_plate,vehicle_type,vehicle_name,current_x,current_y,is_online,status,approval_status,rating,total_trips,total_earnings,service_areas,last_seen';
+const selectDriversFull = 'id,name,phone,password,car_model,car_plate,vehicle_type,vehicle_name,national_id,driver_license,personal_photo,national_id_image,driver_license_image,vehicle_license_image,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,agreed_to_terms,service_areas,last_seen';
+const selectRidersLight = 'id,name,phone,balance,rating,total_trips,approval_status,preferences';
+const selectRidersFull = 'id,name,phone,password,balance,rating,total_trips,approval_status,preferences';
+const selectLocationsLight = 'id,name_ar,name_en,lat,lng';
+const selectLocationsFull = 'id,name_ar,name_en,lat,lng,city,country,x,y';
+
+export const getDriverFields = (isLight: boolean) => isLight ? selectDriversLight : selectDriversFull;
+export const getRiderFields = (isLight: boolean) => isLight ? selectRidersLight : selectRidersFull;
+export const getLocationFields = (isLight: boolean) => isLight ? selectLocationsLight : selectLocationsFull;
 
 // Helper to determine if we can connect to Supabase
 let isSupabaseHealthy = true;
@@ -736,10 +761,10 @@ export const mapTripToDB = (trip: Trip) => ({
 // --- API METHODS ---
 
 // Fetch Drivers
-export const fetchDrivers = async (): Promise<Driver[] | null> => {
+export const fetchDrivers = async (isLight: boolean = false): Promise<Driver[] | null> => {
   try {
-    // Include `service_areas` in the select so remote fetch preserves driver coverage areas
-    const { data, error } = await supabase.from('ezz_drivers').select('id,name,phone,password,car_model,car_plate,vehicle_type,vehicle_name,national_id,driver_license,personal_photo,national_id_image,driver_license_image,vehicle_license_image,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,agreed_to_terms,service_areas');
+    const fields = getDriverFields(isLight);
+    const { data, error } = await supabase.from('ezz_drivers').select(fields);
     if (error) throw error;
     return data.map(mapDriverFromDB);
   } catch (err: any) {
@@ -779,9 +804,10 @@ export const deleteDriverInDB = async (driverId: string): Promise<boolean> => {
 };
 
 // Fetch Registered Riders
-export const fetchRiders = async (): Promise<Rider[] | null> => {
+export const fetchRiders = async (isLight: boolean = false): Promise<Rider[] | null> => {
   try {
-    const { data, error } = await supabase.from('ezz_riders').select('id,name,phone,password,balance,rating,total_trips,approval_status');
+    const fields = getRiderFields(isLight);
+    const { data, error } = await supabase.from('ezz_riders').select(fields);
     if (error) throw error;
     return data.map(mapRiderFromDB);
   } catch (err: any) {

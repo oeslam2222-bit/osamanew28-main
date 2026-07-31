@@ -845,8 +845,8 @@ export default function App() {
           dbActiveTrip,
         ] = await Promise.all([
           fetchLocations(),
-          fetchDrivers(),
-          fetchRiders(),
+          fetchDrivers(true),
+          fetchRiders(true),
           fetchRegions(),
           fetchAds(),
           loadSession(),
