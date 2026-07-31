@@ -30,9 +30,7 @@ if (missingFields.length === 0) {
 }
 
 export const getMessagingInstance = () => {
-  if (!app || !messagingInstance) {
-    return null;
-  }
+  if (!app) return null;
   if (!messagingInstance) {
     try {
       messagingInstance = getMessaging(app);
@@ -42,6 +40,19 @@ export const getMessagingInstance = () => {
     }
   }
   return messagingInstance;
+};
+
+export const getFCMServiceWorkerRegistration = async (): Promise<ServiceWorkerRegistration | null> => {
+  if (!('serviceWorker' in navigator)) return null;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js');
+    if (reg) return reg;
+    const active = await navigator.serviceWorker.ready;
+    return active;
+  } catch (e) {
+    console.warn('[Firebase] Could not get SW registration:', e);
+    return null;
+  }
 };
 
 export const getFCMToken = async (): Promise<string | null> => {
@@ -61,8 +72,10 @@ export const getFCMToken = async (): Promise<string | null> => {
       return null;
     }
 
+    const swReg = await getFCMServiceWorkerRegistration();
     const token = await getToken(messaging, {
       vapidKey,
+      serviceWorkerRegistration: swReg || undefined,
     });
 
     if (token) {

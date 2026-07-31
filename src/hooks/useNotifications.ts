@@ -118,6 +118,7 @@ export const useNotifications = (
       } else if (currentStatus === 'ARRIVED' && !isDriverActor) {
         notifiedEventsRef.current.add(statusEventKey);
         playNotificationSound('trip_accepted');
+        triggerVibration([200, 100, 200, 100, 300]);
         speakText(
           lang === 'ar'
             ? 'وصل الكابتن إلى موقعك وهو في انتظارك الآن.'
@@ -129,6 +130,8 @@ export const useNotifications = (
           'الكابتن متواجد في نقطة الركوب الآن بانتظارك.',
           '⭐'
         );
+        startTitleFlash('📍 الكابتن وصل!');
+        setTimeout(stopTitleFlash, 5000);
         triggerToast(
           '📍 الكابتن وصل!',
           'الكابتن متواجد في نقطة الركوب الآن بانتظارك.',
@@ -238,7 +241,7 @@ export const useNotifications = (
   useEffect(() => {
     if (!driverIsLoggedIn || !selectedDriverId || !supabaseConnected) return;
 
-    const pollInterval = dataSaverMode ? 60000 : 30000;
+    const pollInterval = dataSaverMode ? 30000 : 10000;
     const interval = setInterval(async () => {
       if (document.hidden) return;
       try {

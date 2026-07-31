@@ -569,7 +569,7 @@ export const notifyDriverWithAudioFirst = async ({
       playNotificationSound(soundType);
       triggerVibration([300, 100, 300, 100, 400]);
     }
-    if (speechText && !speechText.includes('شكراً لثقتك') && !speechText.includes('Thank you for your trust')) {
+    if (speechText && !speechText.includes('Thank you for your trust')) {
       speakText(speechText, lang);
     }
     if (soundType !== 'chat_message') {

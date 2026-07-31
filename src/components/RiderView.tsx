@@ -1,6 +1,6 @@
 import React, { useState, useEffect, lazy, Suspense, Dispatch, SetStateAction } from 'react';
 import { Location, Driver, Trip, Rider, Region, Ad } from '../types';
-import { MapPin, ArrowRightLeft, Navigation, Phone, Star, DollarSign, Loader2, Sparkles, AlertCircle, Car, HelpCircle, MessageSquare, Search, Check } from 'lucide-react';
+import { MapPin, ArrowRightLeft, Navigation, Phone, Star, DollarSign, Loader2, Sparkles, AlertCircle, Car, HelpCircle, MessageSquare, Search, Check, X, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { calculateHaversineDistance, estimateDrivingDistance, calculateDynamicFare, getVehiclePricing, calculateVehicleFare, calculateFullTripFare } from '../utils/haversine';
 import { fetchTripsHistoryPaginated, saveRiderPreferences, validatePromoCode } from '../supabaseService';
 import { RiderPreferences } from '../types';
@@ -30,6 +30,7 @@ interface RiderViewProps {
   onCancelRide: () => void;
   onDismissCompletedTrip?: () => void;
   onRateDriver: (rating: number, tags?: string[], comment?: string) => void;
+  onConfirmArrival?: () => void;
   onUpdateLocations?: Dispatch<SetStateAction<Location[]>>;
   lang: 'ar' | 'en';
   onSendChatMessage: (text: string, sender: 'RIDER' | 'DRIVER') => void;
@@ -61,6 +62,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
   onCancelRide,
   onDismissCompletedTrip,
   onRateDriver,
+  onConfirmArrival,
   onUpdateLocations,
   lang,
   onSendChatMessage,
@@ -149,7 +151,10 @@ export const RiderView: React.FC<RiderViewProps> = ({
   const [placeSearchResults, setPlaceSearchResults] = useState<{ display_name: string; lat: number; lng: number; city: string }[]>([]);
   const [placeSearchLoading, setPlaceSearchLoading] = useState(false);
   const [geoError, setGeoError] = useState('');
-  const [showMap, setShowMap] = useState(() => !!rider.preferences?.autoShowMap);
+  const [showMap, setShowMap] = useState(() => {
+    const hasActiveTrip = !!activeTrip && activeTrip.status !== 'COMPLETED' && activeTrip.status !== 'CANCELLED';
+    return hasActiveTrip;
+  });
   const placeSearchCacheRef = React.useRef<Record<string, { display_name: string; lat: number; lng: number; city: string }[]>>({});
   const placeSearchLastRef = React.useRef<{ q: string; t: number } | null>(null);
   const placeSearchDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -777,6 +782,26 @@ export const RiderView: React.FC<RiderViewProps> = ({
                   {activeTrip.status === 'ARRIVED' && (lang === 'ar' ? 'السيارة تنتظرك بالخارج. تفضل بالركوب لتفعيل الرحلة.' : 'The driver has arrived at your location. Please board to start the trip.')}
                   {activeTrip.status === 'STARTED' && (lang === 'ar' ? `متجهون إلى ${lang === 'ar' ? activeTrip.dropoff.nameAr : activeTrip.dropoff.nameEn}. رحلة سعيدة!` : `Heading to ${activeTrip.dropoff.nameEn}. Wish you a safe ride!`)}
                 </p>
+                
+                {/* Ready/Decline buttons for ARRIVED status */}
+                {activeTrip.status === 'ARRIVED' && (
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      type="button"
+                      onClick={onCancelRide}
+                      className="flex-1 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[10px] font-bold rounded-lg transition-all cursor-pointer"
+                    >
+                      {lang === 'ar' ? '❌ لست جاهزاً، إلغاء الطلب' : '❌ Not ready, cancel'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onConfirmArrival}
+                      className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg shadow-sm transition-all cursor-pointer"
+                    >
+                      {lang === 'ar' ? '✅ أنا جاهز، موافق!' : '✅ I\'m ready, continue!'}
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Dynamic live ETA calculated based on driver's physical coordinates on the grid */}

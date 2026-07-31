@@ -1558,26 +1558,18 @@ export default function App() {
     };
   }, [activeTrip?.id, activeTrip?.status, activeTrip?.currentOfferedDriverId, driverIsLoggedIn, selectedDriverId, lang]);
 
-  // PWA Service Worker Registration
+  // Service Worker message listener (registration handled by vite-plugin-pwa)
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js')
-        .then((registration) => {
-          if (registration.scope && new URL(registration.scope).origin !== window.location.origin) {
-            console.warn('[SW] Service Worker registered from a different origin, unregistering for security');
-            registration.unregister();
-            return;
-          }
-          console.log('Service Worker registered successfully with scope:', registration.scope);
+    if (!('serviceWorker' in navigator)) return;
 
-          if ('Notification' in window && Notification.permission === 'default') {
-            Notification.requestPermission();
-          }
-        })
-        .catch((error) => {
-          console.error('Service Worker registration failed:', error);
-        });
-    }
+    const handler = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'ONLINE_CHECK_RESULT') {
+        console.log('[SW] Online status from service worker:', event.data.online);
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', handler);
+    return () => navigator.serviceWorker.removeEventListener('message', handler);
   }, []);
 
   // FCM foreground message listener
@@ -2644,6 +2636,31 @@ export default function App() {
     }
 
     if (driverIsLoggedIn && activeTrip.driverId === selectedDriverId) {
+      playNotificationSound('trip_accepted');
+      speakText(
+        lang === 'ar'
+          ? 'بدأت الرحلة الآن، نتمنى لك مشواراً آمناً.'
+          : 'The ride has started, wish you a safe trip.',
+        lang === 'ar' ? 'ar-EG' : 'en-US'
+      );
+      triggerVibration([200, 100, 200, 100, 300]);
+      triggerToast(
+        '🚀 بدأت الرحلة الآن!',
+        'نتمنى لك رحلة سعيدة وآمنة.',
+        'success'
+      );
+    }
+  };
+
+  const handleRiderConfirmArrival = () => {
+    if (!activeTrip || activeTrip.status !== 'ARRIVED') return;
+    const updated = { ...activeTrip, status: 'STARTED' as TripStatus };
+    setActiveTripWithTracking(updated);
+    if (supabaseConnected) {
+      saveActiveTrip(updated);
+    }
+
+    if (!driverIsLoggedIn) {
       playNotificationSound('trip_accepted');
       speakText(
         lang === 'ar'
@@ -3961,11 +3978,12 @@ export default function App() {
                        setSelectedPickupRegion={setSelectedPickupRegion}
                        setSelectedPickup={setSelectedPickup}
                        setSelectedDropoff={setSelectedDropoff}
-                        onRequestRide={handleRequestRide}
-                        onCancelRide={handleCancelRide}
-                        onDismissCompletedTrip={handleDismissCompletedTrip}
-                        onRateDriver={handleRateDriver}
-                       onUpdateLocations={setLocations}
+                         onRequestRide={handleRequestRide}
+                         onCancelRide={handleCancelRide}
+                         onDismissCompletedTrip={handleDismissCompletedTrip}
+                         onRateDriver={handleRateDriver}
+                         onConfirmArrival={handleRiderConfirmArrival}
+                        onUpdateLocations={setLocations}
                        lang={lang}
                        onSendChatMessage={handleSendChatMessage}
                         onCalculateRoute={getRealRoute}
