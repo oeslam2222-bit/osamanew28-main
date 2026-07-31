@@ -10,6 +10,7 @@ import { AdminView } from './components/AdminView';
 import { Smartphone, Globe, RotateCcw, Award, Shield, Car, Check, ChevronDown, MessageSquare, Upload, Lock, User, Bell, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { calculateHaversineDistance, estimateDrivingDistance, calculateDynamicFare, getVehiclePricing, calculateVehicleFare, calculateFullTripFare, RouteResult, RouteStep } from './utils/haversine';
+import { getEligibleDrivers, getCoordsFromXY } from './utils/tripDispatchUtils';
 import { 
   checkSupabaseConnection, 
   fetchDrivers, 
@@ -42,7 +43,8 @@ import {
   fetchRegions,
   fetchAds,
   fetchActiveAdsForPlacement,
-  sendNewTripNotification
+  sendNewTripNotification,
+  saveRiderPreferences
 } from './supabaseService';
 import {
   requestNotificationPermission,
@@ -471,15 +473,6 @@ export default function App() {
     return null;
   }, [routeCache, lang]);
 
-  // Convert relative XY (0-100 grid) to GPS around the service area (El-Ayyat / Giza)
-  const getCoordsFromXY = (x: number, y: number) => {
-    const latBase = 29.6197;
-    const lngBase = 31.2561;
-    const lat = latBase + (y - 50) * 0.0025;
-    const lng = lngBase + (x - 50) * 0.0025;
-    return { lat, lng };
-  };
-
   const [tripDateFrom, setTripDateFrom] = useState<string>('');
   const [tripDateTo, setTripDateTo] = useState<string>('');
   const [tripPage, setTripPage] = useState<number>(0);
@@ -625,7 +618,27 @@ export default function App() {
     });
   };
   const [regions, setRegions] = useState<Region[]>([]);
-  const [selectedPickupRegion, setSelectedPickupRegion] = useState<string>('');
+  const [pickupRegionsByRider, setPickupRegionsByRider] = useState<Record<string, string>>({});
+
+  const riderPickupRegion = rider.id ? (pickupRegionsByRider[rider.id] ?? '') : '';
+
+  const setRiderPickupRegion = useCallback((regionId: string) => {
+    if (!rider.id) return;
+    setPickupRegionsByRider((prev) => ({ ...prev, [rider.id]: regionId }));
+    if (supabaseConnected && regionId) {
+      saveRiderPreferences(rider.id, {
+        ...(rider.preferences || {}),
+        lastPickupRegion: regionId,
+      }).catch(() => {});
+    }
+  }, [rider.id, rider.preferences, supabaseConnected]);
+
+  const restoreRiderPickupRegion = useCallback((riderData: Rider) => {
+    const saved = riderData.preferences?.lastPickupRegion;
+    if (saved) {
+      setPickupRegionsByRider((prev) => ({ ...prev, [riderData.id]: saved }));
+    }
+  }, []);
 
   // Premium In-App Strong Toast Notifications State
   const [toast, setToast] = useState<{ title: string; message: string; type: 'info' | 'success' | 'warning' | 'new_trip' } | null>(null);
@@ -903,6 +916,7 @@ export default function App() {
             const r = dbRiders?.find(x => x.id === session.userId);
             if (r) {
               setRider({ ...r, isLoggedIn: true });
+              restoreRiderPickupRegion(r);
             }
           } else if (session.role === 'DRIVER') {
             const d = dbDrivers?.find(x => x.id === session.userId);
@@ -1891,6 +1905,29 @@ export default function App() {
   }, [activeTrip?.status, activeTrip?.id]);
 
   // Handler: Request Ride with dynamic commission rate calculation by mileage (distance-based commission request)
+  const fetchEligibleDriversForRegion = async (regionId?: string): Promise<Driver[]> => {
+    const now = Date.now();
+    const staleThreshold = 60000;
+    let driverList = drivers;
+
+    if (supabaseConnected) {
+      try {
+        const freshDrivers = await fetchDrivers();
+        if (freshDrivers?.length) driverList = freshDrivers;
+      } catch (e) {
+        console.warn('Could not fetch fresh drivers for dispatch, falling back to local list:', e);
+      }
+    }
+
+    const selectedRegion = regionId
+      ? regions.find((r) => r.id === regionId)
+      : undefined;
+    const regionForFilter =
+      selectedRegion && selectedRegion.id !== 'all' ? selectedRegion : null;
+
+    return getEligibleDrivers(driverList, now, staleThreshold, regionForFilter);
+  };
+
   const handleRequestRide = async (
     requestedVehicleType: 'CAR' | 'MOTORCYCLE' | 'TOKTOK' | 'TRICYCLE' = 'CAR',
     pickupLandmark?: string,
@@ -1898,6 +1935,14 @@ export default function App() {
     promoCodeId?: string
   ) => {
     if (!selectedPickup || !selectedDropoff) return;
+    if (!riderPickupRegion) {
+      triggerToast(
+        lang === 'ar' ? 'اختر المنطقة أولاً' : 'Select a region first',
+        lang === 'ar' ? 'يرجى تحديد منطقة الالتقاء قبل طلب الرحلة.' : 'Please select your pickup region before requesting a ride.',
+        'warning'
+      );
+      return;
+    }
     const pLoc = locations.find((l) => l.id === selectedPickup);
     const dLoc = locations.find((l) => l.id === selectedDropoff);
     if (!pLoc || !dLoc) return;
@@ -1957,65 +2002,11 @@ export default function App() {
 
     let currentOfferedDriverId: string | undefined = undefined;
     let offeredDriverIds: string[] = [];
-    
-     // Always fetch latest drivers from Supabase to avoid stale empty list
-     let eligibleDrivers: Driver[] = [];
-     if (supabaseConnected) {
-       try {
-         const freshDrivers = await fetchDrivers();
-         if (freshDrivers && freshDrivers.length > 0) {
-           const now = Date.now();
-           const staleThreshold = 60000;
-           eligibleDrivers = freshDrivers.filter(d => {
-             if (d.approvalStatus !== 'APPROVED') return false;
-             if (!d.isOnline) return false;
-             if (d.status === 'BUSY') return false;
-             if (d.lastSeen && now - new Date(d.lastSeen).getTime() > staleThreshold) return false;
-             return true;
-           });
-         }
-       } catch (e) {
-         console.warn('Could not fetch fresh drivers for dispatch, falling back to local list:', e);
-         const now = Date.now();
-         const staleThreshold = 60000;
-         eligibleDrivers = drivers.filter(d => {
-           if (d.approvalStatus !== 'APPROVED') return false;
-           if (!d.isOnline) return false;
-           if (d.status === 'BUSY') return false;
-           if (d.lastSeen && now - new Date(d.lastSeen).getTime() > staleThreshold) return false;
-           return true;
-         });
-       }
-     } else {
-       const now = Date.now();
-       const staleThreshold = 60000;
-       eligibleDrivers = drivers.filter(d => {
-         if (d.approvalStatus !== 'APPROVED') return false;
-         if (!d.isOnline) return false;
-         if (d.status === 'BUSY') return false;
-         if (d.lastSeen && now - new Date(d.lastSeen).getTime() > staleThreshold) return false;
-         return true;
-       });
-     }
 
-    // Filter drivers by the pickup region selected by rider.
-    // Only drivers whose coverage areas include the selected region receive the request.
-    const selectedRegion = regions.find(r => r.id === selectedPickupRegion);
-    if (selectedRegion && selectedRegion.id !== 'all') {
-      eligibleDrivers = eligibleDrivers.filter(d => {
-        if (!d.serviceAreas || d.serviceAreas.length === 0) return true; // covers all regions by default
-        return d.serviceAreas.some(
-          sa =>
-            sa === selectedRegion.nameAr ||
-            sa === selectedRegion.nameEn ||
-            sa === selectedRegion.id ||
-            sa === 'جميع المناطق' ||
-            sa === 'All Regions' ||
-            sa === 'كل المناطق' ||
-            sa.includes('بني سويف')
-        );
-      });
-    }
+    const eligibleDrivers = await fetchEligibleDriversForRegion(riderPickupRegion);
+
+    // Filter drivers by the pickup region selected by this rider.
+    const selectedRegion = regions.find((r) => r.id === riderPickupRegion);
 
     const dispatchTimer = DISPATCH_TIMER_SECONDS;
     const dispatchTimerMax = DISPATCH_TIMER_SECONDS;
@@ -2136,63 +2127,10 @@ export default function App() {
 
     const pLoc = locations.find((l) => l.id === selectedPickup);
     const dLoc = locations.find((l) => l.id === selectedDropoff);
-    const selectedRegion = regions.find(r => r.id === selectedPickupRegion);
-    if (!pLoc || !dLoc) return false;
+    const regionId = trip.pickupRegionId ?? riderPickupRegion;
+    if (!pLoc || !dLoc || !regionId) return false;
 
-    let eligibleDrivers: Driver[] = [];
-    if (supabaseConnected) {
-      try {
-        const freshDrivers = await fetchDrivers();
-        if (freshDrivers && freshDrivers.length > 0) {
-          const now = Date.now();
-          const staleThreshold = 60000;
-          eligibleDrivers = freshDrivers.filter(d => {
-            if (d.approvalStatus !== 'APPROVED') return false;
-            if (!d.isOnline) return false;
-            if (d.status === 'BUSY') return false;
-            if (d.lastSeen && now - new Date(d.lastSeen).getTime() > staleThreshold) return false;
-            return true;
-          });
-        }
-      } catch {
-        const now = Date.now();
-        const staleThreshold = 60000;
-        eligibleDrivers = drivers.filter(d => {
-          if (d.approvalStatus !== 'APPROVED') return false;
-          if (!d.isOnline) return false;
-          if (d.status === 'BUSY') return false;
-          if (d.lastSeen && now - new Date(d.lastSeen).getTime() > staleThreshold) return false;
-          return true;
-        });
-      }
-    } else {
-      const now = Date.now();
-      const staleThreshold = 60000;
-      eligibleDrivers = drivers.filter(d => {
-        if (d.approvalStatus !== 'APPROVED') return false;
-        if (!d.isOnline) return false;
-        if (d.status === 'BUSY') return false;
-        if (d.lastSeen && now - new Date(d.lastSeen).getTime() > staleThreshold) return false;
-        return true;
-      });
-    }
-
-    if (selectedRegion && selectedRegion.id !== 'all') {
-      eligibleDrivers = eligibleDrivers.filter(d => {
-        if (!d.serviceAreas || d.serviceAreas.length === 0) return true;
-        return d.serviceAreas.some(
-          sa =>
-            sa === selectedRegion.nameAr ||
-            sa === selectedRegion.nameEn ||
-            sa === selectedRegion.id ||
-            sa === 'جميع المناطق' ||
-            sa === 'All Regions' ||
-            sa === 'كل المناطق' ||
-            sa.includes('بني سويف')
-        );
-      });
-    }
-
+    const eligibleDrivers = await fetchEligibleDriversForRegion(regionId);
     if (eligibleDrivers.length === 0) return false;
 
     const sortedDrivers = eligibleDrivers
@@ -3044,6 +2982,7 @@ export default function App() {
       auditLogger.log('rider_login', found.id, 'rider', 'Login successful', true);
       riderAuthLimiter.reset(riderLoginPhone.trim());
       setRider({ ...found, isLoggedIn: true });
+      restoreRiderPickupRegion(found);
       if (supabaseConnected) {
         await clearSession('DRIVER');
         await clearSession('ADMIN');
@@ -3838,8 +3777,8 @@ export default function App() {
                        ads={ads}
                        selectedPickup={selectedPickup}
                        selectedDropoff={selectedDropoff}
-                       selectedPickupRegion={selectedPickupRegion}
-                       setSelectedPickupRegion={setSelectedPickupRegion}
+                       selectedPickupRegion={riderPickupRegion}
+                       setSelectedPickupRegion={setRiderPickupRegion}
                        setSelectedPickup={setSelectedPickup}
                        setSelectedDropoff={setSelectedDropoff}
 onRequestRide={handleRequestRide}
@@ -3860,7 +3799,6 @@ onRequestRide={handleRequestRide}
                              setActiveTripWithTracking(null);
                              setSelectedPickup('1');
                              setSelectedDropoff('2');
-                             setSelectedPickupRegion('');
                              clearSession('RIDER');
                              setCurrentScreen('HOME');
                            }}

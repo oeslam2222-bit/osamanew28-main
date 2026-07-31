@@ -330,20 +330,35 @@ const playAudioFallback = (type: 'new_trip' | 'trip_accepted' | 'chat_message' |
  * Prime and unlock AudioContext on user interaction so background alerts play without browser blockage
  */
 export const unlockAudioContext = () => {
-  if (audioUnlocked) return;
   try {
     const ctx = getAudioContext();
     if (ctx.state === 'suspended') {
-      ctx.resume();
+      ctx.resume().catch(() => {});
     }
-    // Play a 0.001s silent buffer to permanently unlock
-    const buffer = ctx.createBuffer(1, 1, 22050);
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-    source.start(0);
-    audioUnlocked = true;
-    console.log('[Ezz Audio] Web Audio Context successfully unlocked');
+    if (!audioUnlocked) {
+      const buffer = ctx.createBuffer(1, 1, 22050);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start(0);
+      audioUnlocked = true;
+      console.log('[Ezz Audio] Web Audio Context successfully unlocked');
+    }
+    // Prime HTML Audio element so blob-URL fallback works after user gesture
+    const el = getAudioElement();
+    if (el.paused) {
+      const silentUrl = generateToneBlobUrl(440, 0.01, 0.001);
+      el.volume = 0.001;
+      el.src = silentUrl;
+      el.play()
+        .then(() => {
+          el.volume = getVolume();
+          setTimeout(() => {
+            try { URL.revokeObjectURL(silentUrl); } catch {}
+          }, 500);
+        })
+        .catch(() => {});
+    }
   } catch (e) {
     console.warn('[Ezz Audio] Could not unlock Web Audio Context:', e);
   }
@@ -371,8 +386,18 @@ if (typeof window !== 'undefined') {
  */
 export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat_message' | 'trip_completed' | 'rating' | 'alert') => {
   if (!shouldPlaySound()) return;
+  unlockAudioContext();
+
+  const ctx = getAudioContext();
+  const useFallbackOnly = ctx.state === 'suspended' || !audioUnlocked;
+  const isCritical = type === 'new_trip' || type === 'alert';
+
+  if (useFallbackOnly) {
+    playAudioFallback(type);
+    return;
+  }
+
   try {
-    const ctx = getAudioContext();
     const now = ctx.currentTime;
 
     if (type === 'new_trip') {
@@ -512,6 +537,12 @@ export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat
     }
   } catch (err) {
     console.warn('Web Audio Playback issue:', err);
+    playAudioFallback(type);
+    return;
+  }
+
+  // Belt-and-suspenders: HTML Audio fallback for high-attention alerts
+  if (isCritical) {
     playAudioFallback(type);
   }
 };

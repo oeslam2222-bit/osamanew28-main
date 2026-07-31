@@ -114,6 +114,7 @@ export interface RiderPreferences {
   recentDestinations?: { id: string; name: string; lat: number; lng: number }[];
   lastPickup?: string;
   lastDropoff?: string;
+  lastPickupRegion?: string;
   autoShowMap?: boolean;
 }
 
