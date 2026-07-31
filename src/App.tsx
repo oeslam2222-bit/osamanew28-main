@@ -1209,8 +1209,8 @@ export default function App() {
                   ...rd,
                   currentX: isActiveTripDriver ? ld.currentX : rd.currentX,
                   currentY: isActiveTripDriver ? ld.currentY : rd.currentY,
-                  isOnline: isStale ? false : ld.isOnline,
-                  status: isStale ? 'AVAILABLE' : (ld.isOnline ? ld.status : rd.status),
+                  isOnline: isStale ? false : rd.isOnline,
+                  status: isStale ? 'AVAILABLE' : (rd.isOnline ? rd.status : 'OFFLINE'),
                 };
               }
               return rd;
