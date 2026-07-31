@@ -89,7 +89,7 @@ export interface Driver {
   driverLicenseImage?: string;
   vehicleLicenseImage?: string;
   isOnline: boolean;
-  status: 'AVAILABLE' | 'BUSY';
+  status: 'AVAILABLE' | 'BUSY' | 'OFFLINE';
   approvalStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'FROZEN';
   rating: number;
   totalTrips: number;
@@ -122,7 +122,6 @@ export interface Rider {
   name: string; // الاسم الثنائي
   phone: string;
   password?: string; // كلمة المرور
-  balance: number;
   rating?: number;
   totalTrips?: number;
   approvalStatus?: 'PENDING' | 'APPROVED' | 'FROZEN' | 'REJECTED' | 'BLOCKED';

@@ -31,7 +31,6 @@ interface AdminViewProps {
   onBlockRider: (riderId: string) => void;
   onUnblockRider: (riderId: string) => void;
   onDeleteRider: (riderId: string) => void;
-  onAddBalanceToRider: (riderId: string, amount: number) => void;
   onClearAllFakeData: () => void;
   lang: 'ar' | 'en';
   onLogout: () => void;
@@ -61,7 +60,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
   onBlockRider,
   onUnblockRider,
   onDeleteRider,
-  onAddBalanceToRider,
   onClearAllFakeData,
   lang,
   onLogout,
@@ -241,12 +239,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [selectedRiderForDetails, setSelectedRiderForDetails] = useState<Rider | null>(null);
   const [riderDetailTrips, setRiderDetailTrips] = useState<Trip[]>([]);
   const [isLoadingRiderTrips, setIsLoadingRiderTrips] = useState(false);
-  const [riderBalanceInput, setRiderBalanceInput] = useState('');
   const [promoDiscount, setPromoDiscount] = useState(5);
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
   const [selectedRiderForPromo, setSelectedRiderForPromo] = useState('');
-  const [showBalanceModal, setShowBalanceModal] = useState(false);
-  const [selectedRiderForBalance, setSelectedRiderForBalance] = useState<Rider | null>(null);
   const [tripHistorySearchQuery, setTripHistorySearchQuery] = useState('');
   const [tripHistoryStatusFilter, setTripHistoryStatusFilter] = useState<'all' | 'COMPLETED' | 'CANCELLED' | 'ACTIVE'>('all');
   const [expandedTripId, setExpandedTripId] = useState<string | null>(null);
@@ -1880,7 +1875,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             <p className="text-[9px] text-slate-400 mt-0.5">📞 {rider.phone}</p>
                           </div>
                           <div className="flex flex-col items-end gap-1">
-                            <span className="text-[10px] font-black text-indigo-600">{rider.balance.toFixed(2)} {lang === 'ar' ? 'ج.م' : 'EGP'}</span>
                             {isFrozen ? (
                               <span className="text-[8px] bg-amber-100 text-amber-800 font-extrabold px-1.5 py-0.5 rounded">
                                 {lang === 'ar' ? 'موقوف مؤقتاً' : 'Frozen'}
@@ -1910,30 +1904,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'التقييم' : 'Rating'}</p>
                             <p className="font-bold text-slate-700 mt-0.5">{rider.rating?.toFixed(1) ?? '5.0'}</p>
                           </div>
-                          <div>
-                            <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'الرصيد' : 'Balance'}</p>
-                            <p className="font-bold text-indigo-700 mt-0.5">{rider.balance.toFixed(2)}</p>
-                          </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-1.5 text-[9px] font-bold">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedRiderForBalance(rider);
-                              setRiderBalanceInput('');
-                              setShowBalanceModal(true);
-                            }}
-                            className="py-1 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer pointer-events-auto text-center"
-                          >
-                            {lang === 'ar' ? '➕ إضافة رصيد' : '➕ Add Balance'}
-                          </button>
-
+                        <div className="grid grid-cols-1 gap-1.5 text-[9px] font-bold">
                           <a
                             href={`https://wa.me/${rider.phone.replace(/[^0-9]/g, '') || '201015555555'}?text=${encodeURIComponent(
                               lang === 'ar'
-                                ? `مرحباً ${rider.name}، رصيدك الحالي في تطبيق كابتن عز هو ${rider.balance.toFixed(2)} ج.م.`
-                                : `Hello ${rider.name}, your current balance in Ezz App is ${rider.balance.toFixed(2)} EGP.`
+                                ? `مرحباً ${rider.name}، كيف يمكننا مساعدتك؟`
+                                : `Hello ${rider.name}, how can we help you?`
                             )}`}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -3256,72 +3234,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             </div>
           </div>
          )}
-       </div>
-
-       {/* Floating Balance Add Modal */}
-       {showBalanceModal && selectedRiderForBalance && (
-         <div
-           onClick={() => setShowBalanceModal(false)}
-           className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex flex-col items-center justify-center p-4 pointer-events-auto cursor-pointer animate-fade-in"
-         >
-           <div
-             onClick={(e) => e.stopPropagation()}
-             className="bg-white rounded-3xl p-5 max-w-sm w-full shadow-2xl flex flex-col space-y-3 cursor-default"
-           >
-             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-               <h3 className="text-xs font-black text-slate-800">
-                 {lang === 'ar' ? 'إضافة رصيد للراكب' : 'Add Balance to Rider'}
-               </h3>
-               <button
-                 onClick={() => setShowBalanceModal(false)}
-                 className="w-6 h-6 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold text-xs cursor-pointer pointer-events-auto"
-               >
-                 ✕
-               </button>
-             </div>
-
-             <div className="bg-slate-50 rounded-xl p-3 space-y-1 text-[10px]">
-               <p className="font-black text-slate-800">{selectedRiderForBalance.name}</p>
-               <p className="text-slate-500">📞 {selectedRiderForBalance.phone}</p>
-               <p className="text-indigo-700 font-bold">
-                 {lang === 'ar' ? 'الرصيد الحالي:' : 'Current Balance:'} {selectedRiderForBalance.balance.toFixed(2)} {lang === 'ar' ? 'ج.م' : 'EGP'}
-               </p>
-             </div>
-
-             <div className="space-y-1">
-               <label className="text-[10px] font-bold text-slate-500 block">
-                 {lang === 'ar' ? 'قيمة الإضافة (ج.م)' : 'Amount to add (EGP)'}
-               </label>
-               <input
-                 type="number"
-                 min="0"
-                 step="0.5"
-                 value={riderBalanceInput}
-                 onChange={(e) => setRiderBalanceInput(e.target.value)}
-                 className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-indigo-500"
-                 placeholder="0.00"
-               />
-             </div>
-
-             <button
-               type="button"
-               onClick={async () => {
-                 const amount = parseFloat(riderBalanceInput);
-                 if (isNaN(amount) || amount <= 0) {
-                   alert(lang === 'ar' ? 'يرجى إدخال قيمة صحيحة' : 'Please enter a valid amount');
-                   return;
-                 }
-                 await onAddBalanceToRider(selectedRiderForBalance.id, amount);
-                 setShowBalanceModal(false);
-                 setRiderBalanceInput('');
-               }}
-               className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-xl transition-colors cursor-pointer pointer-events-auto"
-             >
-               {lang === 'ar' ? 'تأكيد الإضافة' : 'Confirm Add Balance'}
-             </button>
-           </div>
-         </div>
-       )}
-     </div>
-  );
-};
+        </div>
+      </div>
+    );
+  };

@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 import fs from 'fs';
+import {VitePWA} from 'vite-plugin-pwa';
 
 // Load ORS key from .env for the dev proxy (avoids browser CORS issues)
 const envRaw = fs.existsSync('.env') ? fs.readFileSync('.env', 'utf-8') : '';
@@ -11,20 +12,40 @@ const ORS_KEY = orsKeyMatch ? orsKeyMatch.split('=')[1].trim() : '';
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      VitePWA({
+        registerType: 'autoUpdate',
+        includeAssets: ['ezz_taxi_icon.jpg', 'favicon.ico'],
+        manifest: './public/manifest.json',
+        devOptions: {
+          enabled: true,
+        },
+      }),
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-supabase': ['@supabase/supabase-js'],
+            'vendor-maps': ['lucide-react'],
+            'vendor-utils': ['motion'],
+          },
+        },
+      },
+      chunkSizeWarningLimit: 800,
+    },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
-      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
-        // Proxy ORS through the dev server to bypass browser CORS restrictions
         '/api/ors': {
           target: 'https://api.openrouteservice.org',
           changeOrigin: true,

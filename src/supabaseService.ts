@@ -71,7 +71,6 @@ CREATE TABLE IF NOT EXISTS ezz_riders (
   name TEXT NOT NULL,
   phone TEXT NOT NULL UNIQUE,
   password TEXT,
-  balance DOUBLE PRECISION DEFAULT 0,
   rating DOUBLE PRECISION DEFAULT 5.0,
   total_trips INTEGER DEFAULT 0,
   approval_status TEXT DEFAULT 'APPROVED',
@@ -109,10 +108,18 @@ CREATE TABLE IF NOT EXISTS ezz_drivers (
   current_x DOUBLE PRECISION DEFAULT 50,
   current_y DOUBLE PRECISION DEFAULT 50,
   agreed_to_terms BOOLEAN DEFAULT false,
-  last_seen TEXT DEFAULT NOW()::TEXT
+  last_seen TEXT DEFAULT NOW()::TEXT,
+  service_areas TEXT[] DEFAULT '{}',
+  auto_accept BOOLEAN DEFAULT false,
+  auto_show_map BOOLEAN DEFAULT false,
+  fcm_token TEXT
 );
 
 ALTER TABLE ezz_drivers ADD COLUMN IF NOT EXISTS last_seen TEXT DEFAULT NOW()::TEXT;
+ALTER TABLE ezz_drivers ADD COLUMN IF NOT EXISTS service_areas TEXT[] DEFAULT '{}';
+ALTER TABLE ezz_drivers ADD COLUMN IF NOT EXISTS auto_accept BOOLEAN DEFAULT false;
+ALTER TABLE ezz_drivers ADD COLUMN IF NOT EXISTS auto_show_map BOOLEAN DEFAULT false;
+ALTER TABLE ezz_drivers ADD COLUMN IF NOT EXISTS fcm_token TEXT;
 
 -- ============================================================
 -- 4. جدول الرحلة الحالية النشطة
@@ -346,6 +353,7 @@ CREATE POLICY "Allow public delete ads" ON ads FOR DELETE USING (true);
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_drivers_status ON ezz_drivers(status, approval_status, is_online);
 CREATE INDEX IF NOT EXISTS idx_drivers_phone ON ezz_drivers(phone);
+CREATE INDEX IF NOT EXISTS idx_drivers_service_areas ON ezz_drivers USING GIN(service_areas);
 CREATE INDEX IF NOT EXISTS idx_riders_phone ON ezz_riders(phone);
 CREATE INDEX IF NOT EXISTS idx_trips_status ON ezz_trips_history(status);
 CREATE INDEX IF NOT EXISTS idx_trips_rider ON ezz_trips_history(rider_id);
@@ -354,8 +362,9 @@ CREATE INDEX IF NOT EXISTS idx_trips_created ON ezz_trips_history(created_at);
 CREATE INDEX IF NOT EXISTS idx_admin_phone ON ezz_admin(phone);
 
 -- ============================================================
--- تفعيل RLS مع Policies تسمح بالعمليات المباشرة من العميل
--- ملاحظة: بما أننا نستخدم anon key من العميل مباشرة، نسمح بالعمليات الكاملة
+-- تفعيل RLS مع Policies محسنة للأمان
+-- ملاحظة: بما أننا نستخدم anon key من العميل مباشرة،
+-- نعزل البيانات حسب role عبر جدول sessions
 -- ============================================================
 ALTER TABLE IF EXISTS ezz_locations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS ezz_riders ENABLE ROW LEVEL SECURITY;
@@ -368,87 +377,139 @@ ALTER TABLE IF EXISTS ezz_audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS ezz_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS ezz_regions ENABLE ROW LEVEL SECURITY;
 
--- Locations: الجميع يقرأ ويعدل
+-- Locations: القراءة للجميع، الكتابة للإدمن فقط
 DROP POLICY IF EXISTS "Allow public read locations" ON ezz_locations;
-CREATE POLICY "Allow public read locations" ON ezz_locations FOR SELECT USING (true);
+CREATE POLICY "public_read_locations" ON ezz_locations FOR SELECT USING (true);
 DROP POLICY IF EXISTS "Allow public write locations" ON ezz_locations;
-CREATE POLICY "Allow public write locations" ON ezz_locations FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow public update locations" ON ezz_locations FOR UPDATE USING (true);
-CREATE POLICY "Allow public delete locations" ON ezz_locations FOR DELETE USING (true);
+DROP POLICY IF EXISTS "Allow public update locations" ON ezz_locations;
+DROP POLICY IF EXISTS "Allow public delete locations" ON ezz_locations;
+CREATE POLICY "admin_write_locations" ON ezz_locations FOR ALL TO anon USING (
+  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+) WITH CHECK (true);
 
--- Regions: الجميع يقرأ ويعدل (الإدارة تضيف المناطق)
+-- Regions: القراءة للجميع، الكتابة للإدمن فقط
 DROP POLICY IF EXISTS "Allow public read regions" ON ezz_regions;
-CREATE POLICY "Allow public read regions" ON ezz_regions FOR SELECT USING (true);
+CREATE POLICY "public_read_regions" ON ezz_regions FOR SELECT USING (true);
 DROP POLICY IF EXISTS "Allow public write regions" ON ezz_regions;
-CREATE POLICY "Allow public write regions" ON ezz_regions FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow public update regions" ON ezz_regions FOR UPDATE USING (true);
-CREATE POLICY "Allow public delete regions" ON ezz_regions FOR DELETE USING (true);
+DROP POLICY IF EXISTS "Allow public update regions" ON ezz_regions;
+DROP POLICY IF EXISTS "Allow public delete regions" ON ezz_regions;
+CREATE POLICY "admin_write_regions" ON ezz_regions FOR ALL TO anon USING (
+  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+) WITH CHECK (true);
 
--- Riders: الجميع يقرأ ويعدل
+-- Riders: القراءة للجميع، التعديل لمالك الحساب أو الإدمن
 DROP POLICY IF EXISTS "Allow public read riders" ON ezz_riders;
-CREATE POLICY "Allow public read riders" ON ezz_riders FOR SELECT USING (true);
+CREATE POLICY "public_read_riders" ON ezz_riders FOR SELECT USING (true);
 DROP POLICY IF EXISTS "Allow public write riders" ON ezz_riders;
-CREATE POLICY "Allow public write riders" ON ezz_riders FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow public update riders" ON ezz_riders FOR UPDATE USING (true);
-CREATE POLICY "Allow public delete riders" ON ezz_riders FOR DELETE USING (true);
+CREATE POLICY "anon_insert_riders" ON ezz_riders FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow public update riders" ON ezz_riders;
+CREATE POLICY "rider_update_own" ON ezz_riders FOR UPDATE TO anon USING (
+  id IN (SELECT user_id FROM ezz_sessions WHERE role = 'RIDER')
+);
+CREATE POLICY "admin_update_riders" ON ezz_riders FOR UPDATE TO anon USING (
+  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+);
+DROP POLICY IF EXISTS "Allow public delete riders" ON ezz_riders;
+CREATE POLICY "admin_delete_riders" ON ezz_riders FOR DELETE TO anon USING (
+  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+);
 
--- Drivers: الجميع يقرأ السائقين الموثقين، ويعدل
+-- Drivers: السائقين الموثقين فقط للقراءة العامة
 DROP POLICY IF EXISTS "Allow public read approved drivers" ON ezz_drivers;
-CREATE POLICY "Allow public read approved drivers" ON ezz_drivers FOR SELECT USING (approval_status = 'APPROVED');
+CREATE POLICY "public_read_approved_drivers" ON ezz_drivers FOR SELECT USING (approval_status = 'APPROVED');
 DROP POLICY IF EXISTS "Allow public write drivers" ON ezz_drivers;
-CREATE POLICY "Allow public write drivers" ON ezz_drivers FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow public update drivers" ON ezz_drivers FOR UPDATE USING (true);
-CREATE POLICY "Allow public delete drivers" ON ezz_drivers FOR DELETE USING (true);
+CREATE POLICY "anon_insert_drivers" ON ezz_drivers FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow public update drivers" ON ezz_drivers;
+CREATE POLICY "driver_update_own" ON ezz_drivers FOR UPDATE TO anon USING (
+  id IN (SELECT user_id FROM ezz_sessions WHERE role = 'DRIVER')
+);
+CREATE POLICY "admin_update_drivers" ON ezz_drivers FOR UPDATE TO anon USING (
+  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+);
+DROP POLICY IF EXISTS "Allow public delete drivers" ON ezz_drivers;
+CREATE POLICY "admin_delete_drivers" ON ezz_drivers FOR DELETE TO anon USING (
+  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+);
 
--- Active trips: يسمح بالقراءة (مطلوب لـ Realtime والسائق يشوف الرحلة)، مسموح بالكتابة
+-- Active Trip: القراءة للجميع (مطلوب لـ Realtime)، الكتابة للجميع
 DROP POLICY IF EXISTS "Deny anon read active_trip" ON ezz_active_trip;
-CREATE POLICY "Allow anon read active_trip" ON ezz_active_trip FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow anon read active_trip" ON ezz_active_trip;
+CREATE POLICY "anon_read_active_trip" ON ezz_active_trip FOR SELECT USING (true);
 DROP POLICY IF EXISTS "Allow public write active_trip" ON ezz_active_trip;
-CREATE POLICY "Allow public write active_trip" ON ezz_active_trip FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow public update active_trip" ON ezz_active_trip FOR UPDATE USING (true);
-CREATE POLICY "Allow public delete active_trip" ON ezz_active_trip FOR DELETE USING (true);
+CREATE POLICY "anon_write_active_trip" ON ezz_active_trip FOR ALL TO anon USING (true) WITH CHECK (true);
 
 -- تفعيل Realtime على جدول الرحلة النشطة (مطلوب لوصول الطلب للسائق فوراً)
 ALTER PUBLICATION supabase_realtime ADD TABLE ezz_active_trip;
 
--- Trips history: الجميع يقرأ (مطلوب للوحة الإدارة)، مسموح بالكتابة
+-- Trips History: الإدمن يقرأ الكل، Rider/Sdriver يقرأ سجلهم فقط
 DROP POLICY IF EXISTS "Allow public read trips_history" ON ezz_trips_history;
-CREATE POLICY "Allow public read trips_history" ON ezz_trips_history FOR SELECT USING (true);
+CREATE POLICY "rider_read_own_trips" ON ezz_trips_history FOR SELECT TO anon USING (
+  rider_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'RIDER')
+);
+CREATE POLICY "driver_read_own_trips" ON ezz_trips_history FOR SELECT TO anon USING (
+  driver_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'DRIVER')
+);
+CREATE POLICY "admin_read_all_trips" ON ezz_trips_history FOR SELECT TO anon USING (
+  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+);
 DROP POLICY IF EXISTS "Allow public write trips_history" ON ezz_trips_history;
-CREATE POLICY "Allow public write trips_history" ON ezz_trips_history FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow public update trips_history" ON ezz_trips_history FOR UPDATE USING (true);
-CREATE POLICY "Allow public delete trips_history" ON ezz_trips_history FOR DELETE USING (true);
+CREATE POLICY "anon_write_trips_history" ON ezz_trips_history FOR ALL TO anon USING (true) WITH CHECK (true);
 
--- Stats: الجميع يقرأ ويعدل
+-- Stats: القراءة للجميع، التعديل للإدمن فقط
 DROP POLICY IF EXISTS "Allow public read stats" ON ezz_stats;
-CREATE POLICY "Allow public read stats" ON ezz_stats FOR SELECT USING (true);
+CREATE POLICY "public_read_stats" ON ezz_stats FOR SELECT USING (true);
 DROP POLICY IF EXISTS "Allow public write stats" ON ezz_stats;
-CREATE POLICY "Allow public write stats" ON ezz_stats FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow public update stats" ON ezz_stats FOR UPDATE USING (true);
-CREATE POLICY "Allow public delete stats" ON ezz_stats FOR DELETE USING (true);
+DROP POLICY IF EXISTS "Allow public update stats" ON ezz_stats;
+DROP POLICY IF EXISTS "Allow public delete stats" ON ezz_stats;
+CREATE POLICY "admin_write_stats" ON ezz_stats FOR ALL TO anon USING (
+  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+) WITH CHECK (true);
 
--- Admin: يسمح بالقراءة والكتابة (للتوثيق وتعديل البيانات)
+-- Admin: الإدمن فقط يقرأ ويكتب
 DROP POLICY IF EXISTS "Allow public read admin" ON ezz_admin;
-CREATE POLICY "Allow public read admin" ON ezz_admin FOR SELECT USING (true);
+CREATE POLICY "admin_read_admin" ON ezz_admin FOR SELECT TO anon USING (
+  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+);
 DROP POLICY IF EXISTS "Allow public write admin" ON ezz_admin;
-CREATE POLICY "Allow public write admin" ON ezz_admin FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow public update admin" ON ezz_admin FOR UPDATE USING (true);
+DROP POLICY IF EXISTS "Allow public update admin" ON ezz_admin;
 DROP POLICY IF EXISTS "Allow public delete admin" ON ezz_admin;
-CREATE POLICY "Allow public delete admin" ON ezz_admin FOR DELETE USING (true);
+CREATE POLICY "admin_write_admin" ON ezz_admin FOR ALL TO anon USING (
+  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+) WITH CHECK (true);
 
--- Audit logs: ممنوع القراءة العامة، مسموح بالكتابة
+-- Audit Logs: الإدمن فقط يقرأ، الجميع يكتب
 DROP POLICY IF EXISTS "Deny anon read audit_logs" ON ezz_audit_logs;
-CREATE POLICY "Deny anon read audit_logs" ON ezz_audit_logs FOR SELECT USING (false);
+CREATE POLICY "admin_read_audit_logs" ON ezz_audit_logs FOR SELECT TO anon USING (
+  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+);
 DROP POLICY IF EXISTS "Allow public write audit_logs" ON ezz_audit_logs;
-CREATE POLICY "Allow public write audit_logs" ON ezz_audit_logs FOR INSERT WITH CHECK (true);
+CREATE POLICY "anon_write_audit_logs" ON ezz_audit_logs FOR INSERT TO anon WITH CHECK (true);
 
--- Sessions: يسمح بالقراءة والكتابة (تسجيل الدخول يبقى بعد التحديث)
+-- Sessions: القراءة والكتابة للتسجيل
 DROP POLICY IF EXISTS "Allow public read sessions" ON ezz_sessions;
-CREATE POLICY "Allow public read sessions" ON ezz_sessions FOR SELECT USING (true);
+CREATE POLICY "anon_read_sessions" ON ezz_sessions FOR SELECT USING (true);
 DROP POLICY IF EXISTS "Allow public write sessions" ON ezz_sessions;
-CREATE POLICY "Allow public write sessions" ON ezz_sessions FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow public update sessions" ON ezz_sessions FOR UPDATE USING (true);
-CREATE POLICY "Allow public delete sessions" ON ezz_sessions FOR DELETE USING (true);
+CREATE POLICY "anon_write_sessions" ON ezz_sessions FOR ALL TO anon USING (true) WITH CHECK (true);
+
+-- Promo Codes: القراءة للكودات النشطة، الكتابة للإدمن
+DROP POLICY IF EXISTS "Allow anon read promo_codes" ON ezz_promo_codes;
+CREATE POLICY "public_read_active_promo_codes" ON ezz_promo_codes FOR SELECT USING (is_active = true);
+DROP POLICY IF EXISTS "Allow anon insert promo_codes" ON ezz_promo_codes;
+DROP POLICY IF EXISTS "Allow anon update promo_codes" ON ezz_promo_codes;
+DROP POLICY IF EXISTS "Allow anon delete promo_codes" ON ezz_promo_codes;
+CREATE POLICY "admin_write_promo_codes" ON ezz_promo_codes FOR ALL TO anon USING (
+  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+) WITH CHECK (true);
+
+-- Ads: القراءة للإعلانات النشطة، الكتابة للإدمن
+DROP POLICY IF EXISTS "Allow public read ads" ON ads;
+CREATE POLICY "public_read_ads" ON ads FOR SELECT USING (is_active = true);
+DROP POLICY IF EXISTS "Allow public write ads" ON ads;
+DROP POLICY IF EXISTS "Allow public update ads" ON ads;
+DROP POLICY IF EXISTS "Allow public delete ads" ON ads;
+CREATE POLICY "admin_write_ads" ON ads FOR ALL TO anon USING (
+  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+) WITH CHECK (true);
 `;
 
 // --- DRIVER TRANSFORMS ---
@@ -533,7 +594,6 @@ export const mapRiderFromDB = (row: any): Rider => ({
   name: row.name,
   phone: row.phone,
   password: row.password,
-  balance: row.balance || 0,
   rating: row.rating || 5.0,
   totalTrips: row.total_trips || 0,
   approvalStatus: row.approval_status || 'APPROVED',
@@ -546,7 +606,6 @@ export const mapRiderToDB = (r: Rider) => {
     name: r.name,
     phone: r.phone,
     password: r.password,
-    balance: r.balance,
     rating: r.rating || 5.0,
     total_trips: r.totalTrips || 0,
   } as any;
@@ -767,7 +826,7 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
     let query = supabase.from('ezz_active_trip').select('*').order('created_at', { ascending: false });
 
     if (userId && userRole === 'rider') {
-      query = query.eq('rider_id', userId);
+      query = query.eq('rider_id', userId).in('status', ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED']);
     } else if (userId && userRole === 'driver') {
       // Fetch trips where this driver is assigned, current offered, OR in the offered list.
       // PostgREST .or() can't check JSONB containment, so we fetch by driver_id/current_offered
@@ -1512,16 +1571,25 @@ export const saveSession = async (role: 'RIDER' | 'DRIVER' | 'ADMIN', userId: st
       localStorage.setItem('ezz_device_id', deviceId);
     } catch {}
 
-    const id = `session_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    const { error } = await supabase.from('ezz_sessions').upsert({
-      id,
-      role,
-      user_id: userId,
-      device_id: deviceId,
-      updated_at: new Date().toISOString(),
-    });
-    if (error) throw error;
-    return true;
+  // Allow at most one active session per (role, user_id).
+  const { error: deleteError } = await supabase
+    .from('ezz_sessions')
+    .delete()
+    .eq('role', role)
+    .eq('user_id', userId);
+  if (deleteError) throw deleteError;
+
+  const id = `session_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const { error } = await supabase.from('ezz_sessions').insert({
+    id,
+    role,
+    user_id: userId,
+    device_id: deviceId,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+  localStorage.setItem(`ezz_session_${role.toLowerCase()}`, JSON.stringify({ userId, deviceId, updatedAt: new Date().toISOString() }));
+  return true;
   } catch (err: any) {
     console.warn('Could not save session to Supabase:', err.message);
     return false;
@@ -1737,5 +1805,35 @@ export const incrementAdImpression = async (id: string): Promise<void> => {
     await supabase.rpc('increment_ad_impression', { ad_id: id });
   } catch (err: any) {
     console.warn('incrementAdImpression failed:', err.message);
+  }
+};
+
+export const sendNewTripNotification = async (params: {
+  tripId: string;
+  origin?: string;
+  destination?: string;
+  fare?: number;
+  distance?: number;
+}): Promise<{ sent: number; results: any[] }> => {
+  try {
+    const { data, error } = await supabase.functions.invoke('send-fcm-notification', {
+      body: {
+        tripId: params.tripId,
+        origin: params.origin,
+        destination: params.destination,
+        fare: params.fare,
+        distance: params.distance,
+      },
+    });
+
+    if (error) {
+      console.warn('sendNewTripNotification Edge Function error:', error.message);
+      return { sent: 0, results: [] };
+    }
+
+    return data as { sent: number; results: any[] };
+  } catch (err: any) {
+    console.warn('sendNewTripNotification failed:', err.message);
+    return { sent: 0, results: [] };
   }
 };

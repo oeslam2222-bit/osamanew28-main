@@ -1,6 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = 'https://hntqgrybbtydtgkinscw.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhudHFncnliYnR5ZHRna2luc2N3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1Mjc3ODMsImV4cCI6MjA5OTEwMzc4M30.UHRHAz-iWykzlF4fA8AP2VbNkcj1jMVnQq1p14EbDJk';
+const rawUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined) || '';
+const rawKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || '';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const missing = [rawUrl ? '' : 'VITE_SUPABASE_URL', rawKey ? '' : 'VITE_SUPABASE_ANON_KEY'].filter(Boolean);
+if (missing.length > 0) {
+  console.warn(`[Supabase] Missing env: ${missing.join(', ')}. App will run in offline mode.`);
+}
+
+export const supabase = createClient(rawUrl || 'https://placeholder.supabase.co', rawKey || 'placeholder-key');
