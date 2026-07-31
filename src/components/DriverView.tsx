@@ -1014,7 +1014,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                     onClick={onTripCompleted}
                     className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg shadow-sm transition-colors cursor-pointer pointer-events-auto"
                   >
-                    {lang === 'ar' ? '🏠 العودة للصفحة الرئيسية' : '🏠 Return to Home'}
+                    {lang === 'ar' ? '✅ متابعة واستقبال طلبات جديدة' : '✅ Continue & await new rides'}
                   </button>
                 )}
               </div>

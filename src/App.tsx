@@ -1909,6 +1909,9 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [activeTrip?.status, activeTrip?.id]);
 
+  // NOTE: handleTripCompleted keeps the user on their dashboard (RIDER/DRIVER)
+  // so they can immediately start the next ride. It no longer navigates HOME.
+
   // Handler: Request Ride with dynamic commission rate calculation by mileage (distance-based commission request)
   const fetchEligibleDriversForRegion = async (regionId?: string): Promise<Driver[]> => {
     const now = Date.now();
@@ -2636,8 +2639,11 @@ export default function App() {
           if (d.id !== driverId) return d;
           return {
             ...d,
-            status: 'OFFLINE' as const,
-            isOnline: false,
+            // Keep the driver ONLINE and AVAILABLE after the trip ends so they
+            // can immediately receive the next ride request without having to
+            // go online again.
+            status: 'AVAILABLE' as const,
+            isOnline: true,
             totalTrips: d.totalTrips + 1,
             totalEarnings: d.totalEarnings + netEarnings,
             totalCommissionPaid: d.totalCommissionPaid + commission,
@@ -2704,24 +2710,33 @@ export default function App() {
     }
   };
 
-// Handler: Trip completed — skip rating, return driver to home
-    const handleTripCompleted = () => {
-      if (!activeTrip) return;
+// Handler: Trip completed — keep the user on their dashboard so the
+// driver can receive new ride requests and the rider can book again.
+const handleTripCompleted = () => {
+  if (!activeTrip) return;
 
-      const capturedId = activeTrip.id;
-      dismissedTripIdsRef.current.add(capturedId);
+  const capturedId = activeTrip.id;
+  dismissedTripIdsRef.current.add(capturedId);
 
-      setActiveTripWithTracking(null);
-      setNoAvailableDrivers(false);
+  setActiveTripWithTracking(null);
+  setNoAvailableDrivers(false);
 
-      if (supabaseConnected) {
-        saveActiveTrip(null).then((ok) => {
-          console.log('[handleTripCompleted] Cleared active trip, result:', ok);
-        });
-      }
+  if (supabaseConnected) {
+    saveActiveTrip(null).then((ok) => {
+      console.log('[handleTripCompleted] Cleared active trip, result:', ok);
+    });
+  }
 
-      setCurrentScreen('HOME');
-    };
+  // Do NOT navigate back to HOME. The driver stays on DRIVER_DASHBOARD
+  // (ready to receive the next request) and the rider stays on
+  // RIDER_DASHBOARD (ready to book the next trip).
+  const completedByDriver = driverIsLoggedIn;
+  if (completedByDriver) {
+    setCurrentScreen('DRIVER_DASHBOARD');
+  } else {
+    setCurrentScreen('RIDER_DASHBOARD');
+  }
+};
 
   const handleUpdateCommissionRate = (rate: number) => {
     setStats((prev) => ({ ...prev, commissionRate: rate }));

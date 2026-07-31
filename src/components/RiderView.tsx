@@ -1031,13 +1031,13 @@ export const RiderView: React.FC<RiderViewProps> = ({
                  ? `شكراً لاستخدامك كابتن عز. المبلغ المستحق: ${activeTrip.fare} ج.م`
                  : `Thank you for using Captain Ezz. Amount due: ${activeTrip.fare} EGP`}
              </p>
-             {onTripCompleted && (
+            {onTripCompleted && (
                <button
                  type="button"
                  onClick={onTripCompleted}
                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer pointer-events-auto"
                >
-                 {lang === 'ar' ? '🏠 العودة للصفحة الرئيسية' : '🏠 Return to Home'}
+                 {lang === 'ar' ? '✅ متابعة وطلب رحلة جديدة' : '✅ Continue & book a new ride'}
                </button>
              )}
            </div>
