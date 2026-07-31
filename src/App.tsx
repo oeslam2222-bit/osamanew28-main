@@ -2,9 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ErrorBoundary from './components/ErrorBoundary';
 import NetworkStatusBar from './components/NetworkStatusBar';
 import InitializingOverlay from './components/InitializingOverlay';
-import NotificationSettings from './components/NotificationSettings';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
-import { loadNotificationSettings, NotificationSettings as NotificationSettingsType } from './utils/notificationSettings';
 import { Location, Driver, Trip, Rider, SystemStats, TripStatus, Region, Ad } from './types';
 import { RiderView } from './components/RiderView';
 import { DriverView } from './components/DriverView';
@@ -59,7 +57,6 @@ import {
   notifyRideRequest,
   unlockAudioContext,
   isNotificationRateLimited,
-  setNotificationSettings,
 } from './utils/notifications';
 import { getFCMToken, onFCMForegroundMessage } from './firebase';
 import {
@@ -127,6 +124,7 @@ export default function App() {
   const lastTripCompletedRef = useRef(false);
   const lastTripCancelledRef = useRef(false);
   const cancelInProgressRef = useRef(false);
+  const pendingDriverToggleRef = useRef<string | null>(null);
   const [noAvailableDrivers, setNoAvailableDrivers] = useState(false);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [tripsHistory, setTripsHistory] = useState<Trip[]>([]);
@@ -497,12 +495,6 @@ export default function App() {
   const [selectedDriverId, setSelectedDriverId] = useState<string>('drv_1');
 
   const networkConnected = useNetworkStatus();
-  const [notificationSettings, setNotificationSettingsState] = useState<NotificationSettingsType>(loadNotificationSettings);
-
-  useEffect(() => {
-    setNotificationSettings(notificationSettings);
-  }, [notificationSettings]);
-
   const lastNavDriverLatRef = useRef<number | null>(null);
   const lastNavDriverLngRef = useRef<number | null>(null);
   const lastLocationSavedAtRef = useRef<Record<string, number>>({});
@@ -1201,6 +1193,7 @@ export default function App() {
           const currentTrip = activeTripRefForPolling.current;
           setDrivers((localDrivers) => {
             return remoteDrivers.map((rd) => {
+              if (pendingDriverToggleRef.current === rd.id) return rd;
               const ld = localDrivers.find((l) => l.id === rd.id);
               if (ld) {
                 const isActiveTripDriver = currentTrip && currentTrip.driverId === rd.id && (currentTrip.status === 'ACCEPTED' || currentTrip.status === 'STARTED');
@@ -1892,7 +1885,7 @@ export default function App() {
   useEffect(() => {
     if (!activeTrip || activeTrip.status !== 'STARTED') return;
     const timer = setTimeout(() => {
-      handleRateDriver(5, ['good', 'safe'], 'Auto-completed trip');
+      handleTripCompleted();
     }, 120000);
     return () => clearTimeout(timer);
   }, [activeTrip?.status, activeTrip?.id]);
@@ -2379,6 +2372,7 @@ export default function App() {
 
   // Handler: Driver Toggle Online
   const handleToggleOnline = (driverId: string) => {
+    pendingDriverToggleRef.current = driverId;
     setDrivers((prev) => {
       const updated = prev.map((d) => {
         if (d.id !== driverId) return d;
@@ -2387,10 +2381,20 @@ export default function App() {
       });
       const driver = updated.find((d) => d.id === driverId);
       if (driver && supabaseConnected) {
-        saveDriver(driver);
+        saveDriver(driver).then((ok) => {
+          if (ok) {
+            console.log('[handleToggleOnline] Driver status saved:', driverId, driver.isOnline ? 'online' : 'offline');
+          } else {
+            console.warn('[handleToggleOnline] Failed to save driver status:', driverId);
+          }
+          pendingDriverToggleRef.current = null;
+        });
       }
       return updated;
     });
+    setTimeout(() => {
+      pendingDriverToggleRef.current = null;
+    }, 10000);
   };
 
   const handleUpdateDriverLocation = (driverId: string, lat: number, lng: number, x: number, y: number) => {
@@ -2757,163 +2761,24 @@ export default function App() {
     }
   };
 
-    // Handler: Rider rates driver
-   const handleRateDriver = (rating: number, tags?: string[], comment?: string) => {
-     if (!activeTrip || !activeTrip.driverId) return;
+// Handler: Trip completed — skip rating, return driver to home
+    const handleTripCompleted = () => {
+      if (!activeTrip) return;
 
-     const { driverId } = activeTrip;
+      const capturedId = activeTrip.id;
+      dismissedTripIdsRef.current.add(capturedId);
 
-      // Update driver rating with proper average based on number of trips
-      setDrivers((prev) =>
-        prev.map((d) => {
-          if (d.id !== driverId) return d;
-          const totalTrips = d.totalTrips || 0;
-          const nextRating = totalTrips === 0
-            ? parseFloat(rating.toFixed(1))
-            : parseFloat(((d.rating * (totalTrips - 1) + rating) / totalTrips).toFixed(1));
-          const updatedDrv = {
-            ...d,
-            rating: nextRating,
-            totalTrips: totalTrips === 0 ? 1 : d.totalTrips,
-          };
-          if (supabaseConnected) {
-            saveDriver(updatedDrv);
-          }
-          return updatedDrv;
-        })
-      );
+      setActiveTripWithTracking(null);
+      setNoAvailableDrivers(false);
 
-     const updatedTrip: Trip = {
-       ...activeTrip,
-       riderRatingToDriver: rating,
-       riderFeedbackTags: tags,
-       riderFeedbackComment: comment,
-     };
+      if (supabaseConnected) {
+        saveActiveTrip(null).then((ok) => {
+          console.log('[handleTripCompleted] Cleared active trip, result:', ok);
+        });
+      }
 
-     setActiveTripWithTracking(updatedTrip);
-     setNoAvailableDrivers(false);
-
-     setTripsHistory((prev) =>
-       prev.map((t) => (t.id === updatedTrip.id ? updatedTrip : t))
-     );
-
-     if (supabaseConnected) {
-       saveActiveTrip(updatedTrip);
-       saveTripToHistory(updatedTrip);
-     }
-
-      // Announce rating to both driver and rider via speech
-      const driverName = activeTrip.driverName || 'الكابتن';
-      speakText(
-        lang === 'ar'
-          ? `شكراً لثقتك. لقد قمت بتقييم ${driverName} بـ ${rating} نجوم.`
-          : `Thank you for your trust. You rated ${driverName} ${rating} stars.`,
-        lang === 'ar' ? 'ar-EG' : 'en-US'
-      );
-
-      // Quiet internal rating acknowledgement
-      playNotificationSound('rating');
-      sendNativeNotification(
-        lang === 'ar' ? '⭐ شكراً لتقييمك' : '⭐ شكراً لتقييمك',
-        lang === 'ar'
-          ? `تقييمك م valued`
-          : `Your rating is valued`,
-        '⭐',
-        'rating-internal',
-      );
-
-       setTimeout(() => {
-         setCurrentScreen('HOME');
-         setActiveTripWithTracking(null);
-         setNoAvailableDrivers(false);
-         if (supabaseConnected) {
-           saveActiveTrip(null).then((ok) => {
-             console.log('[handleRateDriver] Cleared active trip from DB, result:', ok);
-           });
-         }
-       }, 1500);
+      setCurrentScreen('HOME');
     };
-
-   // Handler: Driver rates rider
-   const handleRateRider = (rating: number, tags?: string[], comment?: string) => {
-     if (!activeTrip) return;
-
-      // Update rider rating with proper average based on number of trips
-      setRider((prev) => {
-        const totalTrips = prev.totalTrips || 0;
-        const currentRating = prev.rating || 5.0;
-        const nextRating = totalTrips === 0
-          ? parseFloat(rating.toFixed(1))
-          : parseFloat(((currentRating * totalTrips + rating) / (totalTrips + 1)).toFixed(1));
-        const updatedRider = {
-          ...prev,
-          rating: nextRating,
-          totalTrips: totalTrips + 1,
-        };
-        if (supabaseConnected) {
-          saveRider(updatedRider);
-        }
-        return updatedRider;
-      });
-
-     const updatedTrip: Trip = {
-       ...activeTrip,
-       driverRatingToRider: rating,
-       driverFeedbackTags: tags,
-       driverFeedbackComment: comment,
-     };
-
-     setActiveTripWithTracking(updatedTrip);
-
-      setTripsHistory((prev) =>
-        prev.map((t) => (t.id === updatedTrip.id ? updatedTrip : t))
-      );
-
-       if (supabaseConnected) {
-         saveActiveTrip(updatedTrip);
-         saveTripToHistory(updatedTrip);
-       }
-
-       const capturedId = activeTrip.id;
-       dismissedTripIdsRef.current.add(capturedId);
-
-       // Announce rating to driver only (internal feedback)
-       const riderName = activeTrip.riderName || 'العميل';
-       speakText(
-         lang === 'ar'
-           ? `شكراً لتقييمك. لقد قمت بتقييم ${riderName} بـ ${rating} نجوم.`
-           : `Thank you for your rating. You rated ${riderName} ${rating} stars.`,
-         lang === 'ar' ? 'ar-EG' : 'en-US'
-       );
-
-       setTimeout(() => {
-         setActiveTripWithTracking(null);
-         setNoAvailableDrivers(false);
-         if (supabaseConnected) {
-           saveActiveTrip(null).then((ok) => {
-             console.log('[handleRateRider] Cleared active trip from DB, result:', ok);
-           });
-         }
-         if (driverIsLoggedIn) {
-           setCurrentScreen('DRIVER_DASHBOARD');
-         }
-       }, 2500);
-    };
-
-   // Handler: Dismiss completed trip and reset active view
-  const handleDismissCompletedTrip = () => {
-    if (activeTrip) {
-      dismissedTripIdsRef.current.add(activeTrip.id);
-      lastTripStatusBeforeNullRef.current = activeTrip.status;
-    } else {
-      lastTripStatusBeforeNullRef.current = null;
-    }
-    setActiveTripWithTracking(null);
-    setNoAvailableDrivers(false);
-    if (supabaseConnected) {
-      saveActiveTrip(null);
-    }
-  };
 
   const handleUpdateCommissionRate = (rate: number) => {
     setStats((prev) => ({ ...prev, commissionRate: rate }));
@@ -3433,10 +3298,9 @@ export default function App() {
 
    return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-amber-400 selection:text-black">
-      <NetworkStatusBar isOnline={networkConnected} isConnected={supabaseConnected} lang={lang} />
-      <InitializingOverlay isInitializing={isInitializing} lang={lang} />
-      <NotificationSettings lang={lang} onSettingsChange={setNotificationSettingsState} />
-      {/* Top Header */}
+<NetworkStatusBar isOnline={networkConnected} isConnected={supabaseConnected} lang={lang} />
+       <InitializingOverlay isInitializing={isInitializing} lang={lang} />
+       {/* Top Header */}
       <header className="bg-slate-950 border-b border-slate-800 py-3.5 px-4 md:px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shrink-0">
         <div>
           <div className="flex items-center gap-2">
@@ -3978,10 +3842,9 @@ export default function App() {
                        setSelectedPickupRegion={setSelectedPickupRegion}
                        setSelectedPickup={setSelectedPickup}
                        setSelectedDropoff={setSelectedDropoff}
-                         onRequestRide={handleRequestRide}
-                         onCancelRide={handleCancelRide}
-                         onDismissCompletedTrip={handleDismissCompletedTrip}
-                         onRateDriver={handleRateDriver}
+onRequestRide={handleRequestRide}
+                          onCancelRide={handleCancelRide}
+                          onTripCompleted={handleTripCompleted}
                          onConfirmArrival={handleRiderConfirmArrival}
                         onUpdateLocations={setLocations}
                        lang={lang}
@@ -4420,8 +4283,7 @@ export default function App() {
                      onArrivedAtPickup={handleArrivedAtPickup}
                      onStartTrip={handleStartTrip}
                      onEndTrip={handleEndTrip}
-                     onRateRider={handleRateRider}
-                     onDismissCompletedTrip={handleDismissCompletedTrip}
+onTripCompleted={handleTripCompleted}
                      lang={lang}
                      onSendChatMessage={handleSendChatMessage}
                      stats={stats}

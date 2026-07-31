@@ -8,10 +8,6 @@ let currentNotificationSettings: NotificationSettingsType = {
   volume: 0.8,
 };
 
-export const setNotificationSettings = (settings: NotificationSettingsType) => {
-  currentNotificationSettings = settings;
-};
-
 const shouldNotify = (): boolean => {
   return currentNotificationSettings.enabled;
 };
@@ -627,6 +623,7 @@ export const notifyRideRequest = (title: string, body: string, lang = 'ar-EG') =
   const isAr = lang === 'ar-EG';
 
   try {
+    unlockAudioContext();
     const ctx = getAudioContext();
     if (ctx.state === 'suspended') {
       ctx.resume().catch(() => {});

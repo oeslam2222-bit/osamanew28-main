@@ -23,10 +23,9 @@ interface DriverViewProps {
   onRejectTrip: () => void;
   onArrivedAtPickup: () => void;
   onStartTrip: () => void;
-  onEndTrip: () => void;
+onEndTrip: () => void;
   onTransferTrip?: () => void;
-  onRateRider: (rating: number, tags: string[], comment?: string) => void;
-  onDismissCompletedTrip?: () => void;
+  onTripCompleted: () => void;
   lang: 'ar' | 'en';
   onSendChatMessage: (text: string, sender: 'RIDER' | 'DRIVER') => void;
   onLogout: () => void;
@@ -60,8 +59,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
   onStartTrip,
   onEndTrip,
   onTransferTrip,
-  onRateRider,
-  onDismissCompletedTrip,
+  onTripCompleted,
   lang,
   onSendChatMessage,
   onLogout,
@@ -148,9 +146,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
   }, [currentDriverId, activeTrip?.id, activeTrip?.driverId]);
 
   const [chatText, setChatText] = useState('');
-  const [driverGivenRating, setDriverGivenRating] = useState(5);
-  const [driverSelectedTags, setDriverSelectedTags] = useState<string[]>([]);
-  const [driverComment, setDriverComment] = useState('');
+  
 
   // Navigation state
   const [navigationRoute, setNavigationRoute] = useState<RouteResult | null>(null);
@@ -1009,113 +1005,14 @@ export const DriverView: React.FC<DriverViewProps> = ({
                   )}
                 </div>
 
-                {!activeTrip.driverRatingToRider ? (
-                  <div className="space-y-3 border-t border-emerald-100/60 pt-2 text-right">
-                    <p className="text-[10px] font-bold text-slate-500 text-center uppercase">
-                      {lang === 'ar' ? 'كيف تقيم العميل؟' : 'Rate this customer'}
-                    </p>
-                    
-                    {/* Stars */}
-                    <div className="flex justify-center gap-1.5">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <button
-                          key={star}
-                          type="button"
-                          onClick={() => setDriverGivenRating(star)}
-                          className="p-0.5 hover:scale-110 transition-transform cursor-pointer"
-                        >
-                          <Star
-                            className={`w-6 h-6 ${
-                              star <= driverGivenRating ? 'fill-amber-400 text-amber-400' : 'text-slate-300'
-                            }`}
-                          />
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Tags */}
-                    <div className="flex flex-wrap gap-1 justify-center">
-                      {(lang === 'ar'
-                        ? [
-                            '👍 عميل محترم جداً',
-                            '⏱️ ملتزم بالوقت والموعد',
-                            '🚗 تواصل ممتاز وسهل',
-                            '🌟 خلوق وراقٍ للغاية'
-                          ]
-                        : [
-                            '👍 Highly Respectful',
-                            '⏱️ On-Time Arrival',
-                            '🚗 Great Communication',
-                            '🌟 Exemplary Conduct'
-                          ]
-                      ).map((tag) => {
-                        const isSelected = driverSelectedTags.includes(tag);
-                        return (
-                          <button
-                            key={tag}
-                            type="button"
-                            onClick={() => {
-                              setDriverSelectedTags((prev) =>
-                                prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
-                              );
-                            }}
-                            className={`px-2 py-0.5 text-[9px] font-semibold rounded-full border transition-all pointer-events-auto cursor-pointer ${
-                              isSelected
-                                ? 'bg-emerald-600 text-white border-emerald-600'
-                                : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
-                            }`}
-                          >
-                            {tag}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {/* Written Comment notes */}
-                    <div className="space-y-1 text-right">
-                      <label className="text-[10px] font-bold text-slate-500 block">
-                        {lang === 'ar' ? 'ملاحظات إضافية (اختياري)' : 'Additional Notes (Optional)'}
-                      </label>
-                      <textarea
-                        value={driverComment}
-                        onChange={(e) => setDriverComment(e.target.value)}
-                        placeholder={lang === 'ar' ? 'اكتب تعليقك هنا مثلاً: "عميل ملتزم ومحترم"...' : 'Type your comment here...'}
-                        className="w-full p-2 bg-white border border-slate-200 rounded-lg text-[10px] text-slate-700 focus:outline-emerald-500 resize-none h-14 pointer-events-auto"
-                      />
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onRateRider(driverGivenRating, driverSelectedTags, driverComment);
-                        setDriverSelectedTags([]); // reset
-                        setDriverComment(''); // reset
-                      }}
-                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg shadow-sm transition-colors cursor-pointer pointer-events-auto"
-                    >
-                      {lang === 'ar' ? 'إرسال تقييم الراكب وتسجيل الرحلة' : 'Submit Rating & Log Ride'}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="border-t border-emerald-100/60 pt-2 text-center space-y-2">
-                    <p className="text-[10px] font-bold text-emerald-800 bg-white border border-emerald-200 rounded-lg p-2 flex items-center justify-center gap-1.5 shadow-xs">
-                      <span>✅</span>
-                      <span>
-                        {lang === 'ar'
-                          ? `تم تسجيل تقييمك للراكب (${activeTrip.driverRatingToRider} نجوم) بنجاح.`
-                          : `Passenger rating submitted (${activeTrip.driverRatingToRider} stars) successfully.`}
-                      </span>
-                    </p>
-                    {onDismissCompletedTrip && (
-                      <button
-                        type="button"
-                        onClick={onDismissCompletedTrip}
-                        className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg shadow-sm transition-colors cursor-pointer pointer-events-auto"
-                      >
-                        {lang === 'ar' ? '✅ الاستعداد لرحلة جديدة' : '✅ Ready for next ride'}
-                      </button>
-                    )}
-                  </div>
+                {onTripCompleted && (
+                  <button
+                    type="button"
+                    onClick={onTripCompleted}
+                    className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg shadow-sm transition-colors cursor-pointer pointer-events-auto"
+                  >
+                    {lang === 'ar' ? '🏠 العودة للصفحة الرئيسية' : '🏠 Return to Home'}
+                  </button>
                 )}
               </div>
             )}

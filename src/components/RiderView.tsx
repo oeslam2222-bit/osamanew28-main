@@ -28,8 +28,7 @@ interface RiderViewProps {
   setSelectedDropoff: (id: string) => void;
   onRequestRide: (requestedVehicleType: 'CAR' | 'MOTORCYCLE' | 'TOKTOK' | 'TRICYCLE', pickupLandmark?: string, promoCode?: string, promoCodeId?: string) => void;
   onCancelRide: () => void;
-  onDismissCompletedTrip?: () => void;
-  onRateDriver: (rating: number, tags?: string[], comment?: string) => void;
+  onTripCompleted: () => void;
   onConfirmArrival?: () => void;
   onUpdateLocations?: Dispatch<SetStateAction<Location[]>>;
   lang: 'ar' | 'en';
@@ -60,8 +59,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
   setSelectedDropoff,
   onRequestRide,
   onCancelRide,
-  onDismissCompletedTrip,
-  onRateDriver,
+  onTripCompleted,
   onConfirmArrival,
   onUpdateLocations,
   lang,
@@ -75,9 +73,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
   onOpenGuide,
 }) => {
   const [requestedVehicleType, setRequestedVehicleType] = useState<'CAR' | 'MOTORCYCLE' | 'TOKTOK' | 'TRICYCLE'>('CAR');
-  const [givenRating, setGivenRating] = useState(5);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [riderComment, setRiderComment] = useState('');
+  
   const [showMathExplanation, setShowMathExplanation] = useState(false);
   const [chatText, setChatText] = useState('');
   
@@ -1017,116 +1013,31 @@ export const RiderView: React.FC<RiderViewProps> = ({
           </div>
         )}
 
-        {/* State 2b: Completed Trip - Rate Driver */}
-        {activeTrip && activeTrip.riderId === rider.id && activeTrip.status === 'COMPLETED' && (
-          !activeTrip.riderRatingToDriver ? (
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3">
-              <div className="text-center">
-                <div className="w-10 h-10 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto text-lg font-black">
-                  ⭐
-                </div>
-                <h4 className="text-xs font-black text-amber-900 mt-2">
-                  {lang === 'ar' ? 'كيف تقيم السائق؟' : 'Rate your driver'}
-                </h4>
-                <p className="text-[10px] text-amber-700 mt-0.5">
-                  {lang === 'ar' ? `كيف كانت رحلتك مع ${activeTrip.driverName}؟` : `How was your ride with ${activeTrip.driverName}?`}
-                </p>
-              </div>
-
-              {/* Stars */}
-              <div className="flex justify-center gap-1.5">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <button
-                    key={star}
-                    type="button"
-                    onClick={() => setGivenRating(star)}
-                    className="p-0.5 hover:scale-110 transition-transform cursor-pointer"
-                  >
-                    <Star
-                      className={`w-6 h-6 ${
-                        star <= givenRating ? 'fill-amber-400 text-amber-400' : 'text-slate-300'
-                      }`}
-                    />
-                  </button>
-                ))}
-              </div>
-
-              {/* Tags */}
-              <div className="flex flex-wrap gap-1 justify-center">
-                {(lang === 'ar'
-                  ? ['👍 سائق محترم', '🚗 قيادة ممتازة', '⏱️ ملتزم بالوقت', '🌟 رحلة مريحة']
-                  : ['👍 Respectful driver', '🚗 Smooth driving', '⏱️ On time', '🌟 Comfortable ride']
-                ).map((tag) => {
-                  const isSelected = selectedTags.includes(tag);
-                  return (
-                    <button
-                      key={tag}
-                      type="button"
-                      onClick={() => {
-                        if (isSelected) {
-                          setSelectedTags(prev => prev.filter(t => t !== tag));
-                        } else {
-                          setSelectedTags(prev => [...prev, tag]);
-                        }
-                      }}
-                      className={`px-2 py-1 rounded-lg text-[9px] font-bold border transition-all cursor-pointer ${
-                        isSelected
-                          ? 'bg-amber-500 text-white border-amber-600'
-                          : 'bg-white text-slate-600 border-slate-200 hover:border-amber-300'
-                      }`}
-                    >
-                      {tag}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Comment */}
-              <input
-                type="text"
-                value={riderComment}
-                onChange={(e) => setRiderComment(e.target.value)}
-                placeholder={lang === 'ar' ? 'تعليق إضافي (اختياري)' : 'Additional comment (optional)'}
-                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-medium text-slate-800 focus:outline-none focus:border-amber-400 text-right"
-              />
-
-              {/* Submit */}
-              <button
-                type="button"
-                onClick={() => {
-                  onRateDriver(givenRating, selectedTags, riderComment);
-                  setGivenRating(5);
-                  setSelectedTags([]);
-                  setRiderComment('');
-                }}
-                className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer"
-              >
-                {lang === 'ar' ? '✅ إرسال التقييم' : '✅ Submit Rating'}
-              </button>
-            </div>
-          ) : (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-3 text-center">
-              <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-lg font-black">
-                🎉
-              </div>
-              <h4 className="text-xs font-black text-emerald-900">
-                {lang === 'ar' ? 'تم تسجيل تقييمك بنجاح! شكرًا لك' : 'Rating submitted! Thank you'}
-              </h4>
-              <p className="text-[10px] text-emerald-700">
-                {lang === 'ar'
-                  ? `تم حفظ تقييمك للسائق ${activeTrip.driverName} (${activeTrip.riderRatingToDriver} نجوم ⭐).`
-                  : `Your rating for ${activeTrip.driverName} (${activeTrip.riderRatingToDriver} stars ⭐) has been saved.`}
-              </p>
-              <button
-                type="button"
-                onClick={onDismissCompletedTrip || onCancelRide}
-                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer pointer-events-auto"
-              >
-                {lang === 'ar' ? '✅ العودة للصفحة الرئيسية وطلب رحلة جديدة' : '✅ Return to main screen & book new ride'}
-              </button>
-            </div>
-          )
-        )}
+{/* State 2b: Completed Trip — Return Home */}
+         {activeTrip && activeTrip.riderId === rider.id && activeTrip.status === 'COMPLETED' && (
+           <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-3 text-center">
+             <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-lg font-black">
+               🎉
+             </div>
+             <h4 className="text-xs font-black text-emerald-900">
+               {lang === 'ar' ? 'تم إنهاء الرحلة بنجاح! 🎉' : 'Trip Finished Successfully! 🎉'}
+             </h4>
+             <p className="text-[10px] text-emerald-700">
+               {lang === 'ar'
+                 ? `شكراً لاستخدامك كابتن عز. المبلغ المستحق: ${activeTrip.fare} ج.م`
+                 : `Thank you for using Captain Ezz. Amount due: ${activeTrip.fare} EGP`}
+             </p>
+             {onTripCompleted && (
+               <button
+                 type="button"
+                 onClick={onTripCompleted}
+                 className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer pointer-events-auto"
+               >
+                 {lang === 'ar' ? '🏠 العودة للصفحة الرئيسية' : '🏠 Return to Home'}
+               </button>
+             )}
+           </div>
+         )}
 
         {/* State 3: Booking Form (No active trip) */}
         {(!activeTrip || activeTrip.riderId !== rider.id) && (
@@ -1893,101 +1804,31 @@ export const RiderView: React.FC<RiderViewProps> = ({
               )}
             </div>
 
-            {/* Rate Driver Section (shown after trip ends) */}
-            {activeTrip && activeTrip.status === 'COMPLETED' && activeTrip.driverId && !activeTrip.riderRatingToDriver && (
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3 mt-3">
-                <div className="text-center">
-                  <div className="w-10 h-10 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto text-lg font-black">
-                    ⭐
-                  </div>
-                  <h4 className="text-xs font-black text-amber-900 mt-2">
-                    {lang === 'ar' ? 'كيف تقيم السائق؟' : 'Rate your driver'}
-                  </h4>
-                  <p className="text-[10px] text-amber-700 mt-0.5">
-                    {lang === 'ar' ? `كيف كانت رحلتك مع ${activeTrip.driverName}؟` : `How was your ride with ${activeTrip.driverName}?`}
-                  </p>
-                  {activeTrip.fare > 0 && (
-                    <div className="mt-2 bg-white/70 rounded-lg p-2">
-                      <div className="flex justify-between text-[10px]">
-                        <span className="text-slate-500">{lang === 'ar' ? 'المبلغ المدفوع' : 'Amount paid'}</span>
-                        <span className="font-bold text-slate-800">{activeTrip.fare} {lang === 'ar' ? 'ج.م' : 'EGP'}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Stars */}
-                <div className="flex justify-center gap-1.5">
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <button
-                      key={star}
-                      type="button"
-                      onClick={() => setGivenRating(star)}
-                      className="p-0.5 hover:scale-110 transition-transform cursor-pointer"
-                    >
-                      <Star
-                        className={`w-6 h-6 ${
-                          star <= givenRating ? 'fill-amber-400 text-amber-400' : 'text-slate-300'
-                        }`}
-                      />
-                    </button>
-                  ))}
-                </div>
-
-                {/* Tags */}
-                <div className="flex flex-wrap gap-1 justify-center">
-                  {(lang === 'ar'
-                    ? ['👍 سائق محترم', '🚗 قيادة ممتازة', '⏱️ ملتزم بالوقت', '🌟 رحلة مريحة']
-                    : ['👍 Respectful driver', '🚗 Smooth driving', '⏱️ On time', '🌟 Comfortable ride']
-                  ).map((tag) => {
-                    const isSelected = selectedTags.includes(tag);
-                    return (
-                      <button
-                        key={tag}
-                        type="button"
-                        onClick={() => {
-                          if (isSelected) {
-                            setSelectedTags(prev => prev.filter(t => t !== tag));
-                          } else {
-                            setSelectedTags(prev => [...prev, tag]);
-                          }
-                        }}
-                        className={`px-2 py-1 rounded-lg text-[9px] font-bold border transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-amber-500 text-white border-amber-600'
-                            : 'bg-white text-slate-600 border-slate-200 hover:border-amber-300'
-                        }`}
-                      >
-                        {tag}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Comment */}
-                <input
-                  type="text"
-                  value={riderComment}
-                  onChange={(e) => setRiderComment(e.target.value)}
-                  placeholder={lang === 'ar' ? 'تعليق إضافي (اختياري)' : 'Additional comment (optional)'}
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-medium text-slate-800 focus:outline-none focus:border-amber-400 text-right"
-                />
-
-                {/* Submit */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    onRateDriver(givenRating, selectedTags, riderComment);
-                    setGivenRating(5);
-                    setSelectedTags([]);
-                    setRiderComment('');
-                  }}
-                  className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer"
-                >
-                  {lang === 'ar' ? '✅ إرسال التقييم' : '✅ Submit Rating'}
-                </button>
-              </div>
-            )}
+{/* Trip Completed — Return Home */}
+             {activeTrip && activeTrip.status === 'COMPLETED' && activeTrip.driverId && (
+               <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-3 mt-3 text-center">
+                 <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-lg font-black">
+                   🎉
+                 </div>
+                 <h4 className="text-xs font-black text-emerald-900">
+                   {lang === 'ar' ? 'تم إنهاء الرحلة بنجاح! 🎉' : 'Trip Finished Successfully! 🎉'}
+                 </h4>
+                 <p className="text-[10px] text-emerald-700">
+                   {lang === 'ar'
+                     ? `شكراً لاستخدامك كابتن عز. المبلغ المستحق: ${activeTrip.fare} ج.م`
+                     : `Thank you for using Captain Ezz. Amount due: ${activeTrip.fare} EGP`}
+                 </p>
+                 {onTripCompleted && (
+                   <button
+                     type="button"
+                     onClick={onTripCompleted}
+                     className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer pointer-events-auto"
+                   >
+                     {lang === 'ar' ? '🏠 العودة للصفحة الرئيسية' : '🏠 Return to Home'}
+                   </button>
+                 )}
+               </div>
+             )}
 
             {/* Favorite Modal Popup */}
             {showFavModal && (
