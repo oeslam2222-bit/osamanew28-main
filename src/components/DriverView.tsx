@@ -372,7 +372,10 @@ export const DriverView: React.FC<DriverViewProps> = ({
   };
 
    const isCurrentlyDriving = currentDriver && activeTrip && activeTrip.driverId === currentDriver.id;
-   const isTripActive = currentDriver && activeTrip && (isCurrentlyDriving || isEligibleForRequest);
+   // During SEARCHING only the incoming ride alert (State 1) should show.
+   // The active driving card (State 2) appears only once the driver is
+   // assigned to the trip (ACCEPTED / ARRIVED / STARTED / COMPLETED).
+   const isTripActive = currentDriver && activeTrip && isCurrentlyDriving;
 
   if (!currentDriver) {
     return (
