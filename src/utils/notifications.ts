@@ -620,7 +620,8 @@ export const notifyRideRequest = (title: string, body: string, lang = 'ar-EG') =
     alarmInterval = null;
   }
 
-  const isAr = lang === 'ar-EG';
+  playNotificationSound('new_trip');
+  triggerVibration([200, 80, 200]);
 
   try {
     unlockAudioContext();
@@ -654,11 +655,10 @@ export const notifyRideRequest = (title: string, body: string, lang = 'ar-EG') =
     osc2.stop(now + 0.8);
     osc2.onended = () => { osc2.disconnect(); gain2.disconnect(); };
   } catch (e) {
-    console.warn('[notifyRideRequest] Audio failed:', e);
-    playAudioFallback('new_trip');
+    console.warn('[notifyRideRequest] Web Audio failed:', e);
+    playNotificationSound('new_trip');
   }
 
-  triggerVibration([200, 80, 200]);
   sendNativeNotification(title, body, '🚖', 'ride-request-' + Date.now());
   startTitleFlash(`🚨 ${title}`);
   setTimeout(stopTitleFlash, 4000);

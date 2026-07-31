@@ -1014,9 +1014,6 @@ export default function App() {
               riderRatingToDriver: trip.riderRatingToDriver ?? prev.riderRatingToDriver,
               riderFeedbackTags: trip.riderFeedbackTags?.length ? trip.riderFeedbackTags : prev.riderFeedbackTags,
               riderFeedbackComment: trip.riderFeedbackComment || prev.riderFeedbackComment,
-              driverRatingToRider: trip.driverRatingToRider ?? prev.driverRatingToRider,
-              driverFeedbackTags: trip.driverFeedbackTags?.length ? trip.driverFeedbackTags : prev.driverFeedbackTags,
-              driverFeedbackComment: trip.driverFeedbackComment || prev.driverFeedbackComment,
             };
           }
 
@@ -1059,10 +1056,7 @@ export default function App() {
         if (!remoteActiveTrip || remoteActiveTrip === 'NO_TABLE') {
           setActiveTripWithTracking((prev) => {
             if (prev && prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
-              if (!prev.driverRatingToRider) {
-                return prev;
-              }
-              return null;
+              return prev;
             }
             if (prev && prev.status === 'CANCELLED') {
               return null;
@@ -1108,9 +1102,6 @@ export default function App() {
               riderRatingToDriver: remoteActiveTrip.riderRatingToDriver ?? prev.riderRatingToDriver,
               riderFeedbackTags: remoteActiveTrip.riderFeedbackTags?.length ? remoteActiveTrip.riderFeedbackTags : prev.riderFeedbackTags,
               riderFeedbackComment: remoteActiveTrip.riderFeedbackComment || prev.riderFeedbackComment,
-              driverRatingToRider: remoteActiveTrip.driverRatingToRider ?? prev.driverRatingToRider,
-              driverFeedbackTags: remoteActiveTrip.driverFeedbackTags?.length ? remoteActiveTrip.driverFeedbackTags : prev.driverFeedbackTags,
-              driverFeedbackComment: remoteActiveTrip.driverFeedbackComment || prev.driverFeedbackComment,
             };
           }
 
@@ -1671,6 +1662,18 @@ export default function App() {
           if (isEligible && needsNotify && isNewlyOffered) {
             lastNotifiedTripIdRef.current = remoteActiveTrip.id;
             lastNotifiedOfferedDriverIdRef.current = remoteActiveTrip.currentOfferedDriverId || null;
+            if (document.hidden) {
+              const speechMsg = lang === 'ar'
+                ? `يوجد رحلة جديدة من ${remoteActiveTrip.pickup.nameAr} إلى ${remoteActiveTrip.dropoff.nameAr}`
+                : `New ride available from ${remoteActiveTrip.pickup.nameEn} to ${remoteActiveTrip.dropoff.nameEn}`;
+              sendNativeNotification(
+                lang === 'ar' ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!',
+                `${remoteActiveTrip.pickup.nameAr || remoteActiveTrip.pickup.nameEn} ← ${remoteActiveTrip.dropoff.nameAr || remoteActiveTrip.dropoff.nameEn} | ${remoteActiveTrip.fare} ج.م`,
+                '🚖',
+                'bg-ride-' + remoteActiveTrip.id
+              );
+              triggerVibration([300, 100, 300, 100, 400]);
+            }
           }
         }
       } catch (err) {
@@ -1953,7 +1956,7 @@ export default function App() {
     // Broadcast dispatch to up to 5 available drivers in the region simultaneously.
     // The first driver to accept wins the ride. 5-minute acceptance window.
     const MAX_OFFERED_DRIVERS = 5;
-    const DISPATCH_TIMER_SECONDS = 300;
+    const DISPATCH_TIMER_SECONDS = 180;
 
     let currentOfferedDriverId: string | undefined = undefined;
     let offeredDriverIds: string[] = [];
@@ -2251,6 +2254,13 @@ export default function App() {
               : 'The ride waiting time has expired. You can request a new ride.',
             lang === 'ar' ? 'ar-EG' : 'en-US'
           );
+          sendNativeNotification(
+            lang === 'ar' ? '❌ تم إلغاء الرحلة' : '❌ Ride Cancelled',
+            lang === 'ar'
+              ? 'تم إلغاء الرحلة بسبب عدم توفر سائق. يمكنك طلب رحلة جديدة.'
+              : 'The ride was cancelled because no driver was available. You can request a new ride.',
+            '❌'
+          );
           triggerToast(
             lang === 'ar' ? 'انتهت مهلة الانتظار' : 'Waiting time expired',
             lang === 'ar'
@@ -2384,6 +2394,30 @@ export default function App() {
         saveDriver(driver).then((ok) => {
           if (ok) {
             console.log('[handleToggleOnline] Driver status saved:', driverId, driver.isOnline ? 'online' : 'offline');
+            // If driver just came online, check for pending trips
+            if (driver.isOnline && activeTrip && activeTrip.status === 'SEARCHING') {
+              const isEligible = activeTrip.offeredDriverIds?.includes(driverId);
+              const isCurrentOffered = activeTrip.currentOfferedDriverId === driverId;
+              if (isEligible) {
+                console.log('[handleToggleOnline] Driver came online with pending trip, notifying...');
+                notifyRideRequest(
+                  lang === 'ar' ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!',
+                  lang === 'ar'
+                    ? `من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr} | ${activeTrip.fare} ج.م`
+                    : `${activeTrip.pickup.nameEn} → ${activeTrip.dropoff.nameEn} | ${activeTrip.fare} EGP`,
+                  lang === 'ar' ? 'ar-EG' : 'en-US'
+                );
+                if (isCurrentOffered) {
+                  triggerToast(
+                    lang === 'ar' ? 'يوجد رحلة جديدة' : 'New trip available',
+                    lang === 'ar'
+                      ? `العميل ${activeTrip.riderName} يطلب رحلة من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr}.`
+                      : `Rider ${activeTrip.riderName} requests a ride from ${activeTrip.pickup.nameEn} to ${activeTrip.dropoff.nameEn}.`,
+                    'new_trip'
+                  );
+                }
+              }
+            }
           } else {
             console.warn('[handleToggleOnline] Failed to save driver status:', driverId);
           }
@@ -2693,8 +2727,8 @@ export default function App() {
           if (d.id !== driverId) return d;
           return {
             ...d,
-            status: 'OFFLINE' as const,
-            isOnline: false,
+            status: 'AVAILABLE' as const,
+            isOnline: true,
             totalTrips: d.totalTrips + 1,
             totalEarnings: d.totalEarnings + netEarnings,
             totalCommissionPaid: d.totalCommissionPaid + commission,
