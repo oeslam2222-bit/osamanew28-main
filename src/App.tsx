@@ -1191,15 +1191,18 @@ export default function App() {
               // If driver toggle is pending, use LOCAL state (not remote) to avoid overwriting the user's action
               const ld = localDrivers.find((l) => l.id === rd.id);
               if (pendingDriverToggleRef.current === rd.id && ld) return ld;
-              if (ld) {
+if (ld) {
                 const isActiveTripDriver = currentTrip && currentTrip.driverId === rd.id && (currentTrip.status === 'ACCEPTED' || currentTrip.status === 'STARTED');
                 const isStale = rd.lastSeen ? (now - new Date(rd.lastSeen).getTime() > staleThreshold) : false;
+                // Only mark as stale if the remote says the driver is offline.
+                // If remote says isOnline=true, trust it (the driver just came online and lastSeen may not have updated yet).
+                const shouldMarkStale = isStale && !rd.isOnline;
                 return {
                   ...rd,
                   currentX: isActiveTripDriver ? ld.currentX : rd.currentX,
                   currentY: isActiveTripDriver ? ld.currentY : rd.currentY,
-                  isOnline: isStale ? false : rd.isOnline,
-                  status: isStale ? 'AVAILABLE' : (rd.isOnline ? rd.status : 'OFFLINE'),
+                  isOnline: shouldMarkStale ? false : rd.isOnline,
+                  status: shouldMarkStale ? 'AVAILABLE' : (rd.isOnline ? rd.status : 'OFFLINE'),
                 };
               }
               return rd;
