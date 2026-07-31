@@ -394,8 +394,8 @@ export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat
       osc2.frequency.setValueAtTime(293.66, now);
       osc2.frequency.setValueAtTime(329.63, now + 0.15);
 
-      gainNode.gain.setValueAtTime(0.25 * getVolume(), now);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
+      gainNode.gain.setValueAtTime(0.45 * getVolume(), now);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 1.4);
 
       osc1.connect(gainNode);
       osc2.connect(gainNode);
@@ -403,8 +403,8 @@ export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat
 
       osc1.start(now);
       osc2.start(now);
-      osc1.stop(now + 0.8);
-      osc2.stop(now + 0.8);
+      osc1.stop(now + 1.4);
+      osc2.stop(now + 1.4);
       osc1.onended = () => { osc1.disconnect(); };
       osc2.onended = () => { osc2.disconnect(); gainNode.disconnect(); };
 
@@ -628,30 +628,33 @@ export const notifyRideRequest = (title: string, body: string, lang = 'ar-EG') =
 
   try {
     const ctx = getAudioContext();
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
     const now = ctx.currentTime;
 
     const osc1 = ctx.createOscillator();
     const gain1 = ctx.createGain();
     osc1.type = 'sine';
     osc1.frequency.setValueAtTime(880, now);
-    gain1.gain.setValueAtTime(0.25, now);
-    gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+    gain1.gain.setValueAtTime(0.45, now);
+    gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
     osc1.connect(gain1);
     gain1.connect(ctx.destination);
     osc1.start(now);
-    osc1.stop(now + 0.2);
+    osc1.stop(now + 0.4);
     osc1.onended = () => { osc1.disconnect(); gain1.disconnect(); };
 
     const osc2 = ctx.createOscillator();
     const gain2 = ctx.createGain();
     osc2.type = 'sine';
-    osc2.frequency.setValueAtTime(880, now + 0.25);
-    gain2.gain.setValueAtTime(0.25, now + 0.25);
-    gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.43);
+    osc2.frequency.setValueAtTime(988, now + 0.4);
+    gain2.gain.setValueAtTime(0.45, now + 0.4);
+    gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.75);
     osc2.connect(gain2);
     gain2.connect(ctx.destination);
-    osc2.start(now + 0.25);
-    osc2.stop(now + 0.45);
+    osc2.start(now + 0.4);
+    osc2.stop(now + 0.8);
     osc2.onended = () => { osc2.disconnect(); gain2.disconnect(); };
   } catch (e) {
     console.warn('[notifyRideRequest] Audio failed:', e);
