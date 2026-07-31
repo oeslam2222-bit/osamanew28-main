@@ -50,6 +50,11 @@ class AuditLogger {
   private logs: AuditLogEntry[] = [];
   private maxLogs = 1000;
 
+  // Cooldown per (userId + action) to avoid flooding audit table on repeated rapid failures.
+  // e.g. a user smashing the login button 8x in 2 seconds should only write 1-2 audit rows.
+  private lastWriteTimestamps = new Map<string, number>();
+  private static readonly COOLDOWN_MS = 60000; // 1 minute between identical failed writes
+
   log(action: AuditAction, userId: string, userType: AuditLogEntry['userType'], details: string, success = true, errorMessage?: string): void {
     const entry: AuditLogEntry = {
       id: `audit_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -70,6 +75,18 @@ class AuditLogger {
     }
 
     // Persist to Supabase audit_logs table (no local storage)
+    // Deduplicate failed writes: if the same userId + action failed within the last minute,
+    // skip writing to the DB to prevent audit spam from rapid double-submits / retries.
+    if (!success && entry.errorMessage) {
+      const key = `${action}::${userId}::${entry.errorMessage}`;
+      const now = Date.now();
+      const last = this.lastWriteTimestamps.get(key) || 0;
+      if (now - last < AuditLogger.COOLDOWN_MS) {
+        return;
+      }
+      this.lastWriteTimestamps.set(key, now);
+    }
+
     logAuditToDB(entry);
   }
 

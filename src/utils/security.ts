@@ -155,16 +155,53 @@ export const isSecureHash = (hash: string | undefined): boolean => {
 /**
  * Rate Limiter for Authentication Attempts
  * Prevents brute force attacks by limiting login attempts per phone number
- * Works in both browser and server environments
+ * Works in both browser and server environments.
+ * - Persists counters to localStorage so attempts survive page refresh.
+ * - Includes a short per-key cooldown to block rapid double-submits.
  */
 export class RateLimiter {
   private attempts: Map<string, { count: number; lastAttempt: number }> = new Map();
   private maxAttempts: number;
   private windowMs: number;
+  private storageKey?: string;
 
-  constructor(maxAttempts = 5, windowMs = 60000) {
+  constructor(maxAttempts = 5, windowMs = 180000, storageKey?: string) {
     this.maxAttempts = maxAttempts;
     this.windowMs = windowMs;
+    this.storageKey = storageKey;
+    this.loadFromStorage();
+  }
+
+  private loadFromStorage(): void {
+    if (!this.storageKey || typeof localStorage === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(this.storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+      const now = Date.now();
+      Object.keys(parsed).forEach((k) => {
+        const rec = parsed[k];
+        if (rec && typeof rec.count === 'number' && typeof rec.lastAttempt === 'number') {
+          if (now - rec.lastAttempt < this.windowMs) {
+            this.attempts.set(k, { count: rec.count, lastAttempt: rec.lastAttempt });
+          }
+        }
+      });
+    } catch {
+      /* noop */
+    }
+  }
+
+  private saveToStorage(): void {
+    if (!this.storageKey || typeof localStorage === 'undefined') return;
+    try {
+      const obj: Record<string, { count: number; lastAttempt: number }> = {};
+      this.attempts.forEach((v, k) => { obj[k] = v; });
+      localStorage.setItem(this.storageKey, JSON.stringify(obj));
+    } catch {
+      /* noop */
+    }
   }
 
   isAllowed(key: string): boolean {
@@ -173,11 +210,13 @@ export class RateLimiter {
 
     if (!record) {
       this.attempts.set(key, { count: 1, lastAttempt: now });
+      this.saveToStorage();
       return true;
     }
 
     if (now - record.lastAttempt > this.windowMs) {
       this.attempts.set(key, { count: 1, lastAttempt: now });
+      this.saveToStorage();
       return true;
     }
 
@@ -187,11 +226,13 @@ export class RateLimiter {
 
     record.count += 1;
     record.lastAttempt = now;
+    this.saveToStorage();
     return true;
   }
 
   reset(key: string): void {
     this.attempts.delete(key);
+    this.saveToStorage();
   }
 
   getRemainingAttempts(key: string): number {
@@ -215,8 +256,9 @@ export class RateLimiter {
   }
 }
 
-// Global rate limiters for rider and driver auth
-export const riderAuthLimiter = new RateLimiter(5, 60000); // 5 attempts per minute
-export const driverAuthLimiter = new RateLimiter(5, 60000); // 5 attempts per minute
-export const adminAuthLimiter = new RateLimiter(3, 60000); // 3 attempts per minute for admin
+// Global rate limiters for rider, driver and admin auth
+// 5 attempts per 3 minutes, persisted across refresh to stop brute-force floods
+export const riderAuthLimiter = new RateLimiter(5, 180000, 'ezz_ratelimit_rider');
+export const driverAuthLimiter = new RateLimiter(5, 180000, 'ezz_ratelimit_driver');
+export const adminAuthLimiter = new RateLimiter(3, 180000, 'ezz_ratelimit_admin');
 

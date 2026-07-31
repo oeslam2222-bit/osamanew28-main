@@ -579,6 +579,11 @@ export default function App() {
   });
   const [adminLoginError, setAdminLoginError] = useState('');
 
+  // Prevent duplicate login submissions (button spam / rapid Enter presses)
+  const [riderSubmitting, setRiderSubmitting] = useState(false);
+  const [driverSubmitting, setDriverSubmitting] = useState(false);
+  const [adminSubmitting, setAdminSubmitting] = useState(false);
+
   // Legal Modal State (Terms & Conditions / Privacy Policy)
   const [showLegalModal, setShowLegalModal] = useState<boolean>(false);
   const [legalModalTab, setLegalModalTab] = useState<'terms' | 'privacy'>('terms');
@@ -2931,7 +2936,10 @@ export default function App() {
   // Rider auth submission
   const handleRiderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (riderSubmitting) return; // block double-submit spam
     setRiderFormError('');
+    setRiderSubmitting(true);
+    try {
 
     if (riderFormMode === 'LOGIN') {
       if (!riderLoginPhone.trim() || !riderLoginPassword.trim()) {
@@ -3035,12 +3043,18 @@ export default function App() {
       setRider({ ...newRider, isLoggedIn: true });
       setCurrentScreen('RIDER_DASHBOARD');
     }
+    } finally {
+      setRiderSubmitting(false);
+    }
   };
 
   // Driver onboarding submission
   const handleDriverSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (driverSubmitting) return; // block double-submit spam
     setDrvFormError('');
+    setDriverSubmitting(true);
+    try {
 
     if (drvFormMode === 'LOGIN') {
       if (!drvLoginPhone.trim() || !drvLoginPassword.trim()) {
@@ -3210,6 +3224,9 @@ export default function App() {
       setDriverIsLoggedIn(true);
       setCurrentScreen('DRIVER_DASHBOARD');
     };
+    } finally {
+      setDriverSubmitting(false);
+    }
   };
 
   const t = {
@@ -3745,11 +3762,14 @@ export default function App() {
 
                         <button
                           type="submit"
-                          className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-amber-400 font-extrabold text-xs rounded-xl shadow-md transition-transform active:scale-95 mt-4 pointer-events-auto cursor-pointer"
+                          disabled={riderSubmitting}
+                          className="w-full py-3 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-amber-400 font-extrabold text-xs rounded-xl shadow-md transition-transform active:scale-95 mt-4 pointer-events-auto cursor-pointer"
                         >
-                          {riderFormMode === 'LOGIN' 
-                            ? (lang === 'ar' ? 'تسجيل الدخول ومتابعة الرحلات' : 'Log In & Continue') 
-                            : (lang === 'ar' ? 'إنشاء الحساب والبدء بالطلب' : 'Sign Up & Start Requesting')}
+                          {riderSubmitting
+                            ? (lang === 'ar' ? '⏳ جاري التحقق...' : '⏳ Checking...')
+                            : (riderFormMode === 'LOGIN'
+                            ? (lang === 'ar' ? 'تسجيل الدخول ومتابعة الرحلات' : 'Log In & Continue')
+                            : (lang === 'ar' ? 'إنشاء الحساب والبدء بالطلب' : 'Sign Up & Start Requesting'))}
                         </button>
                       </form>
                     </div>
@@ -4182,11 +4202,14 @@ onRequestRide={handleRequestRide}
 
                         <button
                           type="submit"
-                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-md transition-transform active:scale-95 mt-2 pointer-events-auto cursor-pointer"
+                          disabled={driverSubmitting}
+                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-xs rounded-xl shadow-md transition-transform active:scale-95 mt-2 pointer-events-auto cursor-pointer"
                         >
-                          {drvFormMode === 'LOGIN' 
-                            ? (lang === 'ar' ? 'تسجيل دخول وتصفح طلبات الركوب' : 'Captain Login') 
-                            : (lang === 'ar' ? 'إرسال طلب الانضمام للقرية' : 'Submit Application')}
+                          {driverSubmitting
+                            ? (lang === 'ar' ? '⏳ جاري التحقق...' : '⏳ Checking...')
+                            : (drvFormMode === 'LOGIN'
+                            ? (lang === 'ar' ? 'تسجيل دخول وتصفح طلبات الركوب' : 'Captain Login')
+                            : (lang === 'ar' ? 'إرسال طلب الانضمام للقرية' : 'Submit Application'))}
                         </button>
                       </form>
                     </div>
@@ -4272,28 +4295,49 @@ if (activeTrip) {
                           </p>
                         </div>
 
-                           <form 
+                           <form
                               onSubmit={async (e) => {
                                 e.preventDefault();
+                                if (adminSubmitting) return; // block double-submit spam
                                 setAdminLoginError('');
-                                if (rider.isLoggedIn || driverIsLoggedIn) {
-                                  setAdminLoginError(lang === 'ar' ? 'يوجد حساب راكب/سائق مسجل حالياً. يرجى تسجيل الخروج أولاً.' : 'A rider/driver account is already logged in. Please logout first.');
-                                  return;
-                                }
-                                const admin = await authenticateAdmin(adminPhone.trim(), adminPassword.trim());
-                                if (admin) {
-                                  setAdminIsLoggedIn(true);
-                                  localStorage.setItem('ezz_admin_phone', adminPhone.trim());
-                                  localStorage.setItem('ezz_admin_password', adminPassword.trim());
-                                  if (supabaseConnected) {
-                                    await clearSession('RIDER');
-                                    await clearSession('DRIVER');
-                                    await saveSession('ADMIN', admin.id);
+                                setAdminSubmitting(true);
+                                try {
+                                  if (!adminPhone.trim() || !adminPassword.trim()) {
+                                    setAdminLoginError(lang === 'ar' ? 'يرجى إدخال رقم الهاتف وكلمة المرور' : 'Please enter phone and password');
+                                    return;
                                   }
-                                } else {
-                                 setAdminLoginError(lang === 'ar' ? 'رقم الهاتف أو كلمة المرور غير صحيحة!' : 'Incorrect credentials!');
+                                  if (!adminAuthLimiter.isAllowed(adminPhone.trim())) {
+                                    const retryAfter = adminAuthLimiter.getRetryAfter(adminPhone.trim());
+                                    setAdminLoginError(lang === 'ar'
+                                      ? `تم تجاوز محاولات تسجيل الدخول. يرجى المحاولة بعد ${retryAfter} ثانية`
+                                      : `Too many login attempts. Please try again in ${retryAfter} seconds`);
+                                    auditLogger.log('admin_login', adminPhone.trim(), 'admin', 'Rate limited', false, 'Rate limit exceeded');
+                                    return;
+                                  }
+                                  if (rider.isLoggedIn || driverIsLoggedIn) {
+                                    setAdminLoginError(lang === 'ar' ? 'يوجد حساب راكب/سائق مسجل حالياً. يرجى تسجيل الخروج أولاً.' : 'A rider/driver account is already logged in. Please logout first.');
+                                    return;
+                                  }
+                                  const admin = await authenticateAdmin(adminPhone.trim(), adminPassword.trim());
+                                  if (admin) {
+                                    setAdminIsLoggedIn(true);
+                                    localStorage.setItem('ezz_admin_phone', adminPhone.trim());
+                                    localStorage.setItem('ezz_admin_password', adminPassword.trim());
+                                    if (supabaseConnected) {
+                                      await clearSession('RIDER');
+                                      await clearSession('DRIVER');
+                                      await saveSession('ADMIN', admin.id);
+                                    }
+                                    auditLogger.log('admin_login', admin.id, 'admin', 'Login successful', true);
+                                    adminAuthLimiter.reset(adminPhone.trim());
+                                  } else {
+                                    auditLogger.log('admin_login', adminPhone.trim(), 'admin', 'Login failed - invalid credentials', false, 'Wrong phone or password');
+                                    setAdminLoginError(lang === 'ar' ? 'رقم الهاتف أو كلمة المرور غير صحيحة!' : 'Incorrect credentials!');
+                                  }
+                                } finally {
+                                  setAdminSubmitting(false);
                                 }
-                              }} 
+                              }}
                            className="space-y-4 max-w-xs mx-auto"
                          >
                           {adminLoginError && (
@@ -4326,9 +4370,12 @@ if (activeTrip) {
 
                           <button
                             type="submit"
-                            className="w-full py-2.5 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95 pointer-events-auto cursor-pointer"
+                            disabled={adminSubmitting}
+                            className="w-full py-2.5 bg-amber-400 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95 pointer-events-auto cursor-pointer"
                           >
-                            🔐 {lang === 'ar' ? 'تسجيل الدخول الآمن' : 'Secure Authorization'}
+                            {adminSubmitting
+                              ? (lang === 'ar' ? '⏳ جاري التحقق...' : '⏳ Checking...')
+                              : `🔐 ${lang === 'ar' ? 'تسجيل الدخول الآمن' : 'Secure Authorization'}`}
                           </button>
                         </form>
                       </div>
