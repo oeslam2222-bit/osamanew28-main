@@ -265,7 +265,7 @@ const generateRingtoneBlobUrl = (): string => {
   for (let i = 0; i < numSamples; i++) {
     const t = i / sampleRate;
     let sample = 0;
-    const vol = 0.5;
+    const vol = 1.0;
     if (t < toneDuration) {
       sample = Math.sin(2 * Math.PI * tone1Freq * t) * vol;
       if (i < fadeSamples) sample *= i / fadeSamples;
@@ -390,7 +390,7 @@ export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat
       osc2.frequency.setValueAtTime(293.66, now);
       osc2.frequency.setValueAtTime(329.63, now + 0.15);
 
-      gainNode.gain.setValueAtTime(0.45 * getVolume(), now);
+      gainNode.gain.setValueAtTime(0.9 * getVolume(), now);
       gainNode.gain.exponentialRampToValueAtTime(0.01, now + 1.4);
 
       osc1.connect(gainNode);
@@ -404,103 +404,7 @@ export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat
       osc1.onended = () => { osc1.disconnect(); };
       osc2.onended = () => { osc2.disconnect(); gainNode.disconnect(); };
 
-    } else if (type === 'trip_accepted') {
-      const osc = ctx.createOscillator();
-      const gainNode = ctx.createGain();
 
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(523.25, now);
-      osc.frequency.setValueAtTime(659.25, now + 0.12);
-      osc.frequency.setValueAtTime(783.99, now + 0.24);
-      osc.frequency.setValueAtTime(1046.50, now + 0.36);
-
-      gainNode.gain.setValueAtTime(0.25 * getVolume(), now);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.65);
-
-      osc.connect(gainNode);
-      gainNode.connect(ctx.destination);
-
-      osc.start(now);
-      osc.stop(now + 0.75);
-      osc.onended = () => { osc.disconnect(); gainNode.disconnect(); };
-
-    } else if (type === 'chat_message') {
-      const osc = ctx.createOscillator();
-      const gainNode = ctx.createGain();
-
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, now);
-      osc.frequency.setValueAtTime(1200, now + 0.08);
-
-      gainNode.gain.setValueAtTime(0.03 * getVolume(), now);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
-
-      osc.connect(gainNode);
-      gainNode.connect(ctx.destination);
-
-      osc.start(now);
-      osc.stop(now + 0.3);
-      osc.onended = () => { osc.disconnect(); gainNode.disconnect(); };
-
-    } else if (type === 'trip_completed') {
-      const osc1 = ctx.createOscillator();
-      const osc2 = ctx.createOscillator();
-      const gainNode = ctx.createGain();
-
-      osc1.type = 'sine';
-      osc1.frequency.setValueAtTime(523.25, now);
-      osc1.frequency.setValueAtTime(659.25, now + 0.2);
-      osc1.frequency.setValueAtTime(1046.50, now + 0.4);
-
-      osc2.type = 'triangle';
-      osc2.frequency.setValueAtTime(261.63, now);
-      osc2.frequency.setValueAtTime(392.00, now + 0.3);
-
-      gainNode.gain.setValueAtTime(0.28 * getVolume(), now);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 1.2);
-
-      osc1.connect(gainNode);
-      osc2.connect(gainNode);
-      gainNode.connect(ctx.destination);
-
-      osc1.start(now);
-      osc2.start(now);
-      osc1.stop(now + 1.2);
-      osc2.stop(now + 1.2);
-      osc1.onended = () => { osc1.disconnect(); };
-      osc2.onended = () => { osc2.disconnect(); gainNode.disconnect(); };
-
-    } else if (type === 'rating') {
-      const osc = ctx.createOscillator();
-      const gainNode = ctx.createGain();
-
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, now);
-
-      gainNode.gain.setValueAtTime(0.28 * getVolume(), now);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
-
-      osc.connect(gainNode);
-      gainNode.connect(ctx.destination);
-
-      osc.start(now);
-      osc.stop(now + 0.65);
-      osc.onended = () => { osc.disconnect(); gainNode.disconnect(); };
-    } else if (type === 'alert') {
-      const osc1 = ctx.createOscillator();
-      const osc2 = ctx.createOscillator();
-      const gainNode = ctx.createGain();
-
-      osc1.type = 'sawtooth';
-      osc1.frequency.setValueAtTime(440, now);
-      osc2.type = 'sine';
-      osc2.frequency.setValueAtTime(445, now);
-
-      gainNode.gain.setValueAtTime(0.18 * getVolume(), now);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
-
-      osc1.connect(gainNode);
-      osc2.connect(gainNode);
       gainNode.connect(ctx.destination);
 
       osc1.start(now);
@@ -631,11 +535,11 @@ export const notifyRideRequest = (title: string, body: string, lang = 'ar-EG') =
     }
     const now = ctx.currentTime;
 
-    const osc1 = ctx.createOscillator();
+const osc1 = ctx.createOscillator();
     const gain1 = ctx.createGain();
     osc1.type = 'sine';
     osc1.frequency.setValueAtTime(880, now);
-    gain1.gain.setValueAtTime(0.45, now);
+    gain1.gain.setValueAtTime(1.0, now);
     gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
     osc1.connect(gain1);
     gain1.connect(ctx.destination);
@@ -647,7 +551,7 @@ export const notifyRideRequest = (title: string, body: string, lang = 'ar-EG') =
     const gain2 = ctx.createGain();
     osc2.type = 'sine';
     osc2.frequency.setValueAtTime(988, now + 0.4);
-    gain2.gain.setValueAtTime(0.45, now + 0.4);
+    gain2.gain.setValueAtTime(1.0, now + 0.4);
     gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.75);
     osc2.connect(gain2);
     gain2.connect(ctx.destination);

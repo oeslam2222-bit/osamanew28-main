@@ -2387,27 +2387,23 @@ export default function App() {
       const updated = prev.map((d) => {
         if (d.id !== driverId) return d;
         const nextOnline = !d.isOnline;
-        return { ...d, isOnline: nextOnline, status: nextOnline ? 'AVAILABLE' as const : 'OFFLINE' as const };
-      });
-      const driver = updated.find((d) => d.id === driverId);
-      if (driver && supabaseConnected) {
-        saveDriver(driver).then((ok) => {
-          if (ok) {
-            console.log('[handleToggleOnline] Driver status saved:', driverId, driver.isOnline ? 'online' : 'offline');
-            // If driver just came online, check for pending trips
-            if (driver.isOnline && activeTrip && activeTrip.status === 'SEARCHING') {
-              const isEligible = activeTrip.offeredDriverIds?.includes(driverId);
-              const isCurrentOffered = activeTrip.currentOfferedDriverId === driverId;
-              if (isEligible) {
-                console.log('[handleToggleOnline] Driver came online with pending trip, notifying...');
-                notifyRideRequest(
-                  lang === 'ar' ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!',
-                  lang === 'ar'
-                    ? `من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr} | ${activeTrip.fare} ج.م`
-                    : `${activeTrip.pickup.nameEn} → ${activeTrip.dropoff.nameEn} | ${activeTrip.fare} EGP`,
-                  lang === 'ar' ? 'ar-EG' : 'en-US'
-                );
-                if (isCurrentOffered) {
+        const nextStatus = nextOnline ? 'AVAILABLE' : 'OFFLINE';
+        const updatedDriver = { ...d, isOnline: nextOnline, status: nextStatus as 'AVAILABLE' | 'OFFLINE' };
+        if (supabaseConnected) {
+          saveDriver(updatedDriver)
+            .then((ok) => {
+              console.log('[handleToggleOnline] Saved to DB:', driverId, nextOnline ? 'online' : 'offline');
+              if (nextOnline && activeTrip && activeTrip.status === 'SEARCHING') {
+                const isEligible = activeTrip.offeredDriverIds?.includes(driverId);
+                if (isEligible) {
+                  console.log('[handleToggleOnline] Driver came online with pending trip');
+                  notifyRideRequest(
+                    lang === 'ar' ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!',
+                    lang === 'ar'
+                      ? `من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr} | ${activeTrip.fare} ج.م`
+                      : `${activeTrip.pickup.nameEn} → ${activeTrip.dropoff.nameEn} | ${activeTrip.fare} EGP`,
+                    lang === 'ar' ? 'ar-EG' : 'en-US'
+                  );
                   triggerToast(
                     lang === 'ar' ? 'يوجد رحلة جديدة' : 'New trip available',
                     lang === 'ar'
@@ -2417,18 +2413,15 @@ export default function App() {
                   );
                 }
               }
-            }
-          } else {
-            console.warn('[handleToggleOnline] Failed to save driver status:', driverId);
-          }
-          pendingDriverToggleRef.current = null;
-        });
-      }
+            })
+            .catch((err) => {
+              console.warn('[handleToggleOnline] Failed to save:', err);
+            });
+        }
+        return updatedDriver;
+      });
       return updated;
     });
-    setTimeout(() => {
-      pendingDriverToggleRef.current = null;
-    }, 10000);
   };
 
   const handleUpdateDriverLocation = (driverId: string, lat: number, lng: number, x: number, y: number) => {
