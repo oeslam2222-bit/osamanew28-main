@@ -2804,7 +2804,7 @@ const updateLastSeen = async () => {
     }
   };
 
-// Handler: Trip completed — skip rating, return driver to home
+
     const handleTripCompleted = () => {
       if (!activeTrip) return;
 
