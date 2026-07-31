@@ -694,9 +694,13 @@ export default function App() {
     localStorage.setItem('ezz_driver_logged_in', driverIsLoggedIn ? 'true' : 'false');
   }, [driverIsLoggedIn]);
 
-  // Reset driver to AVAILABLE when driver session is restored or login occurs
+  // Reset driver to AVAILABLE when driver session is restored or login occurs (ONCE on mount/login)
+  const driverInitialSetupDoneRef = useRef(false);
+  
   useEffect(() => {
     if (!driverIsLoggedIn || !selectedDriverId || !supabaseConnected) return;
+    if (driverInitialSetupDoneRef.current) return;
+    driverInitialSetupDoneRef.current = true;
 
     const resetDriverToAvailable = async () => {
       let driver = drivers.find(d => d.id === selectedDriverId);
@@ -725,7 +729,7 @@ export default function App() {
     };
 
     resetDriverToAvailable();
-  }, [driverIsLoggedIn, selectedDriverId, supabaseConnected, drivers]);
+  }, [driverIsLoggedIn, selectedDriverId, supabaseConnected]); // removed 'drivers' from deps
 
   // Online/Offline connectivity toast notifications (state tracking is handled by useNetworkStatus hook)
   useEffect(() => {
@@ -1184,8 +1188,9 @@ export default function App() {
           const currentTrip = activeTripRefForPolling.current;
           setDrivers((localDrivers) => {
             return remoteDrivers.map((rd) => {
-              if (pendingDriverToggleRef.current === rd.id) return rd;
+              // If driver toggle is pending, use LOCAL state (not remote) to avoid overwriting the user's action
               const ld = localDrivers.find((l) => l.id === rd.id);
+              if (pendingDriverToggleRef.current === rd.id && ld) return ld;
               if (ld) {
                 const isActiveTripDriver = currentTrip && currentTrip.driverId === rd.id && (currentTrip.status === 'ACCEPTED' || currentTrip.status === 'STARTED');
                 const isStale = rd.lastSeen ? (now - new Date(rd.lastSeen).getTime() > staleThreshold) : false;
@@ -1209,12 +1214,19 @@ export default function App() {
     return () => clearInterval(interval);
   }, [supabaseConnected, dataSaverMode]);
 
-  // Heartbeat: update driver lastSeen every 10s so stale drivers can be detected quickly
+// Heartbeat: update driver lastSeen every 10s so stale drivers can be detected quickly
+  const driverOnlineRef = useRef(false);
+  driverOnlineRef.current = drivers.find(d => d.id === selectedDriverId)?.isOnline ?? false;
+
   useEffect(() => {
     if (!supabaseConnected || !driverIsLoggedIn || !selectedDriverId) return;
 
-    const updateLastSeen = async () => {
+const updateLastSeen = async () => {
       if (!isMountedRef.current) return;
+      // Only update heartbeat if driver is online — otherwise they'll be detected as stale
+      if (!driverOnlineRef.current) {
+        return;
+      }
       const now = new Date().toISOString();
       setDrivers((prev) =>
         prev.map((d) => (d.id === selectedDriverId ? { ...d, lastSeen: now } : d))
@@ -2392,6 +2404,7 @@ export default function App() {
         if (supabaseConnected) {
           saveDriver(updatedDriver)
             .then((ok) => {
+              pendingDriverToggleRef.current = null; // Clear ref after save completes
               console.log('[handleToggleOnline] Saved to DB:', driverId, nextOnline ? 'online' : 'offline');
               if (nextOnline && activeTrip && activeTrip.status === 'SEARCHING') {
                 const isEligible = activeTrip.offeredDriverIds?.includes(driverId);
@@ -2415,8 +2428,11 @@ export default function App() {
               }
             })
             .catch((err) => {
+              pendingDriverToggleRef.current = null; // Clear ref on error too
               console.warn('[handleToggleOnline] Failed to save:', err);
             });
+        } else {
+          pendingDriverToggleRef.current = null; // No supabase, clear immediately
         }
         return updatedDriver;
       });

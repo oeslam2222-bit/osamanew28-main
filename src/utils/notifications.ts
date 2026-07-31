@@ -515,8 +515,8 @@ const isDuplicateNotification = (tag: string): boolean => {
 };
 
 /**
- * Ring twice (2 short beeps like WhatsApp), then show one notification + toast.
- * Use this for driver ride-request alerts — NOT repeating.
+ * Ring continuously for 10 seconds (repeating beep pattern) to grab driver's attention.
+ * Use this for driver ride-request alerts.
  */
 export const notifyRideRequest = (title: string, body: string, lang = 'ar-EG') => {
   if (alarmInterval) {
@@ -525,39 +525,54 @@ export const notifyRideRequest = (title: string, body: string, lang = 'ar-EG') =
   }
 
   playNotificationSound('new_trip');
-  triggerVibration([200, 80, 200]);
+  triggerVibration([200, 80, 200, 80, 200, 80, 200, 80, 200, 80, 200]);
 
+  // Play a repeating ringtone pattern for 10 seconds using Web Audio scheduling
   try {
     unlockAudioContext();
     const ctx = getAudioContext();
     if (ctx.state === 'suspended') {
       ctx.resume().catch(() => {});
     }
-    const now = ctx.currentTime;
+    const startTime = ctx.currentTime;
+    const totalDuration = 10; // 10 seconds of ringing
+    const beepDuration = 0.25; // each beep is 0.25s
+    const gapDuration = 0.15; // 0.15s gap between beeps
+    const cycleDuration = beepDuration + gapDuration; // 0.4s per cycle
+    const numCycles = Math.floor(totalDuration / cycleDuration); // 25 cycles
 
-const osc1 = ctx.createOscillator();
-    const gain1 = ctx.createGain();
-    osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(880, now);
-    gain1.gain.setValueAtTime(1.0, now);
-    gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
-    osc1.connect(gain1);
-    gain1.connect(ctx.destination);
-    osc1.start(now);
-    osc1.stop(now + 0.4);
-    osc1.onended = () => { osc1.disconnect(); gain1.disconnect(); };
+    for (let i = 0; i < numCycles; i++) {
+      const t = startTime + i * cycleDuration;
+      
+      // First beep in pair (higher frequency)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(880, t);
+      gain1.gain.setValueAtTime(1.0, t);
+      gain1.gain.exponentialRampToValueAtTime(0.01, t + beepDuration);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(t);
+      osc1.stop(t + beepDuration + 0.05);
+      osc1.onended = () => { osc1.disconnect(); gain1.disconnect(); };
 
-    const osc2 = ctx.createOscillator();
-    const gain2 = ctx.createGain();
-    osc2.type = 'sine';
-    osc2.frequency.setValueAtTime(988, now + 0.4);
-    gain2.gain.setValueAtTime(1.0, now + 0.4);
-    gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.75);
-    osc2.connect(gain2);
-    gain2.connect(ctx.destination);
-    osc2.start(now + 0.4);
-    osc2.stop(now + 0.8);
-    osc2.onended = () => { osc2.disconnect(); gain2.disconnect(); };
+      // Second beep in pair (slightly higher frequency)
+      const t2 = t + beepDuration + gapDuration;
+      if (t2 - startTime < totalDuration) {
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(988, t2);
+        gain2.gain.setValueAtTime(1.0, t2);
+        gain2.gain.exponentialRampToValueAtTime(0.01, t2 + beepDuration);
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.start(t2);
+        osc2.stop(t2 + beepDuration + 0.05);
+        osc2.onended = () => { osc2.disconnect(); gain2.disconnect(); };
+      }
+    }
   } catch (e) {
     console.warn('[notifyRideRequest] Web Audio failed:', e);
     playNotificationSound('new_trip');
@@ -565,7 +580,7 @@ const osc1 = ctx.createOscillator();
 
   sendNativeNotification(title, body, '🚖', 'ride-request-' + Date.now());
   startTitleFlash(`🚨 ${title}`);
-  setTimeout(stopTitleFlash, 4000);
+  setTimeout(stopTitleFlash, 12000); // Keep title flashing for 12 seconds
 };
 
 /**
