@@ -611,8 +611,70 @@ const isDuplicateNotification = (tag: string): boolean => {
 };
 
 /**
- * Ring twice (2 short beeps like WhatsApp), then show one notification + toast.
- * Use this for driver ride-request alerts — NOT repeating.
+ * Play a pleasant repeating ringtone chime for 10 seconds for driver ride requests.
+ */
+let activeRingtoneTimer: ReturnType<typeof setInterval> | null = null;
+
+export const play10SecondRingtone = () => {
+  if (activeRingtoneTimer) {
+    clearInterval(activeRingtoneTimer);
+    activeRingtoneTimer = null;
+  }
+
+  unlockAudioContext();
+  const ctx = getAudioContext();
+  if (ctx.state === 'suspended') {
+    ctx.resume().catch(() => {});
+  }
+
+  let count = 0;
+  const maxRings = 8; // ~10 seconds loop
+
+  const playChime = () => {
+    try {
+      const now = ctx.currentTime;
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(880, now);
+      gain1.gain.setValueAtTime(0.5, now);
+      gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.4);
+
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(1174.66, now + 0.25);
+      gain2.gain.setValueAtTime(0.5, now + 0.25);
+      gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.25);
+      osc2.stop(now + 0.65);
+    } catch (e) {
+      console.warn('[play10SecondRingtone] Audio failed:', e);
+    }
+  };
+
+  playChime();
+  activeRingtoneTimer = setInterval(() => {
+    count++;
+    if (count >= maxRings) {
+      if (activeRingtoneTimer) {
+        clearInterval(activeRingtoneTimer);
+        activeRingtoneTimer = null;
+      }
+      return;
+    }
+    playChime();
+  }, 1200);
+};
+
+/**
+ * Play a 10-second ringtone, voice alert, vibration, and background notification for driver ride requests.
  */
 export const notifyRideRequest = (title: string, body: string, lang = 'ar-EG') => {
   if (alarmInterval) {
@@ -622,46 +684,29 @@ export const notifyRideRequest = (title: string, body: string, lang = 'ar-EG') =
 
   const isAr = lang === 'ar-EG';
 
-  try {
-    unlockAudioContext();
-    const ctx = getAudioContext();
-    if (ctx.state === 'suspended') {
-      ctx.resume().catch(() => {});
-    }
-    const now = ctx.currentTime;
+  // 1. Play 10-second ringtone chime
+  play10SecondRingtone();
 
-    const osc1 = ctx.createOscillator();
-    const gain1 = ctx.createGain();
-    osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(880, now);
-    gain1.gain.setValueAtTime(0.45, now);
-    gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
-    osc1.connect(gain1);
-    gain1.connect(ctx.destination);
-    osc1.start(now);
-    osc1.stop(now + 0.4);
-    osc1.onended = () => { osc1.disconnect(); gain1.disconnect(); };
+  // 2. Speak voice alert
+  speakText(
+    isAr ? 'يوجد طلب مشوار جديد، يرجى الاستجابة' : 'New ride request available, please respond',
+    lang
+  );
 
-    const osc2 = ctx.createOscillator();
-    const gain2 = ctx.createGain();
-    osc2.type = 'sine';
-    osc2.frequency.setValueAtTime(988, now + 0.4);
-    gain2.gain.setValueAtTime(0.45, now + 0.4);
-    gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.75);
-    osc2.connect(gain2);
-    gain2.connect(ctx.destination);
-    osc2.start(now + 0.4);
-    osc2.stop(now + 0.8);
-    osc2.onended = () => { osc2.disconnect(); gain2.disconnect(); };
-  } catch (e) {
-    console.warn('[notifyRideRequest] Audio failed:', e);
-    playAudioFallback('new_trip');
-  }
+  // 3. Trigger mobile vibration pattern for incoming ride
+  triggerVibration([500, 200, 500, 200, 500, 200, 500]);
 
-  triggerVibration([200, 80, 200]);
-  sendNativeNotification(title, body, '🚖', 'ride-request-' + Date.now());
+  // 4. Send background / native push notification with sound & vibration
+  sendNativeNotification(
+    title,
+    body,
+    '🚖',
+    'ride-request-' + Date.now()
+  );
+
+  // 5. Flash title in browser tab
   startTitleFlash(`🚨 ${title}`);
-  setTimeout(stopTitleFlash, 4000);
+  setTimeout(stopTitleFlash, 10000);
 };
 
 /**
@@ -684,6 +729,10 @@ export const startLoudRepeatingAlarm = (
 };
 
 export const stopLoudRepeatingAlarm = () => {
+  if (activeRingtoneTimer) {
+    clearInterval(activeRingtoneTimer);
+    activeRingtoneTimer = null;
+  }
   if (alarmInterval) {
     clearInterval(alarmInterval);
     alarmInterval = null;
