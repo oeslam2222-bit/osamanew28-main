@@ -55,11 +55,11 @@ export const useBackgroundSync = (
               const ld = localDrivers.find((l) => l.id === rd.id);
               if (ld) {
                 const isStale = rd.lastSeen ? (now - new Date(rd.lastSeen).getTime() > staleThreshold) : false;
-                return {
-                  ...rd,
-                  isOnline: isStale ? false : ld.isOnline,
-                  status: isStale ? 'AVAILABLE' : (ld.isOnline ? ld.status : rd.status),
-                };
+                 return {
+                   ...rd,
+                   isOnline: isStale ? false : rd.isOnline,
+                   status: isStale ? 'AVAILABLE' : (rd.isOnline ? rd.status : ld.status),
+                 };
               }
               return rd;
             });
