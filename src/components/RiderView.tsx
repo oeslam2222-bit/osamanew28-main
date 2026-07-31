@@ -1072,8 +1072,8 @@ export const RiderView: React.FC<RiderViewProps> = ({
               </p>
             </div>
 
-            {/* Pickup Region Selection (Mandatory — Prominent standalone card) */}
-            {!activeTrip && (
+{/* Pickup Region Selection (Mandatory — Prominent standalone card) */}
+            {(!activeTrip || activeTrip.riderId !== rider.id) && (
               <div className="bg-gradient-to-l from-indigo-50 to-white border-2 border-indigo-200 rounded-2xl p-3.5 space-y-2.5 shadow-sm">
                 <div className="flex items-center gap-2.5">
                   <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
