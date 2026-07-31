@@ -26,9 +26,9 @@ const selectRidersFull = 'id,name,phone,password,balance,rating,total_trips,appr
 const selectLocationsLight = 'id,name_ar,name_en,lat,lng';
 const selectLocationsFull = 'id,name_ar,name_en,lat,lng,city,country,x,y';
 
-export const getDriverFields = (isLight: boolean) => isLight ? selectDriversLight : selectDriversFull;
-export const getRiderFields = (isLight: boolean) => isLight ? selectRidersLight : selectRidersFull;
-export const getLocationFields = (isLight: boolean) => isLight ? selectLocationsLight : selectLocationsFull;
+export const getDriverFields = (isLight: boolean): string => isLight ? selectDriversLight : selectDriversFull;
+export const getRiderFields = (isLight: boolean): string => isLight ? selectRidersLight : selectRidersFull;
+export const getLocationFields = (isLight: boolean): string => isLight ? selectLocationsLight : selectLocationsFull;
 
 // Helper to determine if we can connect to Supabase
 let isSupabaseHealthy = true;

@@ -1237,7 +1237,7 @@ const updateLastSeen = async () => {
       try {
         await supabase
           .from('ezz_drivers')
-          .update({ last_seen: now, last_heartbeat: now })
+          .update({ last_seen: now, last_heartbeat: now, is_online: true })
           .eq('id', selectedDriverId);
       } catch (e) {
         // Heartbeat failure is non-critical
@@ -1252,7 +1252,7 @@ const updateLastSeen = async () => {
       try {
         await supabase
           .from('ezz_drivers')
-          .update({ status: 'OFFLINE' })
+          .update({ status: 'OFFLINE', is_online: false })
           .eq('id', selectedDriverId);
       } catch (e) {
         // best-effort
