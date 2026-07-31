@@ -694,13 +694,9 @@ export default function App() {
     localStorage.setItem('ezz_driver_logged_in', driverIsLoggedIn ? 'true' : 'false');
   }, [driverIsLoggedIn]);
 
-  // Reset driver to AVAILABLE when driver session is restored or login occurs (ONCE on mount/login)
-  const driverInitialSetupDoneRef = useRef(false);
-  
+  // Reset driver to AVAILABLE when driver session is restored or login occurs
   useEffect(() => {
     if (!driverIsLoggedIn || !selectedDriverId || !supabaseConnected) return;
-    if (driverInitialSetupDoneRef.current) return;
-    driverInitialSetupDoneRef.current = true;
 
     const resetDriverToAvailable = async () => {
       let driver = drivers.find(d => d.id === selectedDriverId);
@@ -729,7 +725,7 @@ export default function App() {
     };
 
     resetDriverToAvailable();
-  }, [driverIsLoggedIn, selectedDriverId, supabaseConnected]); // removed 'drivers' from deps
+  }, [driverIsLoggedIn, selectedDriverId, supabaseConnected, drivers]);
 
   // Online/Offline connectivity toast notifications (state tracking is handled by useNetworkStatus hook)
   useEffect(() => {
@@ -849,8 +845,8 @@ export default function App() {
           dbActiveTrip,
         ] = await Promise.all([
           fetchLocations(),
-          fetchDrivers(true),
-          fetchRiders(true),
+          fetchDrivers(),
+          fetchRiders(),
           fetchRegions(),
           fetchAds(),
           loadSession(),
@@ -1018,6 +1014,9 @@ export default function App() {
               riderRatingToDriver: trip.riderRatingToDriver ?? prev.riderRatingToDriver,
               riderFeedbackTags: trip.riderFeedbackTags?.length ? trip.riderFeedbackTags : prev.riderFeedbackTags,
               riderFeedbackComment: trip.riderFeedbackComment || prev.riderFeedbackComment,
+              driverRatingToRider: trip.driverRatingToRider ?? prev.driverRatingToRider,
+              driverFeedbackTags: trip.driverFeedbackTags?.length ? trip.driverFeedbackTags : prev.driverFeedbackTags,
+              driverFeedbackComment: trip.driverFeedbackComment || prev.driverFeedbackComment,
             };
           }
 
@@ -1060,7 +1059,10 @@ export default function App() {
         if (!remoteActiveTrip || remoteActiveTrip === 'NO_TABLE') {
           setActiveTripWithTracking((prev) => {
             if (prev && prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
-              return prev;
+              if (!prev.driverRatingToRider) {
+                return prev;
+              }
+              return null;
             }
             if (prev && prev.status === 'CANCELLED') {
               return null;
@@ -1106,6 +1108,9 @@ export default function App() {
               riderRatingToDriver: remoteActiveTrip.riderRatingToDriver ?? prev.riderRatingToDriver,
               riderFeedbackTags: remoteActiveTrip.riderFeedbackTags?.length ? remoteActiveTrip.riderFeedbackTags : prev.riderFeedbackTags,
               riderFeedbackComment: remoteActiveTrip.riderFeedbackComment || prev.riderFeedbackComment,
+              driverRatingToRider: remoteActiveTrip.driverRatingToRider ?? prev.driverRatingToRider,
+              driverFeedbackTags: remoteActiveTrip.driverFeedbackTags?.length ? remoteActiveTrip.driverFeedbackTags : prev.driverFeedbackTags,
+              driverFeedbackComment: remoteActiveTrip.driverFeedbackComment || prev.driverFeedbackComment,
             };
           }
 
@@ -1188,21 +1193,17 @@ export default function App() {
           const currentTrip = activeTripRefForPolling.current;
           setDrivers((localDrivers) => {
             return remoteDrivers.map((rd) => {
-              // If driver toggle is pending, use LOCAL state (not remote) to avoid overwriting the user's action
+              if (pendingDriverToggleRef.current === rd.id) return rd;
               const ld = localDrivers.find((l) => l.id === rd.id);
-              if (pendingDriverToggleRef.current === rd.id && ld) return ld;
-if (ld) {
+              if (ld) {
                 const isActiveTripDriver = currentTrip && currentTrip.driverId === rd.id && (currentTrip.status === 'ACCEPTED' || currentTrip.status === 'STARTED');
                 const isStale = rd.lastSeen ? (now - new Date(rd.lastSeen).getTime() > staleThreshold) : false;
-                // Only mark as stale if the remote says the driver is offline.
-                // If remote says isOnline=true, trust it (the driver just came online and lastSeen may not have updated yet).
-                const shouldMarkStale = isStale && !rd.isOnline;
                 return {
                   ...rd,
                   currentX: isActiveTripDriver ? ld.currentX : rd.currentX,
                   currentY: isActiveTripDriver ? ld.currentY : rd.currentY,
-                  isOnline: shouldMarkStale ? false : rd.isOnline,
-                  status: shouldMarkStale ? 'AVAILABLE' : (rd.isOnline ? rd.status : 'OFFLINE'),
+                  isOnline: isStale ? false : rd.isOnline,
+                  status: isStale ? 'AVAILABLE' : (rd.isOnline ? rd.status : 'OFFLINE'),
                 };
               }
               return rd;
@@ -1217,19 +1218,12 @@ if (ld) {
     return () => clearInterval(interval);
   }, [supabaseConnected, dataSaverMode]);
 
-// Heartbeat: update driver lastSeen every 10s so stale drivers can be detected quickly
-  const driverOnlineRef = useRef(false);
-  driverOnlineRef.current = drivers.find(d => d.id === selectedDriverId)?.isOnline ?? false;
-
+  // Heartbeat: update driver lastSeen every 10s so stale drivers can be detected quickly
   useEffect(() => {
     if (!supabaseConnected || !driverIsLoggedIn || !selectedDriverId) return;
 
-const updateLastSeen = async () => {
+    const updateLastSeen = async () => {
       if (!isMountedRef.current) return;
-      // Only update heartbeat if driver is online — otherwise they'll be detected as stale
-      if (!driverOnlineRef.current) {
-        return;
-      }
       const now = new Date().toISOString();
       setDrivers((prev) =>
         prev.map((d) => (d.id === selectedDriverId ? { ...d, lastSeen: now } : d))
@@ -1237,7 +1231,7 @@ const updateLastSeen = async () => {
       try {
         await supabase
           .from('ezz_drivers')
-          .update({ last_seen: now, last_heartbeat: now, is_online: true })
+          .update({ last_seen: now, last_heartbeat: now })
           .eq('id', selectedDriverId);
       } catch (e) {
         // Heartbeat failure is non-critical
@@ -1252,7 +1246,7 @@ const updateLastSeen = async () => {
       try {
         await supabase
           .from('ezz_drivers')
-          .update({ status: 'OFFLINE', is_online: false })
+          .update({ status: 'OFFLINE' })
           .eq('id', selectedDriverId);
       } catch (e) {
         // best-effort
@@ -1677,18 +1671,6 @@ const updateLastSeen = async () => {
           if (isEligible && needsNotify && isNewlyOffered) {
             lastNotifiedTripIdRef.current = remoteActiveTrip.id;
             lastNotifiedOfferedDriverIdRef.current = remoteActiveTrip.currentOfferedDriverId || null;
-            if (document.hidden) {
-              const speechMsg = lang === 'ar'
-                ? `يوجد رحلة جديدة من ${remoteActiveTrip.pickup.nameAr} إلى ${remoteActiveTrip.dropoff.nameAr}`
-                : `New ride available from ${remoteActiveTrip.pickup.nameEn} to ${remoteActiveTrip.dropoff.nameEn}`;
-              sendNativeNotification(
-                lang === 'ar' ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!',
-                `${remoteActiveTrip.pickup.nameAr || remoteActiveTrip.pickup.nameEn} ← ${remoteActiveTrip.dropoff.nameAr || remoteActiveTrip.dropoff.nameEn} | ${remoteActiveTrip.fare} ج.م`,
-                '🚖',
-                'bg-ride-' + remoteActiveTrip.id
-              );
-              triggerVibration([300, 100, 300, 100, 400]);
-            }
           }
         }
       } catch (err) {
@@ -1971,7 +1953,7 @@ const updateLastSeen = async () => {
     // Broadcast dispatch to up to 5 available drivers in the region simultaneously.
     // The first driver to accept wins the ride. 5-minute acceptance window.
     const MAX_OFFERED_DRIVERS = 5;
-    const DISPATCH_TIMER_SECONDS = 180;
+    const DISPATCH_TIMER_SECONDS = 300;
 
     let currentOfferedDriverId: string | undefined = undefined;
     let offeredDriverIds: string[] = [];
@@ -2269,13 +2251,6 @@ const updateLastSeen = async () => {
               : 'The ride waiting time has expired. You can request a new ride.',
             lang === 'ar' ? 'ar-EG' : 'en-US'
           );
-          sendNativeNotification(
-            lang === 'ar' ? '❌ تم إلغاء الرحلة' : '❌ Ride Cancelled',
-            lang === 'ar'
-              ? 'تم إلغاء الرحلة بسبب عدم توفر سائق. يمكنك طلب رحلة جديدة.'
-              : 'The ride was cancelled because no driver was available. You can request a new ride.',
-            '❌'
-          );
           triggerToast(
             lang === 'ar' ? 'انتهت مهلة الانتظار' : 'Waiting time expired',
             lang === 'ar'
@@ -2402,45 +2377,24 @@ const updateLastSeen = async () => {
       const updated = prev.map((d) => {
         if (d.id !== driverId) return d;
         const nextOnline = !d.isOnline;
-        const nextStatus = nextOnline ? 'AVAILABLE' : 'OFFLINE';
-        const updatedDriver = { ...d, isOnline: nextOnline, status: nextStatus as 'AVAILABLE' | 'OFFLINE' };
-        if (supabaseConnected) {
-          saveDriver(updatedDriver)
-            .then((ok) => {
-              pendingDriverToggleRef.current = null; // Clear ref after save completes
-              console.log('[handleToggleOnline] Saved to DB:', driverId, nextOnline ? 'online' : 'offline');
-              if (nextOnline && activeTrip && activeTrip.status === 'SEARCHING') {
-                const isEligible = activeTrip.offeredDriverIds?.includes(driverId);
-                if (isEligible) {
-                  console.log('[handleToggleOnline] Driver came online with pending trip');
-                  notifyRideRequest(
-                    lang === 'ar' ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!',
-                    lang === 'ar'
-                      ? `من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr} | ${activeTrip.fare} ج.م`
-                      : `${activeTrip.pickup.nameEn} → ${activeTrip.dropoff.nameEn} | ${activeTrip.fare} EGP`,
-                    lang === 'ar' ? 'ar-EG' : 'en-US'
-                  );
-                  triggerToast(
-                    lang === 'ar' ? 'يوجد رحلة جديدة' : 'New trip available',
-                    lang === 'ar'
-                      ? `العميل ${activeTrip.riderName} يطلب رحلة من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr}.`
-                      : `Rider ${activeTrip.riderName} requests a ride from ${activeTrip.pickup.nameEn} to ${activeTrip.dropoff.nameEn}.`,
-                    'new_trip'
-                  );
-                }
-              }
-            })
-            .catch((err) => {
-              pendingDriverToggleRef.current = null; // Clear ref on error too
-              console.warn('[handleToggleOnline] Failed to save:', err);
-            });
-        } else {
-          pendingDriverToggleRef.current = null; // No supabase, clear immediately
-        }
-        return updatedDriver;
+        return { ...d, isOnline: nextOnline, status: nextOnline ? 'AVAILABLE' as const : 'OFFLINE' as const };
       });
+      const driver = updated.find((d) => d.id === driverId);
+      if (driver && supabaseConnected) {
+        saveDriver(driver).then((ok) => {
+          if (ok) {
+            console.log('[handleToggleOnline] Driver status saved:', driverId, driver.isOnline ? 'online' : 'offline');
+          } else {
+            console.warn('[handleToggleOnline] Failed to save driver status:', driverId);
+          }
+          pendingDriverToggleRef.current = null;
+        });
+      }
       return updated;
     });
+    setTimeout(() => {
+      pendingDriverToggleRef.current = null;
+    }, 10000);
   };
 
   const handleUpdateDriverLocation = (driverId: string, lat: number, lng: number, x: number, y: number) => {
@@ -2739,8 +2693,8 @@ const updateLastSeen = async () => {
           if (d.id !== driverId) return d;
           return {
             ...d,
-            status: 'AVAILABLE' as const,
-            isOnline: true,
+            status: 'OFFLINE' as const,
+            isOnline: false,
             totalTrips: d.totalTrips + 1,
             totalEarnings: d.totalEarnings + netEarnings,
             totalCommissionPaid: d.totalCommissionPaid + commission,
@@ -2807,7 +2761,7 @@ const updateLastSeen = async () => {
     }
   };
 
-
+// Handler: Trip completed — skip rating, return driver to home
     const handleTripCompleted = () => {
       if (!activeTrip) return;
 

@@ -48,6 +48,9 @@ export interface Trip {
   riderRatingToDriver?: number;
   riderFeedbackTags?: string[];
   riderFeedbackComment?: string;
+  driverRatingToRider?: number;
+  driverFeedbackTags?: string[];
+  driverFeedbackComment?: string;
   currentOfferedDriverId?: string;
   offeredDriverIds?: string[];
   dispatchTimer?: number;

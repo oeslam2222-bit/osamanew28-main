@@ -862,14 +862,12 @@ export const DriverView: React.FC<DriverViewProps> = ({
               )}
             </div>
 
-            {activeTrip && ['ACCEPTED', 'ARRIVED', 'STARTED', 'COMPLETED'].includes(activeTrip.status) && (
-              <>
-                {/* Chat with Rider Section */}
-                <div className="bg-white border border-slate-150 p-3 rounded-2xl space-y-2 pointer-events-auto">
-                  <div className="flex items-center gap-1.5 text-slate-700 font-bold text-xs pb-1 border-b border-slate-100">
-                    <MessageSquare className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
-                    <span>{lang === 'ar' ? 'شات للتواصل الفوري داخل التطبيق' : 'In-App Direct Chat'}</span>
-                  </div>
+            {/* Chat with Rider Section */}
+            <div className="bg-white border border-slate-150 p-3 rounded-2xl space-y-2 pointer-events-auto">
+              <div className="flex items-center gap-1.5 text-slate-700 font-bold text-xs pb-1 border-b border-slate-100">
+                <MessageSquare className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
+                <span>{lang === 'ar' ? 'شات للتواصل الفوري داخل التطبيق' : 'In-App Direct Chat'}</span>
+              </div>
 
               <div className="bg-slate-50 rounded-xl p-2 max-h-[120px] overflow-y-auto space-y-1.5 border border-slate-100 flex flex-col">
                 {activeTrip.chatMessages && activeTrip.chatMessages.length > 0 ? (
@@ -918,9 +916,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                   {lang === 'ar' ? 'إرسال' : 'Send'}
                 </button>
               </form>
-              </div>
-              </>
-            )}
+            </div>
 
             {/* Interactive driving steps */}
             {activeTrip.status === 'ACCEPTED' && (

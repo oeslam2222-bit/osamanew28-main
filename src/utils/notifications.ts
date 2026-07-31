@@ -265,7 +265,7 @@ const generateRingtoneBlobUrl = (): string => {
   for (let i = 0; i < numSamples; i++) {
     const t = i / sampleRate;
     let sample = 0;
-    const vol = 1.0;
+    const vol = 0.5;
     if (t < toneDuration) {
       sample = Math.sin(2 * Math.PI * tone1Freq * t) * vol;
       if (i < fadeSamples) sample *= i / fadeSamples;
@@ -294,7 +294,7 @@ const playAudioFallback = (type: 'new_trip' | 'trip_accepted' | 'chat_message' |
         url = generateRingtoneBlobUrl();
         break;
       case 'trip_accepted':
-        url = generateToneBlobUrl(783.99, 0.5, 0.8 * getVolume());
+        url = generateToneBlobUrl(783.99, 0.5, 0.4 * getVolume());
         break;
       case 'trip_completed':
         url = generateToneBlobUrl(1046.50, 0.6, 0.35 * getVolume());
@@ -390,7 +390,7 @@ export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat
       osc2.frequency.setValueAtTime(293.66, now);
       osc2.frequency.setValueAtTime(329.63, now + 0.15);
 
-      gainNode.gain.setValueAtTime(0.9 * getVolume(), now);
+      gainNode.gain.setValueAtTime(0.45 * getVolume(), now);
       gainNode.gain.exponentialRampToValueAtTime(0.01, now + 1.4);
 
       osc1.connect(gainNode);
@@ -404,7 +404,103 @@ export const playNotificationSound = (type: 'new_trip' | 'trip_accepted' | 'chat
       osc1.onended = () => { osc1.disconnect(); };
       osc2.onended = () => { osc2.disconnect(); gainNode.disconnect(); };
 
+    } else if (type === 'trip_accepted') {
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
 
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, now);
+      osc.frequency.setValueAtTime(659.25, now + 0.12);
+      osc.frequency.setValueAtTime(783.99, now + 0.24);
+      osc.frequency.setValueAtTime(1046.50, now + 0.36);
+
+      gainNode.gain.setValueAtTime(0.25 * getVolume(), now);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.65);
+
+      osc.connect(gainNode);
+      gainNode.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.75);
+      osc.onended = () => { osc.disconnect(); gainNode.disconnect(); };
+
+    } else if (type === 'chat_message') {
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, now);
+      osc.frequency.setValueAtTime(1200, now + 0.08);
+
+      gainNode.gain.setValueAtTime(0.03 * getVolume(), now);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+
+      osc.connect(gainNode);
+      gainNode.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.3);
+      osc.onended = () => { osc.disconnect(); gainNode.disconnect(); };
+
+    } else if (type === 'trip_completed') {
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(523.25, now);
+      osc1.frequency.setValueAtTime(659.25, now + 0.2);
+      osc1.frequency.setValueAtTime(1046.50, now + 0.4);
+
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(261.63, now);
+      osc2.frequency.setValueAtTime(392.00, now + 0.3);
+
+      gainNode.gain.setValueAtTime(0.28 * getVolume(), now);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 1.2);
+
+      osc1.connect(gainNode);
+      osc2.connect(gainNode);
+      gainNode.connect(ctx.destination);
+
+      osc1.start(now);
+      osc2.start(now);
+      osc1.stop(now + 1.2);
+      osc2.stop(now + 1.2);
+      osc1.onended = () => { osc1.disconnect(); };
+      osc2.onended = () => { osc2.disconnect(); gainNode.disconnect(); };
+
+    } else if (type === 'rating') {
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, now);
+
+      gainNode.gain.setValueAtTime(0.28 * getVolume(), now);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+
+      osc.connect(gainNode);
+      gainNode.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.65);
+      osc.onended = () => { osc.disconnect(); gainNode.disconnect(); };
+    } else if (type === 'alert') {
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+
+      osc1.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(440, now);
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(445, now);
+
+      gainNode.gain.setValueAtTime(0.18 * getVolume(), now);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+
+      osc1.connect(gainNode);
+      osc2.connect(gainNode);
       gainNode.connect(ctx.destination);
 
       osc1.start(now);
@@ -515,8 +611,8 @@ const isDuplicateNotification = (tag: string): boolean => {
 };
 
 /**
- * Ring continuously for 10 seconds (repeating beep pattern) to grab driver's attention.
- * Use this for driver ride-request alerts.
+ * Ring twice (2 short beeps like WhatsApp), then show one notification + toast.
+ * Use this for driver ride-request alerts — NOT repeating.
  */
 export const notifyRideRequest = (title: string, body: string, lang = 'ar-EG') => {
   if (alarmInterval) {
@@ -524,63 +620,48 @@ export const notifyRideRequest = (title: string, body: string, lang = 'ar-EG') =
     alarmInterval = null;
   }
 
-  playNotificationSound('new_trip');
-  triggerVibration([200, 80, 200, 80, 200, 80, 200, 80, 200, 80, 200]);
+  const isAr = lang === 'ar-EG';
 
-  // Play a repeating ringtone pattern for 10 seconds using Web Audio scheduling
   try {
     unlockAudioContext();
     const ctx = getAudioContext();
     if (ctx.state === 'suspended') {
       ctx.resume().catch(() => {});
     }
-    const startTime = ctx.currentTime;
-    const totalDuration = 10; // 10 seconds of ringing
-    const beepDuration = 0.25; // each beep is 0.25s
-    const gapDuration = 0.15; // 0.15s gap between beeps
-    const cycleDuration = beepDuration + gapDuration; // 0.4s per cycle
-    const numCycles = Math.floor(totalDuration / cycleDuration); // 25 cycles
+    const now = ctx.currentTime;
 
-    for (let i = 0; i < numCycles; i++) {
-      const t = startTime + i * cycleDuration;
-      
-      // First beep in pair (higher frequency)
-      const osc1 = ctx.createOscillator();
-      const gain1 = ctx.createGain();
-      osc1.type = 'sine';
-      osc1.frequency.setValueAtTime(880, t);
-      gain1.gain.setValueAtTime(1.0, t);
-      gain1.gain.exponentialRampToValueAtTime(0.01, t + beepDuration);
-      osc1.connect(gain1);
-      gain1.connect(ctx.destination);
-      osc1.start(t);
-      osc1.stop(t + beepDuration + 0.05);
-      osc1.onended = () => { osc1.disconnect(); gain1.disconnect(); };
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(880, now);
+    gain1.gain.setValueAtTime(0.45, now);
+    gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.4);
+    osc1.onended = () => { osc1.disconnect(); gain1.disconnect(); };
 
-      // Second beep in pair (slightly higher frequency)
-      const t2 = t + beepDuration + gapDuration;
-      if (t2 - startTime < totalDuration) {
-        const osc2 = ctx.createOscillator();
-        const gain2 = ctx.createGain();
-        osc2.type = 'sine';
-        osc2.frequency.setValueAtTime(988, t2);
-        gain2.gain.setValueAtTime(1.0, t2);
-        gain2.gain.exponentialRampToValueAtTime(0.01, t2 + beepDuration);
-        osc2.connect(gain2);
-        gain2.connect(ctx.destination);
-        osc2.start(t2);
-        osc2.stop(t2 + beepDuration + 0.05);
-        osc2.onended = () => { osc2.disconnect(); gain2.disconnect(); };
-      }
-    }
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(988, now + 0.4);
+    gain2.gain.setValueAtTime(0.45, now + 0.4);
+    gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.75);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.4);
+    osc2.stop(now + 0.8);
+    osc2.onended = () => { osc2.disconnect(); gain2.disconnect(); };
   } catch (e) {
-    console.warn('[notifyRideRequest] Web Audio failed:', e);
-    playNotificationSound('new_trip');
+    console.warn('[notifyRideRequest] Audio failed:', e);
+    playAudioFallback('new_trip');
   }
 
+  triggerVibration([200, 80, 200]);
   sendNativeNotification(title, body, '🚖', 'ride-request-' + Date.now());
   startTitleFlash(`🚨 ${title}`);
-  setTimeout(stopTitleFlash, 12000); // Keep title flashing for 12 seconds
+  setTimeout(stopTitleFlash, 4000);
 };
 
 /**

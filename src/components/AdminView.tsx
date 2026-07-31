@@ -2225,9 +2225,43 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                           ) : (
                                             <p className="text-[9px] text-slate-400 italic">{lang === 'ar' ? 'لم يتم التقييم بعد' : 'No rating submitted yet'}</p>
                                           )}
-                                         </div>
-                                       </div>
-                                     </div>
+                                        </div>
+
+                                        {/* Driver Rating to Rider */}
+                                        <div className="bg-slate-50/60 p-3 rounded-xl space-y-1.5">
+                                          <p className="text-[8px] text-slate-400 uppercase font-black">{lang === 'ar' ? '⭐ تقييم الكابتن للعميل' : '⭐ Driver Rating to Rider'}</p>
+                                          {trip.driverRatingToRider !== undefined ? (
+                                            <div className="space-y-1">
+                                              <div className="flex items-center gap-1 justify-start">
+                                                <div className="flex text-indigo-500">
+                                                  {Array.from({ length: 5 }).map((_, i) => (
+                                                    <Star
+                                                      key={i}
+                                                      className={`w-3.5 h-3.5 ${i < (trip.driverRatingToRider || 5) ? 'fill-indigo-500 text-indigo-500' : 'text-slate-200'}`}
+                                                    />
+                                                  ))}
+                                                </div>
+                                                <span className="text-[9px] text-slate-600 font-extrabold">({trip.driverRatingToRider})</span>
+                                              </div>
+                                              {trip.driverFeedbackTags && trip.driverFeedbackTags.length > 0 && (
+                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                  {trip.driverFeedbackTags.map((t, idx) => (
+                                                    <span key={idx} className="text-[7.5px] bg-indigo-50 text-indigo-800 px-1.5 py-0.5 rounded-md font-semibold border border-indigo-100/40">{t}</span>
+                                                  ))}
+                                                </div>
+                                              )}
+                                              {trip.driverFeedbackComment && (
+                                                <p className="text-[9px] text-slate-600 bg-white border border-slate-100/80 p-2 rounded-lg italic mt-1 leading-normal">
+                                                  "{trip.driverFeedbackComment}"
+                                                </p>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <p className="text-[9px] text-slate-400 italic">{lang === 'ar' ? 'لم يتم التقييم بعد' : 'No rating submitted yet'}</p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
                                   </td>
                                 </tr>
                               )}
