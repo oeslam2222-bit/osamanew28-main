@@ -294,7 +294,7 @@ const playAudioFallback = (type: 'new_trip' | 'trip_accepted' | 'chat_message' |
         url = generateRingtoneBlobUrl();
         break;
       case 'trip_accepted':
-        url = generateToneBlobUrl(783.99, 0.5, 0.4 * getVolume());
+        url = generateToneBlobUrl(783.99, 0.5, 0.8 * getVolume());
         break;
       case 'trip_completed':
         url = generateToneBlobUrl(1046.50, 0.6, 0.35 * getVolume());
