@@ -1008,6 +1008,18 @@ export default function App() {
             if (prev && prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
               return prev;
             }
+            if (
+              prev &&
+              !dismissedTripIdsRef.current.has(prev.id) &&
+              ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'].includes(prev.status)
+            ) {
+              fetchActiveTrip(userId, userRole).then((remote) => {
+                if (remote && remote !== 'NO_TABLE' && remote.id === prev.id && isMountedRef.current) {
+                  setActiveTripWithTracking(remote);
+                }
+              });
+              return prev;
+            }
             return null;
           }
 
@@ -1762,6 +1774,7 @@ export default function App() {
   }, [drivers, supabaseConnected]);
 
   const lastSavedTripRef = useRef<string | null>(null);
+  const lastSavedActiveTripIdRef = useRef<string | null>(null);
   const lastSavedTripSnapshotRef = useRef<string>('');
   const isMountedRef = useRef(true);
   const activePollingLockRef = useRef(false);
@@ -1793,6 +1806,7 @@ export default function App() {
      if (lastSavedTripRef.current === currentTripKey) return;
      
      lastSavedTripRef.current = currentTripKey;
+     lastSavedActiveTripIdRef.current = activeTrip.id;
      saveActiveTrip(activeTrip).then((ok) => {
        console.log('[saveActiveTrip useEffect] Saved trip:', activeTrip.id, 'status:', activeTrip.status, 'result:', ok);
      });
@@ -1802,10 +1816,14 @@ export default function App() {
   useEffect(() => {
     if (!supabaseConnected) return;
     if (!activeTrip && lastSavedTripRef.current !== null) {
+      const tripIdToClear = lastSavedActiveTripIdRef.current;
       lastSavedTripRef.current = null;
-      saveActiveTrip(null).then((ok) => {
-        console.log('[saveActiveTrip useEffect] Cleared active trip, result:', ok);
-      });
+      lastSavedActiveTripIdRef.current = null;
+      if (tripIdToClear) {
+        saveActiveTrip(null, tripIdToClear).then((ok) => {
+          console.log('[saveActiveTrip useEffect] Cleared active trip, result:', ok);
+        });
+      }
     }
   }, [activeTrip, supabaseConnected]);
 
@@ -2134,8 +2152,8 @@ export default function App() {
   };
 
   // Refresh a waiting trip: re-evaluate eligible drivers and re-dispatch
-  const refreshWaitingTrip = async (): Promise<boolean> => {
-    const trip = activeTrip;
+  const refreshWaitingTrip = async (tripOverride?: Trip): Promise<boolean> => {
+    const trip = tripOverride ?? activeTrip;
     if (!trip || trip.status !== 'SEARCHING' || !rider.isLoggedIn || !selectedPickup || !selectedDropoff) return false;
 
     const pLoc = locations.find((l) => l.id === selectedPickup);
@@ -2172,8 +2190,9 @@ export default function App() {
     return true;
   };
 
-  // Dispatch timer countdown: decrements while trip is SEARCHING, cancels on timeout
+  // Dispatch timer countdown: decrements while trip is SEARCHING (rider only — avoids double countdown with driver app)
   useEffect(() => {
+    if (driverIsLoggedIn || !rider.isLoggedIn) return;
     if (!activeTrip || activeTrip.status !== 'SEARCHING') {
       return;
     }
@@ -2193,7 +2212,7 @@ export default function App() {
           setTripsHistory((history) => [cancelled, ...history]);
           if (supabaseConnected) {
             saveTripToHistory(cancelled);
-            saveActiveTrip(null).catch(() => {});
+            saveActiveTrip(null, prev.id).catch(() => {});
           }
           playNotificationSound('alert');
           speakText(
@@ -2217,7 +2236,7 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [activeTrip?.id, activeTrip?.status, lang, supabaseConnected]);
+  }, [activeTrip?.id, activeTrip?.status, lang, supabaseConnected, driverIsLoggedIn, rider.isLoggedIn]);
 
   // Auto-refresh waiting trip every 2 minutes to re-dispatch to new online drivers
   useEffect(() => {
@@ -2265,6 +2284,7 @@ export default function App() {
     cancelInProgressRef.current = true;
     dismissedTripIdsRef.current.add(activeTrip.id);
     const { driverId } = activeTrip;
+    const cancelledTripId = activeTrip.id;
 
     if (driverId) {
       setDrivers((prev) =>
@@ -2282,7 +2302,7 @@ export default function App() {
 
     if (supabaseConnected) {
       saveTripToHistory(cancelledTrip);
-      saveActiveTrip(null).then((ok) => {
+      saveActiveTrip(null, cancelledTripId).then((ok) => {
         console.log('[handleCancelRide] Cleared active trip from DB, result:', ok);
         cancelInProgressRef.current = false;
       }).catch(() => {
@@ -2503,20 +2523,25 @@ export default function App() {
       }
     } else {
       const rejectingDriverId = currentTrip.currentOfferedDriverId;
-      const updatedTrip = {
-        ...currentTrip,
-        status: 'CANCELLED' as TripStatus,
-        currentOfferedDriverId: undefined,
-        offeredDriverIds: [],
-      };
-      setActiveTripWithTracking(updatedTrip);
       setDrivers((prev) =>
         prev.map((d) => (d.id === rejectingDriverId ? { ...d, status: 'AVAILABLE' } : d))
       );
+      const withoutRejector = (currentTrip.offeredDriverIds || []).filter((id) => id !== rejectingDriverId);
+      const resetTrip: Trip = {
+        ...currentTrip,
+        status: 'SEARCHING' as TripStatus,
+        offeredDriverIds: withoutRejector,
+        currentOfferedDriverId: withoutRejector[0],
+        dispatchTimer: currentTrip.dispatchTimerMax || currentTrip.dispatchTimer || 300,
+      };
+      setActiveTripWithTracking(resetTrip);
       if (supabaseConnected) {
-        saveActiveTrip(updatedTrip).then((ok) => {
-          console.log('[handleRejectTrip] Cancelled trip, result:', ok);
+        saveActiveTrip(resetTrip).then((ok) => {
+          console.log('[handleRejectTrip] Re-dispatching after reject, result:', ok);
         });
+      }
+      if (!resetTrip.currentOfferedDriverId) {
+        refreshWaitingTrip(resetTrip);
       }
     }
   };
@@ -2715,7 +2740,7 @@ export default function App() {
        setNoAvailableDrivers(false);
 
        if (supabaseConnected) {
-         saveActiveTrip(null).then((ok) => {
+         saveActiveTrip(null, capturedId).then((ok) => {
            console.log('[handleTripCompleted] Cleared active trip, result:', ok);
          });
        }
@@ -4270,7 +4295,7 @@ if (activeTrip) {
                               dismissedTripIdsRef.current.add(activeTrip.id);
                               lastTripStatusBeforeNullRef.current = null;
                               if (supabaseConnected) {
-                                saveActiveTrip(null);
+                                saveActiveTrip(null, activeTrip.id);
                               }
                               setActiveTripWithTracking(null);
                               setNoAvailableDrivers(false);

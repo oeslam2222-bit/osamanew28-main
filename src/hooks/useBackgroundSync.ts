@@ -33,6 +33,7 @@ export const useBackgroundSync = (
   const pricingSaveGuardUntilRef = useRef<number>(0);
   const lastSyncedDriversRef = useRef<Record<string, Partial<Driver>>>({});
   const lastSavedTripRef = useRef<string | null>(null);
+  const lastSavedActiveTripIdRef = useRef<string | null>(null);
   const lastSavedTripSnapshotRef = useRef<string>('');
   const activePollingLockRef = useRef(false);
 
@@ -156,6 +157,7 @@ export const useBackgroundSync = (
     if (lastSavedTripRef.current === currentTripKey) return;
 
     lastSavedTripRef.current = currentTripKey;
+    lastSavedActiveTripIdRef.current = activeTrip.id;
     saveActiveTrip(activeTrip).then((ok) => {
       console.log('[saveActiveTrip useEffect] Saved trip:', activeTrip.id, 'status:', activeTrip.status, 'result:', ok);
     });
@@ -165,10 +167,14 @@ export const useBackgroundSync = (
   useEffect(() => {
     if (!supabaseConnected) return;
     if (!activeTrip && lastSavedTripRef.current !== null) {
+      const tripIdToClear = lastSavedActiveTripIdRef.current;
       lastSavedTripRef.current = null;
-      saveActiveTrip(null).then((ok) => {
-        console.log('[saveActiveTrip useEffect] Cleared active trip, result:', ok);
-      });
+      lastSavedActiveTripIdRef.current = null;
+      if (tripIdToClear) {
+        saveActiveTrip(null, tripIdToClear).then((ok) => {
+          console.log('[saveActiveTrip useEffect] Cleared active trip, result:', ok);
+        });
+      }
     }
   }, [activeTrip, supabaseConnected]);
 

@@ -910,18 +910,19 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
 };
 
 // Save Active Trip
-export const saveActiveTrip = async (trip: Trip | null): Promise<boolean> => {
+export const saveActiveTrip = async (trip: Trip | null, clearTripId?: string): Promise<boolean> => {
   try {
     if (!trip) {
-      // SAFETY: remove only the most recent active trip row instead of deleting the whole table.
-      // Previous code deleted all rows (delete().neq(...)) which cleared every active trip unintentionally.
+      if (!clearTripId) {
+        console.warn('[saveActiveTrip] Refusing to clear active trip without trip id');
+        return false;
+      }
       const { error } = await supabase
         .from('ezz_active_trip')
         .delete()
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .eq('id', clearTripId);
       if (error) throw error;
-      console.log('[saveActiveTrip] Cleared most recent active trip from DB');
+      console.log('[saveActiveTrip] Cleared active trip from DB:', clearTripId);
       return true;
     }
 

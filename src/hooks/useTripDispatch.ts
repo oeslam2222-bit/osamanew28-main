@@ -63,7 +63,7 @@ export const useTripDispatch = (
           setTripsHistory((history: Trip[]) => [cancelled, ...history]);
           if (supabaseConnected) {
             saveTripToHistory(cancelled);
-            saveActiveTrip(null).catch(() => {});
+            saveActiveTrip(null, prev.id).catch(() => {});
           }
           playNotificationSound('alert');
           speakText(
