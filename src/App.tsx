@@ -2720,11 +2720,14 @@ export default function App() {
          });
        }
 
-       setCurrentScreen(prev => {
-         if (prev === 'DRIVER_DASHBOARD') return 'DRIVER_DASHBOARD';
-         if (prev === 'RIDER_DASHBOARD') return 'RIDER_DASHBOARD';
-         return 'HOME';
-       });
+      // Ensure user is returned to their role-specific dashboard after trip completion
+      if (driverIsLoggedIn) {
+        setCurrentScreen('DRIVER_DASHBOARD');
+      } else if (rider.isLoggedIn) {
+        setCurrentScreen('RIDER_DASHBOARD');
+      } else {
+        setCurrentScreen('HOME');
+      }
      };
 
   const handleUpdateCommissionRate = (rate: number) => {
