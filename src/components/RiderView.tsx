@@ -362,10 +362,6 @@ export const RiderView: React.FC<RiderViewProps> = ({
         }
       } else {
         console.warn('[route] no result returned (all providers failed)');
-        // Allow a retry on the next render/selection change instead of
-        // caching the failed key forever. This lets the real route be
-        // recalculated when connectivity is restored.
-        lastCalculatedRouteRef.current = null;
       }
       setIsCalculatingRoute(false);
     });
@@ -1031,13 +1027,13 @@ export const RiderView: React.FC<RiderViewProps> = ({
                  ? `شكراً لاستخدامك كابتن عز. المبلغ المستحق: ${activeTrip.fare} ج.م`
                  : `Thank you for using Captain Ezz. Amount due: ${activeTrip.fare} EGP`}
              </p>
-            {onTripCompleted && (
+             {onTripCompleted && (
                <button
                  type="button"
                  onClick={onTripCompleted}
                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer pointer-events-auto"
                >
-                 {lang === 'ar' ? '✅ متابعة وطلب رحلة جديدة' : '✅ Continue & book a new ride'}
+                 {lang === 'ar' ? '🏠 العودة للصفحة الرئيسية' : '🏠 Return to Home'}
                </button>
              )}
            </div>
@@ -1577,11 +1573,8 @@ export const RiderView: React.FC<RiderViewProps> = ({
               type="button"
               disabled={!selectedPickup || !selectedDropoff || !selectedPickupRegion}
                 onClick={() => {
-                  // Open the two-step confirmation modal (vehicle → price) before sending.
-                  setConfirmVehicleType(requestedVehicleType);
-                  setConfirmPickupLandmark(pickupLandmark);
-                  setConfirmStep('VEHICLE');
-                  setShowConfirmModal(true);
+                  onRequestRide(requestedVehicleType, pickupLandmark, appliedPromo?.code, appliedPromo?.promoCodeId);
+                  setPickupLandmark('');
                 }}
               className="w-full py-3 bg-slate-900 hover:bg-black disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-xs rounded-xl shadow-md disabled:shadow-none hover:scale-[1.01] transition-all cursor-pointer"
             >

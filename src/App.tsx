@@ -1199,7 +1199,9 @@ export default function App() {
         console.log('[Drivers Polling] Fetched', remoteDrivers?.length || 0, 'drivers from DB');
         if (remoteDrivers && remoteDrivers.length > 0) {
           const now = Date.now();
-          const staleThreshold = 15000; // 15 seconds — stale driver cutoff by lastSeen
+          // Use a slightly more tolerant stale threshold to avoid brief flickers
+          // due to small network delays or polling gaps.
+          const staleThreshold = 30000; // 30 seconds — stale driver cutoff by lastSeen
           const availableCount = remoteDrivers.filter(d => {
             if (d.approvalStatus !== 'APPROVED' || !d.isOnline || d.status !== 'AVAILABLE') return false;
             if (d.lastSeen) {
@@ -1212,7 +1214,13 @@ export default function App() {
           const currentTrip = activeTripRefForPolling.current;
           setDrivers((localDrivers) => {
             return remoteDrivers.map((rd) => {
-              if (pendingDriverToggleRef.current === rd.id) return rd;
+              if (pendingDriverToggleRef.current === rd.id) {
+                // If a local toggle is in progress prefer the local driver state
+                // to avoid overwriting the user's immediate action with stale remote data.
+                const ldPending = localDrivers.find((l) => l.id === rd.id);
+                if (ldPending) return ldPending;
+                return rd;
+              }
               const ld = localDrivers.find((l) => l.id === rd.id);
               if (ld) {
                 const isActiveTripDriver = currentTrip && currentTrip.driverId === rd.id && (currentTrip.status === 'ACCEPTED' || currentTrip.status === 'STARTED');
@@ -1909,9 +1917,6 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [activeTrip?.status, activeTrip?.id]);
 
-  // NOTE: handleTripCompleted keeps the user on their dashboard (RIDER/DRIVER)
-  // so they can immediately start the next ride. It no longer navigates HOME.
-
   // Handler: Request Ride with dynamic commission rate calculation by mileage (distance-based commission request)
   const fetchEligibleDriversForRegion = async (regionId?: string): Promise<Driver[]> => {
     const now = Date.now();
@@ -2370,14 +2375,6 @@ export default function App() {
     }
   };
 
-  // Handler: Update arbitrary driver fields (used by DriverView toggles)
-  const handleUpdateDriver = (driver: Driver) => {
-    setDrivers((prev) => prev.map((d) => d.id === driver.id ? driver : d));
-    if (supabaseConnected) {
-      saveDriver(driver).then((ok) => console.log('[handleUpdateDriver] saveDriver result:', ok));
-    }
-  };
-
   // Handler: Driver Accepts Trip Manually
   const handleAcceptTrip = async (driverId: string) => {
     if (!activeTrip || activeTrip.status !== 'SEARCHING') return;
@@ -2639,11 +2636,8 @@ export default function App() {
           if (d.id !== driverId) return d;
           return {
             ...d,
-            // Keep the driver ONLINE and AVAILABLE after the trip ends so they
-            // can immediately receive the next ride request without having to
-            // go online again.
-            status: 'AVAILABLE' as const,
-            isOnline: true,
+            status: 'OFFLINE' as const,
+            isOnline: false,
             totalTrips: d.totalTrips + 1,
             totalEarnings: d.totalEarnings + netEarnings,
             totalCommissionPaid: d.totalCommissionPaid + commission,
@@ -2710,33 +2704,31 @@ export default function App() {
     }
   };
 
-// Handler: Trip completed — keep the user on their dashboard so the
-// driver can receive new ride requests and the rider can book again.
-const handleTripCompleted = () => {
-  if (!activeTrip) return;
+// Handler: Trip completed — skip rating, return driver to home
+     const handleTripCompleted = () => {
+       if (!activeTrip) return;
 
-  const capturedId = activeTrip.id;
-  dismissedTripIdsRef.current.add(capturedId);
+       const capturedId = activeTrip.id;
+       dismissedTripIdsRef.current.add(capturedId);
 
-  setActiveTripWithTracking(null);
-  setNoAvailableDrivers(false);
+       setActiveTripWithTracking(null);
+       setNoAvailableDrivers(false);
 
-  if (supabaseConnected) {
-    saveActiveTrip(null).then((ok) => {
-      console.log('[handleTripCompleted] Cleared active trip, result:', ok);
-    });
-  }
+       if (supabaseConnected) {
+         saveActiveTrip(null).then((ok) => {
+           console.log('[handleTripCompleted] Cleared active trip, result:', ok);
+         });
+       }
 
-  // Do NOT navigate back to HOME. The driver stays on DRIVER_DASHBOARD
-  // (ready to receive the next request) and the rider stays on
-  // RIDER_DASHBOARD (ready to book the next trip).
-  const completedByDriver = driverIsLoggedIn;
-  if (completedByDriver) {
-    setCurrentScreen('DRIVER_DASHBOARD');
-  } else {
-    setCurrentScreen('RIDER_DASHBOARD');
-  }
-};
+      // Ensure user is returned to their role-specific dashboard after trip completion
+      if (driverIsLoggedIn) {
+        setCurrentScreen('DRIVER_DASHBOARD');
+      } else if (rider.isLoggedIn) {
+        setCurrentScreen('RIDER_DASHBOARD');
+      } else {
+        setCurrentScreen('HOME');
+      }
+     };
 
   const handleUpdateCommissionRate = (rate: number) => {
     setStats((prev) => ({ ...prev, commissionRate: rate }));
@@ -4245,9 +4237,8 @@ onRequestRide={handleRequestRide}
                       drivers={drivers}
                       tripsHistory={tripsHistory}
                       selectedDriverId={selectedDriverId}
-                      setSelectedDriverId={setSelectedDriverId}
-                      onUpdateDriver={handleUpdateDriver}
-                      activeTrip={activeTrip}
+                       setSelectedDriverId={setSelectedDriverId}
+                       activeTrip={activeTrip}
                       locations={locations}
                       regions={regions}
                       commissionRate={stats.commissionRate}
@@ -4267,9 +4258,8 @@ onTripCompleted={handleTripCompleted}
                      onEnableLowData={enableLowData}
                      onDisableLowData={disableLowData}
                      driverLat={drivers.find(d => d.id === selectedDriverId)?.lat}
-                     driverLng={drivers.find(d => d.id === selectedDriverId)?.lng}
-                     onCalculateNavigationRoute={getNavigationRoute}
-                     onOpenGuide={openGuideModal}
+                      driverLng={drivers.find(d => d.id === selectedDriverId)?.lng}
+                      onOpenGuide={openGuideModal}
                         onLogout={() => {
                            // Auto-set driver offline in Supabase and clear any active trip
                            if (supabaseConnected && selectedDriverId) {
@@ -4285,9 +4275,9 @@ if (activeTrip) {
                               setActiveTripWithTracking(null);
                               setNoAvailableDrivers(false);
                             }
-                           setDriverIsLoggedIn(false);
-                           clearSession('DRIVER');
-                           setCurrentScreen('HOME');
+                            setDriverIsLoggedIn(false);
+                            clearSession('DRIVER');
+                            setCurrentScreen('DRIVER_DASHBOARD');
                          }}
                     />
                   </ErrorBoundary>
