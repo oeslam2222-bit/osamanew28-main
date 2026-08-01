@@ -56,6 +56,7 @@ export const CityMap: React.FC<CityMapProps> = ({
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const layerGroupRef = useRef<any>(null);
+  const prevLocationIdsRef = useRef<string>('');
 
   // Refs for callbacks to prevent stale closures in Leaflet events
   const mapModeRef = useRef(mapMode);
@@ -188,6 +189,7 @@ export const CityMap: React.FC<CityMapProps> = ({
       zoom: 14,
       zoomControl: false,
       attributionControl: true,
+      preferCanvas: true,
     });
 
     // Low-bandwidth optimized Map tiles
@@ -196,7 +198,7 @@ export const CityMap: React.FC<CityMapProps> = ({
       maxNativeZoom: 18,
       updateWhenIdle: dataSaverMode,
       updateWhenZooming: !dataSaverMode,
-      keepBuffer: dataSaverMode ? 1 : 2,
+      keepBuffer: dataSaverMode ? 0 : 1,
       attribution: '© OpenStreetMap contributors',
     }).addTo(map);
 
@@ -241,6 +243,10 @@ export const CityMap: React.FC<CityMapProps> = ({
 
     layerGroup.clearLayers();
 
+    const currentLocationIds = locations.map(l => l.id).join(',');
+    const locationsChanged = currentLocationIds !== prevLocationIdsRef.current;
+    prevLocationIdsRef.current = currentLocationIds;
+
     const pLoc = locations.find(l => l.id === selectedPickup);
     const dLoc = locations.find(l => l.id === selectedDropoff);
 
@@ -274,41 +280,44 @@ export const CityMap: React.FC<CityMapProps> = ({
 
     // 1. Draw pre-defined stations (except selected ones)
     // Skip generic numbered defaults (id 1-8) to avoid confusing "مكان 1/2" labels on the map.
-    locations.forEach(loc => {
-      const isPickup = loc.id === selectedPickup;
-      const isDropoff = loc.id === selectedDropoff;
-      const isDefaultNumbered = /^[1-8]$/.test(loc.id);
+    // Only redraw station markers when locations actually changed to avoid unnecessary work on mobile.
+    if (locationsChanged) {
+      locations.forEach(loc => {
+        const isPickup = loc.id === selectedPickup;
+        const isDropoff = loc.id === selectedDropoff;
+        const isDefaultNumbered = /^[1-8]$/.test(loc.id);
 
-      if (!isPickup && !isDropoff && !isDefaultNumbered) {
-        const stationIcon = L.divIcon({
-          className: 'custom-div-icon',
-          html: `
-            <div class="flex flex-col items-center opacity-70 hover:opacity-100 transition-all cursor-pointer">
-              <div class="w-5 h-5 rounded-full bg-slate-800 border-2 border-white text-white flex items-center justify-center shadow-lg">
-                🏛️
+        if (!isPickup && !isDropoff && !isDefaultNumbered) {
+          const stationIcon = L.divIcon({
+            className: 'custom-div-icon',
+            html: `
+              <div class="flex flex-col items-center opacity-70 hover:opacity-100 transition-all cursor-pointer">
+                <div class="w-5 h-5 rounded-full bg-slate-800 border-2 border-white text-white flex items-center justify-center shadow-lg">
+                  🏛️
+                </div>
+                <div class="bg-white/95 text-slate-800 border border-slate-200 px-1 py-0.2 rounded text-[7px] font-black shadow-xs whitespace-nowrap mt-0.5">
+                  ${lang === 'ar' ? loc.nameAr : loc.nameEn}
+                </div>
               </div>
-              <div class="bg-white/95 text-slate-800 border border-slate-200 px-1 py-0.2 rounded text-[7px] font-black shadow-xs whitespace-nowrap mt-0.5">
-                ${lang === 'ar' ? loc.nameAr : loc.nameEn}
-              </div>
-            </div>
-          `,
-          iconSize: [20, 26],
-          iconAnchor: [10, 13],
-        });
+            `,
+            iconSize: [20, 26],
+            iconAnchor: [10, 13],
+          });
 
-        const stationMarker = L.marker([loc.lat, loc.lng], { icon: stationIcon });
-        stationMarker.on('click', (e: any) => {
-          L.DomEvent.stopPropagation(e);
-          const isPickupMode = mapModeRef.current === 'PICKUP';
-          if (isPickupMode && onSelectPickupRef.current) {
-            onSelectPickupRef.current(loc.id);
-          } else if (!isPickupMode && onSelectDropoffRef.current) {
-            onSelectDropoffRef.current(loc.id);
-          }
-        });
-        stationMarker.addTo(layerGroup);
-      }
-    });
+          const stationMarker = L.marker([loc.lat, loc.lng], { icon: stationIcon });
+          stationMarker.on('click', (e: any) => {
+            L.DomEvent.stopPropagation(e);
+            const isPickupMode = mapModeRef.current === 'PICKUP';
+            if (isPickupMode && onSelectPickupRef.current) {
+              onSelectPickupRef.current(loc.id);
+            } else if (!isPickupMode && onSelectDropoffRef.current) {
+              onSelectDropoffRef.current(loc.id);
+            }
+          });
+          stationMarker.addTo(layerGroup);
+        }
+      });
+    }
 
     // 2. Custom Icons styled perfectly with Tailwind
     const pickupIcon = L.divIcon({
