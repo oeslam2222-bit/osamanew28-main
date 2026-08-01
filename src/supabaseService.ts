@@ -912,25 +912,18 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
 // Save Active Trip
 export const saveActiveTrip = async (trip: Trip | null): Promise<boolean> => {
   try {
-      if (!trip) {
-        const { data: recent, error: fetchError } = await supabase
-          .from('ezz_active_trip')
-          .select('id')
-          .order('created_at', { ascending: false })
-          .limit(1);
-        if (fetchError) throw fetchError;
-        if (!recent || recent.length === 0) {
-          console.log('[saveActiveTrip] No active trip to clear');
-          return true;
-        }
-        const { error } = await supabase
-          .from('ezz_active_trip')
-          .delete()
-          .eq('id', recent[0].id);
-        if (error) throw error;
-        console.log('[saveActiveTrip] Cleared most recent active trip from DB');
-        return true;
-      }
+    if (!trip) {
+      // SAFETY: remove only the most recent active trip row instead of deleting the whole table.
+      // Previous code deleted all rows (delete().neq(...)) which cleared every active trip unintentionally.
+      const { error } = await supabase
+        .from('ezz_active_trip')
+        .delete()
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      console.log('[saveActiveTrip] Cleared most recent active trip from DB');
+      return true;
+    }
 
     console.log('[saveActiveTrip] Saving trip to DB:', trip.id, 'status:', trip.status, 'offeredDriverIds:', trip.offeredDriverIds, 'chatMessages count:', trip.chatMessages?.length || 0);
 
