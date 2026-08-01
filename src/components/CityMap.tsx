@@ -360,7 +360,8 @@ export const CityMap: React.FC<CityMapProps> = ({
               onSelectDropoffRef.current(loc.id);
             }
           });
-          clusterGroup.addMarker(stationMarker);
+          // markercluster uses addLayer to add markers to the group
+          clusterGroup.addLayer(stationMarker);
         }
       });
     }
