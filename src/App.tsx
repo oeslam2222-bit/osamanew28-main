@@ -2367,14 +2367,6 @@ export default function App() {
     }
   };
 
-  // Handler: Update arbitrary driver fields (used by DriverView toggles)
-  const handleUpdateDriver = (driver: Driver) => {
-    setDrivers((prev) => prev.map((d) => d.id === driver.id ? driver : d));
-    if (supabaseConnected) {
-      saveDriver(driver).then((ok) => console.log('[handleUpdateDriver] saveDriver result:', ok));
-    }
-  };
-
   // Handler: Driver Accepts Trip Manually
   const handleAcceptTrip = async (driverId: string) => {
     if (!activeTrip || activeTrip.status !== 'SEARCHING') return;
@@ -4234,9 +4226,8 @@ onRequestRide={handleRequestRide}
                       drivers={drivers}
                       tripsHistory={tripsHistory}
                       selectedDriverId={selectedDriverId}
-                      setSelectedDriverId={setSelectedDriverId}
-                      onUpdateDriver={handleUpdateDriver}
-                      activeTrip={activeTrip}
+                       setSelectedDriverId={setSelectedDriverId}
+                       activeTrip={activeTrip}
                       locations={locations}
                       regions={regions}
                       commissionRate={stats.commissionRate}
@@ -4256,9 +4247,8 @@ onTripCompleted={handleTripCompleted}
                      onEnableLowData={enableLowData}
                      onDisableLowData={disableLowData}
                      driverLat={drivers.find(d => d.id === selectedDriverId)?.lat}
-                     driverLng={drivers.find(d => d.id === selectedDriverId)?.lng}
-                     onCalculateNavigationRoute={getNavigationRoute}
-                     onOpenGuide={openGuideModal}
+                      driverLng={drivers.find(d => d.id === selectedDriverId)?.lng}
+                      onOpenGuide={openGuideModal}
                         onLogout={() => {
                            // Auto-set driver offline in Supabase and clear any active trip
                            if (supabaseConnected && selectedDriverId) {

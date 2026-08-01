@@ -213,9 +213,19 @@ export const CityMap: React.FC<CityMapProps> = ({
       zoomEl.style.overflow = 'hidden';
     }
 
+    const clusterGroup = L.markerClusterGroup({
+      chunkedLoading: true,
+      maxClusterRadius: 50,
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+      zoomToBoundsOnClick: true,
+      disableClusteringAtZoom: 16,
+    }).addTo(map);
+
     const layerGroup = L.layerGroup().addTo(map);
     layerGroupRef.current = layerGroup;
     mapInstanceRef.current = map;
+    (window as any).__clusterGroup = clusterGroup;
 
     // Click on map sets pickup or dropoff depending on current mode
     map.on('click', (e: any) => {
@@ -224,6 +234,30 @@ export const CityMap: React.FC<CityMapProps> = ({
       const isPickup = mapModeRef.current === 'PICKUP';
       handlePositionUpdate(lat, lng, isPickup);
     });
+
+    // Update station markers visibility on pan/zoom for viewport + zoom filtering
+    const updateStationVisibility = () => {
+      const cg = (window as any).__clusterGroup;
+      if (!cg) return;
+      const bounds = map.getBounds();
+      const zoom = map.getZoom();
+      const minZoom = 14;
+      
+      cg.eachLayer((layer: any) => {
+        if (layer instanceof L.Marker) {
+          const latLng = layer.getLatLng();
+          const inBounds = bounds.contains([latLng.lat, latLng.lng]);
+          const showDetail = zoom >= minZoom;
+          const el = layer.getElement();
+          if (el) {
+            el.style.display = (inBounds && showDetail) ? '' : 'none';
+          }
+        }
+      });
+    };
+
+    map.on('moveend', updateStationVisibility);
+    map.on('zoomend', updateStationVisibility);
 
     return () => {
       if (mapInstanceRef.current) {
@@ -277,33 +311,46 @@ export const CityMap: React.FC<CityMapProps> = ({
     lastCenterPickupCoordsRef.current = pCoords;
     lastCenterDropoffCoordsRef.current = dCoords;
 
-    // 1. Draw pre-defined stations (except selected ones)
-    // Skip generic numbered defaults (id 1-8) to avoid confusing "مكان 1/2" labels on the map.
-    // Only redraw station markers when locations actually changed to avoid unnecessary work on mobile.
-    if (locationsChanged) {
+    // 1. Draw pre-defined stations (except selected ones) with clustering + viewport/zoom filtering
+    const clusterGroup = (window as any).__clusterGroup;
+    if (clusterGroup && locationsChanged) {
+      clusterGroup.clearLayers();
+      const bounds = map.getBounds();
+      const zoom = map.getZoom();
+      const minZoomForStations = 14;
+      
       locations.forEach(loc => {
         const isPickup = loc.id === selectedPickup;
         const isDropoff = loc.id === selectedDropoff;
         const isDefaultNumbered = /^[1-8]$/.test(loc.id);
-
+        
         if (!isPickup && !isDropoff && !isDefaultNumbered) {
+          // Viewport filtering: only show markers within current map bounds
+          if (!bounds.contains([loc.lat, loc.lng])) return;
+          
+          // Zoom filtering: only show detailed station markers when zoomed in enough
+          if (zoom < minZoomForStations) return;
+          
           const stationIcon = L.divIcon({
             className: 'custom-div-icon',
             html: `
-              <div class="flex flex-col items-center opacity-70 hover:opacity-100 transition-all cursor-pointer">
-                <div class="w-5 h-5 rounded-full bg-slate-800 border-2 border-white text-white flex items-center justify-center shadow-lg">
-                  🏛️
-                </div>
-                <div class="bg-white/95 text-slate-800 border border-slate-200 px-1 py-0.2 rounded text-[7px] font-black shadow-xs whitespace-nowrap mt-0.5">
-                  ${lang === 'ar' ? loc.nameAr : loc.nameEn}
+              <div style="cursor: pointer;">
+                <div style="width: 24px; height: 24px; border-radius: 50%; background: #1e293b; border: 2px solid white; display: flex; align-items: center; justify-content: center; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                  📍
                 </div>
               </div>
             `,
-            iconSize: [20, 26],
-            iconAnchor: [10, 13],
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
           });
-
+          
           const stationMarker = L.marker([loc.lat, loc.lng], { icon: stationIcon });
+          stationMarker.bindPopup(`
+            <div style="font-family: system-ui; padding: 4px; min-width: 120px;">
+              <strong style="font-size: 13px;">${lang === 'ar' ? loc.nameAr : loc.nameEn}</strong>
+              <br/><span style="font-size: 11px; color: #666;">${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}</span>
+            </div>
+          `);
           stationMarker.on('click', (e: any) => {
             L.DomEvent.stopPropagation(e);
             const isPickupMode = mapModeRef.current === 'PICKUP';
@@ -313,7 +360,7 @@ export const CityMap: React.FC<CityMapProps> = ({
               onSelectDropoffRef.current(loc.id);
             }
           });
-          stationMarker.addTo(layerGroup);
+          clusterGroup.addMarker(stationMarker);
         }
       });
     }
@@ -322,34 +369,28 @@ export const CityMap: React.FC<CityMapProps> = ({
     const pickupIcon = L.divIcon({
       className: 'custom-div-icon',
       html: `
-        <div class="flex flex-col items-center">
-          <span class="absolute inline-flex h-7 w-7 rounded-full bg-emerald-400 opacity-40 animate-ping"></span>
-          <div class="w-8 h-8 rounded-full bg-emerald-500 border-2 border-white text-white flex items-center justify-center shadow-xl font-bold">
+        <div style="cursor: pointer; position: relative;">
+          <span style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 28px; height: 28px; border-radius: 50%; background: rgba(16, 185, 129, 0.3); animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
+          <div style="width: 32px; height: 32px; border-radius: 50%; background: #10b981; border: 3px solid white; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
             📍
-          </div>
-          <div class="bg-emerald-950 text-emerald-100 border border-emerald-800 px-1.5 py-0.5 rounded text-[8.5px] font-extrabold shadow-lg whitespace-nowrap mt-1">
-            ${lang === 'ar' ? 'الالتقاء' : 'Pickup'}
           </div>
         </div>
       `,
-      iconSize: [30, 42],
-      iconAnchor: [15, 35],
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
     });
 
     const dropoffIcon = L.divIcon({
       className: 'custom-div-icon',
       html: `
-        <div class="flex flex-col items-center">
-          <div class="w-8 h-8 rounded-full bg-rose-500 border-2 border-white text-white flex items-center justify-center shadow-xl font-bold">
+        <div style="cursor: pointer;">
+          <div style="width: 32px; height: 32px; border-radius: 50%; background: #f43f5e; border: 3px solid white; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
             🏁
-          </div>
-          <div class="bg-rose-950 text-rose-100 border border-rose-800 px-1.5 py-0.5 rounded text-[8.5px] font-extrabold shadow-lg whitespace-nowrap mt-1">
-            ${lang === 'ar' ? 'الوصول' : 'Dropoff'}
           </div>
         </div>
       `,
-      iconSize: [30, 42],
-      iconAnchor: [15, 35],
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
     });
 
     // 3. Add Pickup Marker
@@ -358,6 +399,12 @@ export const CityMap: React.FC<CityMapProps> = ({
         icon: pickupIcon,
         draggable: true,
       });
+      pickupMarker.bindPopup(`
+        <div style="font-family: system-ui; padding: 4px;">
+          <strong style="color: #059669;">📌 ${lang === 'ar' ? 'نقطة الالتقاء' : 'Pickup'}</strong><br/>
+          <span style="font-size: 12px;">${lang === 'ar' ? pLoc.nameAr : pLoc.nameEn}</span>
+        </div>
+      `);
       pickupMarker.on('dragend', (e: any) => {
         const { lat, lng } = e.target.getLatLng();
         handlePositionUpdate(lat, lng, true);
@@ -371,6 +418,12 @@ export const CityMap: React.FC<CityMapProps> = ({
         icon: dropoffIcon,
         draggable: true,
       });
+      dropoffMarker.bindPopup(`
+        <div style="font-family: system-ui; padding: 4px;">
+          <strong style="color: #e11d48;">🏁 ${lang === 'ar' ? 'نقطة الوصول' : 'Dropoff'}</strong><br/>
+          <span style="font-size: 12px;">${lang === 'ar' ? dLoc.nameAr : dLoc.nameEn}</span>
+        </div>
+      `);
       dropoffMarker.on('dragend', (e: any) => {
         const { lat, lng } = e.target.getLatLng();
         handlePositionUpdate(lat, lng, false);
@@ -383,22 +436,24 @@ export const CityMap: React.FC<CityMapProps> = ({
       const driverIcon = L.divIcon({
         className: 'custom-div-icon',
         html: `
-          <div class="flex flex-col items-center">
-            <div class="w-10 h-10 rounded-full bg-blue-600 border-3 border-white text-white flex items-center justify-center shadow-2xl font-bold text-lg animate-pulse">
+          <div style="cursor: pointer;">
+            <div style="width: 36px; height: 36px; border-radius: 50%; background: #2563eb; border: 3px solid white; display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); animation: pulse 2s infinite;">
               🚖
-            </div>
-            <div class="bg-blue-950 text-blue-100 border border-blue-800 px-1.5 py-0.5 rounded text-[8px] font-extrabold shadow-lg whitespace-nowrap mt-1">
-              ${lang === 'ar' ? 'أنت هنا' : 'You are here'}
             </div>
           </div>
         `,
-        iconSize: [40, 52],
-        iconAnchor: [20, 42],
+        iconSize: [36, 36],
+        iconAnchor: [18, 18],
       });
       const driverMarker = L.marker([currentDriverPosition.lat, currentDriverPosition.lng], {
         icon: driverIcon,
         zIndexOffset: 1000,
       });
+      driverMarker.bindPopup(`
+        <div style="font-family: system-ui; padding: 4px;">
+          <strong style="color: #2563eb;">🚖 ${lang === 'ar' ? 'موقعك الحالي' : 'Your Location'}</strong>
+        </div>
+      `);
       driverMarker.addTo(layerGroup);
 
       // If navigating, center map on driver and fit all points

@@ -1,11 +1,7 @@
-import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Driver, Trip, Location, SystemStats, Region } from '../types';
-import { RouteResult } from '../utils/haversine';
 import { ToggleLeft, ToggleRight, MapPin, Navigation, DollarSign, Wallet, Check, AlertTriangle, Users, Star, MessageSquare, Bell, ShieldAlert, Loader2, ChevronRight, ChevronLeft, Plus, X } from 'lucide-react';
-import { fetchTripsHistoryPaginated, saveDriver } from '../supabaseService';
-// Lazy-load the map so the driver screen opens instantly even on slow networks.
-// The map bundle is only fetched when the driver explicitly taps "Show map".
-const CityMap = lazy(() => import('./CityMap').then(m => ({ default: m.CityMap })));
+import { fetchTripsHistoryPaginated } from '../supabaseService';
 
 interface DriverViewProps {
   drivers: Driver[];
@@ -18,12 +14,11 @@ interface DriverViewProps {
   onToggleOnline: (driverId: string) => void;
   onUpdateDriverLocation?: (driverId: string, lat: number, lng: number, x: number, y: number) => void;
   onUpdateServiceAreas?: (driverId: string, areas: string[]) => void;
-  onUpdateDriver?: (driver: Driver) => void;
   onAcceptTrip: (driverId: string) => void;
   onRejectTrip: () => void;
   onArrivedAtPickup: () => void;
   onStartTrip: () => void;
-onEndTrip: () => void;
+  onEndTrip: () => void;
   onTransferTrip?: () => void;
   onTripCompleted: () => void;
   lang: 'ar' | 'en';
@@ -36,7 +31,6 @@ onEndTrip: () => void;
   pendingRequestCount?: number;
   driverLat?: number;
   driverLng?: number;
-  onCalculateNavigationRoute?: (driverLat: number, driverLng: number, pickup: Location, dropoff: Location) => Promise<RouteResult | null>;
   onOpenGuide?: (tab?: 'rider' | 'driver' | 'about') => void;
   tripsHistory?: Trip[];
 }
@@ -52,7 +46,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
   onToggleOnline,
   onUpdateDriverLocation,
   onUpdateServiceAreas,
-  onUpdateDriver,
   onAcceptTrip,
   onRejectTrip,
   onArrivedAtPickup,
@@ -70,7 +63,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
   pendingRequestCount = 0,
   driverLat,
   driverLng,
-  onCalculateNavigationRoute,
   onOpenGuide,
   tripsHistory = [],
 }) => {
@@ -87,70 +79,51 @@ export const DriverView: React.FC<DriverViewProps> = ({
   const currentDriverId = currentDriver?.id || '';
   const activeTripRef = useRef(activeTrip);
   activeTripRef.current = activeTrip;
-  const driverLatRef = useRef(driverLat);
-  driverLatRef.current = driverLat;
-  const driverLngRef = useRef(driverLng);
-  driverLngRef.current = driverLng;
   const onUpdateDriverLocationRef = useRef(onUpdateDriverLocation);
   onUpdateDriverLocationRef.current = onUpdateDriverLocation;
-  const onUpdateDriverRef = useRef(onUpdateDriver);
-  onUpdateDriverRef.current = onUpdateDriver;
-  const onCalculateNavigationRouteRef = useRef(onCalculateNavigationRoute);
-  onCalculateNavigationRouteRef.current = onCalculateNavigationRoute;
 
-   let geoWatchId: number | null = null;
+  const geoWatchIdRef = useRef<number | null>(null);
 
-  const [stableOnline, setStableOnline] = useState(currentDriver?.isOnline ?? false);
-
-  React.useEffect(() => {
-    setStableOnline(currentDriver?.isOnline ?? false);
-  }, [currentDriver?.isOnline]);
+  const [chatText, setChatText] = useState('');
 
    React.useEffect(() => {
      if (!currentDriverId || !onUpdateDriverLocationRef.current) return;
      const trip = activeTripRef.current;
      if (!trip || trip.driverId !== currentDriverId) return;
 
-    if (!('geolocation' in navigator)) {
-      console.warn('[GPS] Geolocation not supported in this browser');
-      return;
-    }
+     if (!('geolocation' in navigator)) {
+       console.warn('[GPS] Geolocation not supported in this browser');
+       return;
+     }
 
-    geoWatchId = navigator.geolocation.watchPosition(
-      (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        const x = ((lng - 31.2561) / 0.0025) + 50;
-        const y = ((lat - 29.6197) / 0.0025) + 50;
-        try {
-          onUpdateDriverLocationRef.current?.(currentDriverId, lat, lng, x, y);
-        } catch (err) {
-          console.warn('[DriverView] onUpdateDriverLocation error:', err);
-        }
-      },
-      (err) => {
-        console.warn('[GPS] Watch error:', err.message);
-      },
-      {
-        enableHighAccuracy: !lowDataMode,
-        maximumAge: lowDataMode ? 30000 : 10000,
-      }
-    );
+     geoWatchIdRef.current = navigator.geolocation.watchPosition(
+       (position) => {
+         const lat = position.coords.latitude;
+         const lng = position.coords.longitude;
+         const x = ((lng - 31.2561) / 0.0025) + 50;
+         const y = ((lat - 29.6197) / 0.0025) + 50;
+         try {
+           onUpdateDriverLocationRef.current?.(currentDriverId, lat, lng, x, y);
+         } catch (err) {
+           console.warn('[DriverView] onUpdateDriverLocation error:', err);
+         }
+       },
+       (err) => {
+         console.warn('[GPS] Watch error:', err.message);
+       },
+       {
+         enableHighAccuracy: !lowDataMode,
+         maximumAge: lowDataMode ? 30000 : 10000,
+       }
+     );
 
-    return () => {
-      if (geoWatchId !== null) {
-        navigator.geolocation.clearWatch(geoWatchId);
-        geoWatchId = null;
-      }
-    };
-  }, [currentDriverId, activeTrip?.id, activeTrip?.driverId]);
-
-  const [chatText, setChatText] = useState('');
-  
-
-  // Navigation state
-  const [navigationRoute, setNavigationRoute] = useState<RouteResult | null>(null);
-  const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
+     return () => {
+       if (geoWatchIdRef.current !== null) {
+         navigator.geolocation.clearWatch(geoWatchIdRef.current);
+         geoWatchIdRef.current = null;
+       }
+     };
+  }, [currentDriverId, activeTrip?.id, activeTrip?.driverId, lowDataMode]);
 
   // Driver Trip History (paginated + filtered)
   const [myTrips, setMyTrips] = useState<Trip[]>([]);
@@ -160,64 +133,18 @@ export const DriverView: React.FC<DriverViewProps> = ({
   const [myTripDateTo, setMyTripDateTo] = useState('');
   const [isLoadingMyTrips, setIsLoadingMyTrips] = useState(false);
 
-  // Optional map toggle (driver can show/hide the map on demand)
-  const [showMap, setShowMap] = useState(false);
-
   // PWA Service Worker & Push Notification state
   const [swRegistered, setSwRegistered] = useState(false);
   const [pushStatus, setPushStatus] = useState<'granted' | 'denied' | 'default'>('default');
 
-  React.useEffect(() => {
-    if (!currentDriver) {
-      setNavigationRoute(null);
-      return;
-    }
-    const trip = activeTripRef.current;
-    if (!trip || trip.driverId !== currentDriver.id) {
-      setNavigationRoute(null);
-      return;
-    }
-    const calcRoute = onCalculateNavigationRouteRef.current;
-    if (!calcRoute || !driverLatRef.current || !driverLngRef.current) {
-      setNavigationRoute(null);
-      return;
-    }
-
-    // Auto-show map only if driver preference enables it
-    if ((currentDriver.autoShowMap || false) && ['ACCEPTED', 'ARRIVED', 'STARTED'].includes(trip.status)) {
-      setShowMap(true);
-    }
-
-    let cancelled = false;
-    setIsCalculatingRoute(true);
-
-    calcRoute(driverLatRef.current, driverLngRef.current, trip.pickup, trip.dropoff)
-      .then(result => {
-        if (!cancelled) {
-          setNavigationRoute(result);
-          setIsCalculatingRoute(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setNavigationRoute(null);
-          setIsCalculatingRoute(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentDriverId, activeTrip?.id, activeTrip?.status, onCalculateNavigationRoute]);
-
-  React.useEffect(() => {
-    if ('Notification' in window) {
-      setPushStatus(Notification.permission);
-    }
+  useEffect(() => {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistration().then(reg => {
+      navigator.serviceWorker.getRegistration().then((reg) => {
         setSwRegistered(!!reg);
       });
+    }
+    if ('Notification' in window) {
+      setPushStatus(Notification.permission);
     }
   }, []);
 
@@ -275,27 +202,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
     }
   };
 
-  const getManeuverEmoji = (step: any): string => {
-    const type = step.maneuver?.type || '';
-    const modifier = step.maneuver?.modifier || '';
-    if (type === 'arrive') return '🏁';
-    if (type === 'depart') return '🚀';
-    if (type === 'roundabout') return '🔄';
-    if (type === 'merge') return '🔗';
-    if (type === 'fork') return '⑂';
-    if (type === 'ramp') return '🛣️';
-    if (modifier === 'left') return '⬅️';
-    if (modifier === 'right') return '➡️';
-    if (modifier === 'slight left') return '↰';
-    if (modifier === 'slight right') return '↱';
-    if (modifier === 'sharp left') return '⮘';
-    if (modifier === 'sharp right') return '⮙';
-    if (modifier === 'uturn') return '↩️';
-    if (modifier === 'straight') return '⬆️';
-    return '↑';
-  };
-
-  const handleOnlineToggle = () => {
+   const handleOnlineToggle = () => {
     if (!currentDriver) return;
     onToggleOnline(currentDriver.id);
   };
@@ -365,14 +272,8 @@ export const DriverView: React.FC<DriverViewProps> = ({
       'isEligibleForRequest:', isEligibleForRequest);
   }, [activeTrip?.id, activeTrip?.status, activeTrip?.offeredDriverIds, currentDriver?.id]);
 
-  const getCoordsFromXY = (x: number, y: number) => {
-    const latBase = 29.6197;
-    const lngBase = 31.2561;
-    return { lat: latBase + (y - 50) * 0.0025, lng: lngBase + (x - 50) * 0.0025 };
-  };
-
-   const isCurrentlyDriving = currentDriver && activeTrip && activeTrip.driverId === currentDriver.id;
-   const isTripActive = currentDriver && activeTrip && (isCurrentlyDriving || isEligibleForRequest);
+   const isCurrentlyDriving = !!currentDriver && !!activeTrip && activeTrip.driverId === currentDriver.id;
+   const isTripActive = !!currentDriver && !!activeTrip && (isCurrentlyDriving || isEligibleForRequest);
 
   if (!currentDriver) {
     return (
@@ -525,7 +426,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
               <div className="flex items-center gap-1.5">
                 <h2 className="text-xs sm:text-sm font-extrabold truncate">{currentDriver.name}</h2>
                 {pendingRequestCount > 0 && (
-                  <span className="animate-pulse bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full leading-none shrink-0">
+<span className="animate-pulse bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full leading-none shrink-0">
                     📞 {pendingRequestCount}
                   </span>
                 )}
@@ -537,7 +438,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                   <span className="font-bold text-white">{currentDriver.rating}</span>
                   <span className="text-[9px] opacity-80">({currentDriver.totalTrips})</span>
                 </div>
-                <div className="bg-white/15 px-1.5 py-0.2 rounded-full text-[9px] font-semibold">{currentDriver.vehicleName}</div>
+<div className="bg-white/15 px-1.5 py-0.5 rounded-full text-[9px] font-semibold">{currentDriver.vehicleName}</div>
               </div>
             </div>
           </div>
@@ -636,7 +537,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
                       newAreas = [...currentDriver.serviceAreas, region.nameAr];
                     }
                     onUpdateServiceAreas?.(currentDriver.id, newAreas);
-                    saveDriver({ ...currentDriver, serviceAreas: newAreas });
                   }}
                   className="w-full bg-white text-slate-800 border border-slate-200 rounded-xl py-2 px-2.5 text-[11px] font-bold focus:outline-none cursor-pointer pointer-events-auto shadow-xs"
                 >
@@ -662,7 +562,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
                           onClick={() => {
                             const newAreas = currentDriver.serviceAreas.filter(sa => sa !== areaName);
                             onUpdateServiceAreas?.(currentDriver.id, newAreas);
-                            saveDriver({ ...currentDriver, serviceAreas: newAreas });
                           }}
                           className="text-white/80 hover:text-white font-bold cursor-pointer pointer-events-auto text-[10px]"
                           title={lang === 'ar' ? 'إزالة' : 'Remove'}
@@ -687,17 +586,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
           </div>
         )}
 
-        {/* Rating and Info */}
-        <div className="flex items-center justify-between text-[11px] text-slate-400">
-          <div className="flex items-center gap-1">
-            <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-            <span className="font-bold text-slate-700">{currentDriver.rating}</span>
-            <span>({currentDriver.totalTrips} {lang === 'ar' ? 'رحلة' : 'rides'})</span>
-          </div>
-          <div className="font-mono text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded font-bold">
-            {currentDriver.carPlate}
-          </div>
-        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -808,7 +696,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
         )}
 
         {/* State 2: Active Driving Mode */}
-        {isTripActive && (
+        {isCurrentlyDriving && (
           <div className="bg-blue-50/50 border border-blue-100 rounded-2xl p-4 space-y-4">
             <div className="flex items-center justify-between">
               <span className="px-2 py-0.5 bg-blue-600 text-white text-[9px] font-bold rounded-full">
@@ -864,7 +752,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
 
             {/* Chat with Rider Section — only show when trip is active */}
             {activeTrip.status !== 'SEARCHING' && activeTrip.status !== 'CANCELLED' && (
-            <div className="bg-white border border-slate-150 p-3 rounded-2xl space-y-2 pointer-events-auto">
+<div className="bg-white border border-slate-200 p-3 rounded-2xl space-y-2 pointer-events-auto">
               <div className="flex items-center gap-1.5 text-slate-700 font-bold text-xs pb-1 border-b border-slate-100">
                 <MessageSquare className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
                 <span>{lang === 'ar' ? 'شات للتواصل الفوري داخل التطبيق' : 'In-App Direct Chat'}</span>
