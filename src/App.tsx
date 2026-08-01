@@ -2705,23 +2705,27 @@ export default function App() {
   };
 
 // Handler: Trip completed — skip rating, return driver to home
-    const handleTripCompleted = () => {
-      if (!activeTrip) return;
+     const handleTripCompleted = () => {
+       if (!activeTrip) return;
 
-      const capturedId = activeTrip.id;
-      dismissedTripIdsRef.current.add(capturedId);
+       const capturedId = activeTrip.id;
+       dismissedTripIdsRef.current.add(capturedId);
 
-      setActiveTripWithTracking(null);
-      setNoAvailableDrivers(false);
+       setActiveTripWithTracking(null);
+       setNoAvailableDrivers(false);
 
-      if (supabaseConnected) {
-        saveActiveTrip(null).then((ok) => {
-          console.log('[handleTripCompleted] Cleared active trip, result:', ok);
-        });
-      }
+       if (supabaseConnected) {
+         saveActiveTrip(null).then((ok) => {
+           console.log('[handleTripCompleted] Cleared active trip, result:', ok);
+         });
+       }
 
-      setCurrentScreen('HOME');
-    };
+       setCurrentScreen(prev => {
+         if (prev === 'DRIVER_DASHBOARD') return 'DRIVER_DASHBOARD';
+         if (prev === 'RIDER_DASHBOARD') return 'RIDER_DASHBOARD';
+         return 'HOME';
+       });
+     };
 
   const handleUpdateCommissionRate = (rate: number) => {
     setStats((prev) => ({ ...prev, commissionRate: rate }));
@@ -4270,9 +4274,9 @@ if (activeTrip) {
                               setActiveTripWithTracking(null);
                               setNoAvailableDrivers(false);
                             }
-                           setDriverIsLoggedIn(false);
-                           clearSession('DRIVER');
-                           setCurrentScreen('HOME');
+                            setDriverIsLoggedIn(false);
+                            clearSession('DRIVER');
+                            setCurrentScreen('DRIVER_DASHBOARD');
                          }}
                     />
                   </ErrorBoundary>

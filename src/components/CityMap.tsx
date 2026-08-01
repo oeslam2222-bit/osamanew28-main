@@ -189,7 +189,6 @@ export const CityMap: React.FC<CityMapProps> = ({
       zoom: 14,
       zoomControl: false,
       attributionControl: true,
-      preferCanvas: true,
     });
 
     // Low-bandwidth optimized Map tiles
