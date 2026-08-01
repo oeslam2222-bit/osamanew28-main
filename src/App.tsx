@@ -1199,7 +1199,9 @@ export default function App() {
         console.log('[Drivers Polling] Fetched', remoteDrivers?.length || 0, 'drivers from DB');
         if (remoteDrivers && remoteDrivers.length > 0) {
           const now = Date.now();
-          const staleThreshold = 15000; // 15 seconds — stale driver cutoff by lastSeen
+          // Use a slightly more tolerant stale threshold to avoid brief flickers
+          // due to small network delays or polling gaps.
+          const staleThreshold = 30000; // 30 seconds — stale driver cutoff by lastSeen
           const availableCount = remoteDrivers.filter(d => {
             if (d.approvalStatus !== 'APPROVED' || !d.isOnline || d.status !== 'AVAILABLE') return false;
             if (d.lastSeen) {
@@ -1212,7 +1214,13 @@ export default function App() {
           const currentTrip = activeTripRefForPolling.current;
           setDrivers((localDrivers) => {
             return remoteDrivers.map((rd) => {
-              if (pendingDriverToggleRef.current === rd.id) return rd;
+              if (pendingDriverToggleRef.current === rd.id) {
+                // If a local toggle is in progress prefer the local driver state
+                // to avoid overwriting the user's immediate action with stale remote data.
+                const ldPending = localDrivers.find((l) => l.id === rd.id);
+                if (ldPending) return ldPending;
+                return rd;
+              }
               const ld = localDrivers.find((l) => l.id === rd.id);
               if (ld) {
                 const isActiveTripDriver = currentTrip && currentTrip.driverId === rd.id && (currentTrip.status === 'ACCEPTED' || currentTrip.status === 'STARTED');
