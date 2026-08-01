@@ -80,15 +80,15 @@ export const useRouteCache = (lang: 'ar' | 'en') => {
     const providers: Array<{ name: string; build: (coords: string) => { url: string; init?: RequestInit } }> = [
       {
         name: 'OSRM-1',
-        build: (coords) => ({ url: `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true` }),
+        build: (coords) => ({ url: `https://router.project-osrm.org/route/v1/driving/${coords}?overview=simplified&geometries=geojson&steps=true` }),
       },
       {
         name: 'OSRM-2',
-        build: (coords) => ({ url: `https://routing.openstreetmap.de/routed-car/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true` }),
+        build: (coords) => ({ url: `https://routing.openstreetmap.de/routed-car/route/v1/driving/${coords}?overview=simplified&geometries=geojson&steps=true` }),
       },
       {
         name: 'OSRM-3',
-        build: (coords) => ({ url: `https://valhalla1.openstreetmap.de/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true` }),
+        build: (coords) => ({ url: `https://valhalla1.openstreetmap.de/route/v1/driving/${coords}?overview=simplified&geometries=geojson&steps=true` }),
       },
     ];
 
@@ -108,7 +108,7 @@ export const useRouteCache = (lang: 'ar' | 'en') => {
             setCachedRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng, result);
             lastRouteCacheUseRef.current = Date.now();
             setRouteCacheInternal(prev => ({ ...prev, [cacheKey]: result }));
-            console.log(`[route] ${provider.name} OK: ${result.distance} km, ${result.geometry.length} pts, ${result.steps?.length || 0} steps`);
+            console.log(`[route] ${provider.name} OK: ${result.distance} km, ${result.geometry?.length ?? 0} pts, ${result.steps?.length || 0} steps`);
             return result;
           }
         } catch (err) {
@@ -136,11 +136,11 @@ export const useRouteCache = (lang: 'ar' | 'en') => {
     const providers: Array<{ name: string; build: (coords: string) => { url: string; init?: RequestInit } }> = [
       {
         name: 'OSRM-NAV-1',
-        build: (coords) => ({ url: `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true` }),
+        build: (coords) => ({ url: `https://router.project-osrm.org/route/v1/driving/${coords}?overview=simplified&geometries=geojson&steps=true` }),
       },
       {
         name: 'OSRM-NAV-2',
-        build: (coords) => ({ url: `https://routing.openstreetmap.de/routed-car/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true` }),
+        build: (coords) => ({ url: `https://routing.openstreetmap.de/routed-car/route/v1/driving/${coords}?overview=simplified&geometries=geojson&steps=true` }),
       },
     ];
 
@@ -159,7 +159,7 @@ export const useRouteCache = (lang: 'ar' | 'en') => {
             const result: RouteResult = parsed;
             lastRouteCacheUseRef.current = Date.now();
             setRouteCacheInternal(prev => ({ ...prev, [cacheKey]: result }));
-            console.log(`[nav] ${provider.name} OK: ${result.distance} km, ${result.geometry.length} pts, ${result.steps?.length || 0} steps`);
+            console.log(`[nav] ${provider.name} OK: ${result.distance} km, ${result.geometry?.length ?? 0} pts, ${result.steps?.length || 0} steps`);
             return result;
           }
         } catch (err) {
