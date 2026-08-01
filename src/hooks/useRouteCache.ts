@@ -71,7 +71,7 @@ export const useRouteCache = (lang: 'ar' | 'en') => {
     return null;
   };
 
-  const simplifyGeometry = (points: [number, number][], maxPoints: number = 80): [number, number][] => {
+  const simplifyGeometry = (points: [number, number][], maxPoints: number = 10): [number, number][] => {
     if (points.length <= maxPoints) return points;
     const sampled: [number, number][] = [];
     const step = (points.length - 1) / (maxPoints - 1);
