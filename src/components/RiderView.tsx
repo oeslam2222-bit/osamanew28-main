@@ -151,10 +151,6 @@ export const RiderView: React.FC<RiderViewProps> = ({
     const hasActiveTrip = !!activeTrip && activeTrip.status !== 'COMPLETED' && activeTrip.status !== 'CANCELLED';
     return hasActiveTrip;
   });
-  const isMobileDevice = React.useMemo(
-    () => typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
-    []
-  );
   const placeSearchCacheRef = React.useRef<Record<string, { display_name: string; lat: number; lng: number; city: string }[]>>({});
   const placeSearchLastRef = React.useRef<{ q: string; t: number } | null>(null);
   const placeSearchDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -339,13 +335,11 @@ export const RiderView: React.FC<RiderViewProps> = ({
 
   // Prefetch real road distance and route when both pickup and dropoff are selected
   useEffect(() => {
-    if (!pickupLoc || !dropoffLoc || !onCalculateRoute || (!showMap && !activeTrip)) {
+    if (!pickupLoc || !dropoffLoc || !onCalculateRoute) {
       setRouteGeometry(null);
       return;
     }
-    // Always compute real road path only when the map is visible or when an
-    // active trip already exists, to avoid expensive route fetches during
-    // initial form interaction.
+    // Always compute real road path (lowDataMode no longer blocks routing, only GPS accuracy)
     const routeKey = `${pickupLoc.id}_${dropoffLoc.id}`;
     if (lastCalculatedRouteRef.current === routeKey) return;
     lastCalculatedRouteRef.current = routeKey;
@@ -371,7 +365,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
       }
       setIsCalculatingRoute(false);
     });
-  }, [pickupLoc?.id, dropoffLoc?.id, onCalculateRoute, showMap, activeTrip]);
+  }, [pickupLoc?.id, dropoffLoc?.id, onCalculateRoute, lowDataMode]);
 
   const safeTripsHistory = Array.isArray(tripsHistory) ? tripsHistory : [];
 
@@ -1250,7 +1244,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
                   </div>
                 }
               >
-                 {stats?.mapProvider === 'google' && stats?.googleMapsApiKey && !isMobileDevice ? (
+                 {stats?.mapProvider === 'google' && stats?.googleMapsApiKey ? (
                   <GoogleMap
                     locations={locations}
                     activeTrip={activeTrip}
