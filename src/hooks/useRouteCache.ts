@@ -65,9 +65,21 @@ export const useRouteCache = (lang: 'ar' | 'en') => {
     }
 
     if (distance > 0 && geometry && geometry.length > 1) {
-      return { distance, geometry, durationSeconds, steps };
+      const simplified = simplifyGeometry(geometry);
+      return { distance, geometry: simplified, durationSeconds, steps };
     }
     return null;
+  };
+
+  const simplifyGeometry = (points: [number, number][], maxPoints: number = 80): [number, number][] => {
+    if (points.length <= maxPoints) return points;
+    const sampled: [number, number][] = [];
+    const step = (points.length - 1) / (maxPoints - 1);
+    for (let i = 0; i < maxPoints; i++) {
+      const idx = Math.min(Math.round(i * step), points.length - 1);
+      sampled.push(points[idx]);
+    }
+    return sampled;
   };
 
   const getRealRoute = useCallback(async (pickup: Location, dropoff: Location): Promise<RouteResult | null> => {
