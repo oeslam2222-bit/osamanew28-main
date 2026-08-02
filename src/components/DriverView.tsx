@@ -75,7 +75,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
     return current ? [current] : safeDrivers.slice(0, 1);
   }, [safeDrivers, safeSelectedId]);
 
-  const currentDriver = visibleDrivers.find((d) => d.id === safeSelectedId) || visibleDrivers[0];
+  const currentDriver = visibleDrivers.find((d) => d.id === safeSelectedId) || visibleDrivers[0] || null;
   const currentDriverId = currentDriver?.id || '';
   const activeTripRef = useRef(activeTrip);
   activeTripRef.current = activeTrip;
@@ -203,7 +203,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
   };
 
    const handleOnlineToggle = () => {
-    if (!currentDriver) return;
+    if (!currentDriver || !currentDriver.id) return;
     onToggleOnline(currentDriver.id);
   };
 
