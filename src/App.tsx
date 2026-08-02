@@ -116,12 +116,54 @@ export default function App() {
   const statsLoadedRef = useRef(false);
 
   // Shared state is sourced entirely from Supabase (no localStorage)
-  const [locations, setLocations] = useState<Location[]>([]);
-  const [drivers, setDrivers] = useState<Driver[]>([]);
-  const [rider, setRider] = useState<Rider & { isLoggedIn: boolean }>({
-    id: '', name: '', phone: '', password: '', rating: 5.0, totalTrips: 0, isLoggedIn: false,
+  const [locations, setLocations] = useState<Location[]>(() => {
+    try {
+      const stored = localStorage.getItem('ezz_locations_cache');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed as Location[];
+      }
+    } catch {}
+    return [];
   });
-  const [activeTrip, setActiveTrip] = useState<Trip | null>(null);
+  const [drivers, setDrivers] = useState<Driver[]>(() => {
+    try {
+      const stored = localStorage.getItem('ezz_drivers_cache');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed as Driver[];
+      }
+    } catch {}
+    return [];
+  });
+  const [rider, setRider] = useState<Rider & { isLoggedIn: boolean }>(() => {
+    try {
+      const stored = localStorage.getItem('ezz_rider_session');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.id && parsed.phone) {
+          return { ...parsed, isLoggedIn: true };
+        }
+      }
+    } catch {}
+    return { id: '', name: '', phone: '', password: '', rating: 5.0, totalTrips: 0, isLoggedIn: false };
+  });
+  const [activeTrip, setActiveTrip] = useState<Trip | null>(() => {
+    try {
+      const stored = localStorage.getItem('ezz_active_trip_cache');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.id && parsed.status && ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'].includes(parsed.status)) {
+          return parsed as Trip;
+        }
+      }
+    } catch {}
+    return null;
+  });
+  // Live ref to the current trip so background interval callbacks (e.g. the
+  // anti-logout check) can inspect it without re-creating the interval.
+  const activeTripLocalRef = useRef<Trip | null>(null);
+  activeTripLocalRef.current = activeTrip;
   const dismissedTripIdsRef = useRef<Set<string>>(new Set());
   const lastTripCompletedRef = useRef(false);
   const lastTripCancelledRef = useRef(false);
@@ -484,8 +526,15 @@ export default function App() {
   const [selectedPickup, setSelectedPickup] = useState<string>('1');
   const [selectedDropoff, setSelectedDropoff] = useState<string>('2');
 
-  // Driver selected inside the Driver role screen
-  const [selectedDriverId, setSelectedDriverId] = useState<string>('drv_1');
+  // Driver selected inside the Driver role screen (persisted locally so the same
+  // captain gets his dashboard back immediately even when offline)
+  const [selectedDriverId, setSelectedDriverId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('ezz_selected_driver_id') || 'drv_1';
+    } catch {
+      return 'drv_1';
+    }
+  });
 
   const networkConnected = useNetworkStatus();
   const lastNavDriverLatRef = useRef<number | null>(null);
@@ -524,8 +573,17 @@ export default function App() {
   // Terms and conditions accordion state
   const [termsOpen, setTermsOpen] = useState(false);
 
-  // Registered riders list (sourced from Supabase)
-  const [registeredRiders, setRegisteredRiders] = useState<Rider[]>([]);
+  // Registered riders list (sourced from Supabase, with a local cache for offline login)
+  const [registeredRiders, setRegisteredRiders] = useState<Rider[]>(() => {
+    try {
+      const stored = localStorage.getItem('ezz_registered_riders_cache');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed as Rider[];
+      }
+    } catch {}
+    return [];
+  });
 
   // App visitors count (sourced from Supabase stats)
   const [visitorCount, setVisitorCount] = useState<number>(0);
@@ -622,7 +680,16 @@ export default function App() {
       return next;
     });
   };
-  const [regions, setRegions] = useState<Region[]>([]);
+  const [regions, setRegions] = useState<Region[]>(() => {
+    try {
+      const stored = localStorage.getItem('ezz_regions_cache');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed as Region[];
+      }
+    } catch {}
+    return [];
+  });
   const [pickupRegionsByRider, setPickupRegionsByRider] = useState<Record<string, string>>({});
 
   const riderPickupRegion = rider.id ? (pickupRegionsByRider[rider.id] ?? '') : '';
@@ -788,35 +855,102 @@ export default function App() {
     localStorage.setItem('ezz_current_screen', currentScreen);
   }, [currentScreen]);
 
+  // Local cache of shared reference data so the app remains usable offline
+  // and re-opens instantly without waiting for Supabase.
+  useEffect(() => {
+    try {
+      if (drivers.length > 0) localStorage.setItem('ezz_drivers_cache', JSON.stringify(drivers));
+    } catch {}
+  }, [drivers]);
+  useEffect(() => {
+    try {
+      if (locations.length > 0) localStorage.setItem('ezz_locations_cache', JSON.stringify(locations));
+    } catch {}
+  }, [locations]);
+  useEffect(() => {
+    try {
+      if (registeredRiders.length > 0) localStorage.setItem('ezz_registered_riders_cache', JSON.stringify(registeredRiders));
+    } catch {}
+  }, [registeredRiders]);
+  useEffect(() => {
+    try {
+      if (regions.length > 0) localStorage.setItem('ezz_regions_cache', JSON.stringify(regions));
+    } catch {}
+  }, [regions]);
+  useEffect(() => {
+    try {
+      if (rider.id) localStorage.setItem('ezz_rider_session', JSON.stringify(rider));
+    } catch {}
+  }, [rider]);
+  useEffect(() => {
+    try {
+      if (selectedDriverId) localStorage.setItem('ezz_selected_driver_id', selectedDriverId);
+    } catch {}
+  }, [selectedDriverId]);
+
+  // Persist active trip locally so the driver/rider can resume their ride
+  // even if the network drops mid-ride or the app is closed and re-opened.
+  useEffect(() => {
+    try {
+      if (activeTrip && ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'].includes(activeTrip.status)) {
+        localStorage.setItem('ezz_active_trip_cache', JSON.stringify(activeTrip));
+      } else {
+        localStorage.removeItem('ezz_active_trip_cache');
+      }
+    } catch {}
+  }, [activeTrip]);
+
   // Auto-logout when the same account logs in from another device.
+  // IMPORTANT: never log the user out during an active trip or while the
+  // network is down (loadSession returns null on errors, which would treat a
+  // temporary connectivity glitch as "no session" and forcibly log out).
   useEffect(() => {
     if (!supabaseConnected) return;
     if (!rider.isLoggedIn && !driverIsLoggedIn && !adminIsLoggedIn) return;
 
     const checkSession = async () => {
+      if (!networkConnected) return; // offline – keep the session locally
+      const localTrip = activeTripLocalRef.current;
+      if (localTrip && ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'].includes(localTrip.status)) {
+        // Trip in progress – never auto-logout mid-ride.
+        return;
+      }
       try {
         const session = await loadSession();
-        if (!session) {
-          if (rider.isLoggedIn) {
-            await clearSession('RIDER');
-            setRider(prev => ({ ...prev, isLoggedIn: false }));
-            setCurrentScreen('HOME');
-          } else if (driverIsLoggedIn) {
-            await clearSession('DRIVER');
-            setDriverIsLoggedIn(false);
-            setCurrentScreen('HOME');
-          } else if (adminIsLoggedIn) {
-            await clearSession('ADMIN');
-            setAdminIsLoggedIn(false);
-            setCurrentScreen('HOME');
-          }
+        if (session) return;
+
+        // loadSession returned null. Distinguish a real "no session" from a
+        // transient network/DB error by re-checking connectivity first.
+        let isHealthy = false;
+        try {
+          const { error } = await supabase.from('ezz_stats').select('id').limit(1);
+          isHealthy = !error || error.code === 'PGRST116';
+        } catch {
+          isHealthy = false;
         }
-      } catch {}
+        if (!isHealthy) return; // DB unreachable – keep the session
+
+        if (rider.isLoggedIn) {
+          await clearSession('RIDER');
+          setRider(prev => ({ ...prev, isLoggedIn: false }));
+          setCurrentScreen('HOME');
+        } else if (driverIsLoggedIn) {
+          await clearSession('DRIVER');
+          setDriverIsLoggedIn(false);
+          setCurrentScreen('HOME');
+        } else if (adminIsLoggedIn) {
+          await clearSession('ADMIN');
+          setAdminIsLoggedIn(false);
+          setCurrentScreen('HOME');
+        }
+      } catch {
+        // Any error during the check → keep the user logged in.
+      }
     };
 
-    const id = setInterval(checkSession, 15000);
+    const id = setInterval(checkSession, 30000);
     return () => clearInterval(id);
-  }, [supabaseConnected, rider.isLoggedIn, driverIsLoggedIn, adminIsLoggedIn]);
+  }, [supabaseConnected, rider.isLoggedIn, driverIsLoggedIn, adminIsLoggedIn, networkConnected, activeTrip?.status, activeTrip?.id]);
 
   // Screen access guard: redirect to HOME if user tries to access a protected screen without login
   useEffect(() => {
@@ -842,6 +976,48 @@ export default function App() {
         const isConnected = await checkSupabaseConnection();
         if (!isConnected) {
           setSupabaseConnected(false);
+          // Offline: restore rider/driver/activeTrip from the local cache
+          // so the user stays on their dashboard and can resume any ride.
+          try {
+            const cachedRider = localStorage.getItem('ezz_rider_session');
+            if (cachedRider) {
+              const parsedRider = JSON.parse(cachedRider);
+              if (parsedRider && parsedRider.id && parsedRider.phone) {
+                setRider({ ...parsedRider, isLoggedIn: true });
+                restoreRiderPickupRegion(parsedRider);
+              }
+            }
+          } catch {}
+          try {
+            // Restore drivers list so the selected driver exists offline.
+            const cachedDrivers = localStorage.getItem('ezz_drivers_cache');
+            if (cachedDrivers) {
+              const parsedDrivers = JSON.parse(cachedDrivers);
+              if (Array.isArray(parsedDrivers) && parsedDrivers.length > 0) {
+                setDrivers(parsedDrivers);
+              }
+            }
+            // Restore locations/regions so the rider can keep booking offline.
+            const cachedLocations = localStorage.getItem('ezz_locations_cache');
+            if (cachedLocations) {
+              const parsed = JSON.parse(cachedLocations);
+              if (Array.isArray(parsed) && parsed.length > 0) setLocations(parsed);
+            }
+            const cachedRegions = localStorage.getItem('ezz_regions_cache');
+            if (cachedRegions) {
+              const parsed = JSON.parse(cachedRegions);
+              if (Array.isArray(parsed) && parsed.length > 0) setRegions(parsed);
+            }
+          } catch {}
+          try {
+            const cachedActive = localStorage.getItem('ezz_active_trip_cache');
+            if (cachedActive) {
+              const parsedTrip = JSON.parse(cachedActive);
+              if (parsedTrip && parsedTrip.id && ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'].includes(parsedTrip.status)) {
+                setActiveTripWithTracking(parsedTrip);
+              }
+            }
+          } catch {}
           setSessionLoaded(true);
           setIsInitializing(false);
           return;
@@ -2727,6 +2903,7 @@ export default function App() {
        const capturedId = activeTrip.id;
        dismissedTripIdsRef.current.add(capturedId);
 
+       try { localStorage.removeItem('ezz_active_trip_cache'); } catch {}
        setActiveTripWithTracking(null);
        setNoAvailableDrivers(false);
 
