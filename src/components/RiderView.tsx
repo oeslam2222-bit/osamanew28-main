@@ -148,7 +148,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
   const [placeSearchLoading, setPlaceSearchLoading] = useState(false);
   const [geoError, setGeoError] = useState('');
   const [showMap, setShowMap] = useState(() => {
-    const hasActiveTrip = !!activeTrip && activeTrip.status !== 'COMPLETED' && activeTrip.status !== 'CANCELLED';
+    const hasActiveTrip = !!activeTrip && !!activeTrip.status && activeTrip.status !== 'COMPLETED' && activeTrip.status !== 'CANCELLED';
     return hasActiveTrip;
   });
   const placeSearchCacheRef = React.useRef<Record<string, { display_name: string; lat: number; lng: number; city: string }[]>>({});
@@ -495,7 +495,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
     }
     return true;
   });
-  const availableDrivers = onlineDrivers.filter((d) => d.status === 'AVAILABLE' && d.vehicleType === requestedVehicleType);
+  const availableDrivers = onlineDrivers.filter((d) => d.status === 'AVAILABLE' && String(d.vehicleType).toUpperCase() === requestedVehicleType);
 
   const swapLocations = () => {
     const temp = selectedPickup;
@@ -1571,7 +1571,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
             {/* Request Button */}
             <button
               type="button"
-              disabled={!selectedPickup || !selectedDropoff || !selectedPickupRegion}
+              disabled={!selectedPickup || !selectedDropoff || !selectedPickupRegion || availableDrivers.length === 0}
                 onClick={() => {
                   onRequestRide(requestedVehicleType, pickupLandmark, appliedPromo?.code, appliedPromo?.promoCodeId);
                   setPickupLandmark('');

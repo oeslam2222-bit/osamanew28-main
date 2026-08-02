@@ -75,7 +75,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
     return current ? [current] : safeDrivers.slice(0, 1);
   }, [safeDrivers, safeSelectedId]);
 
-  const currentDriver = visibleDrivers.find((d) => d.id === safeSelectedId) || visibleDrivers[0];
+  const currentDriver = visibleDrivers.find((d) => d.id === safeSelectedId) || visibleDrivers[0] || null;
   const currentDriverId = currentDriver?.id || '';
   const activeTripRef = useRef(activeTrip);
   activeTripRef.current = activeTrip;
@@ -203,7 +203,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
   };
 
    const handleOnlineToggle = () => {
-    if (!currentDriver) return;
+    if (!currentDriver || !currentDriver.id) return;
     onToggleOnline(currentDriver.id);
   };
 
@@ -447,7 +447,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
-              onClick={handleOnlineToggle}
+              onClick={() => onToggleOnline(currentDriver.id)}
               className={`flex items-center gap-1 px-2.5 py-1 rounded-full font-black text-xs transition-all shadow-xs cursor-pointer pointer-events-auto ${
                 currentDriver.isOnline ? 'bg-white text-emerald-700' : 'bg-white/20 text-white/90 border border-white/20'
               }`}

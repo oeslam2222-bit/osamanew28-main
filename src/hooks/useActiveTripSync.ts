@@ -138,10 +138,9 @@ export const useActiveTripSync = ({
               }
               return null;
             }
-            if (prev && prev.status === 'CANCELLED') {
-              return null;
-            }
-            return prev;
+            // If active trip is gone from DB and wasn't already completed/cancelled,
+            // clear it locally so drivers don't keep seeing stale requests.
+            return null;
           });
           return;
         }

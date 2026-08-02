@@ -169,6 +169,7 @@ export default function App() {
   const lastTripCancelledRef = useRef(false);
   const cancelInProgressRef = useRef(false);
   const pendingDriverToggleRef = useRef<string | null>(null);
+  const resetDriverStatusOnceRef = useRef<Record<string, boolean>>({});
   const [noAvailableDrivers, setNoAvailableDrivers] = useState(false);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [tripsHistory, setTripsHistory] = useState<Trip[]>([]);
@@ -782,10 +783,10 @@ export default function App() {
   // Reset driver to AVAILABLE when driver session is restored or login occurs
   useEffect(() => {
     if (!driverIsLoggedIn || !selectedDriverId || !supabaseConnected) return;
+    if (resetDriverStatusOnceRef.current[selectedDriverId]) return;
 
     const resetDriverToAvailable = async () => {
       let driver = drivers.find(d => d.id === selectedDriverId);
-      
       if (!driver) {
         try {
           const freshDrivers = await fetchDrivers();
@@ -794,23 +795,34 @@ export default function App() {
           console.warn('[DriverReset] Could not fetch driver:', e);
         }
       }
-      
       if (!driver) return;
 
-      if (driver.status === 'BUSY' || !driver.isOnline) {
-        const updated = { ...driver, isOnline: true, status: 'AVAILABLE' as const };
-        setDrivers(prev => prev.map(d => d.id === selectedDriverId ? updated : d));
-        await saveDriver(updated);
-        triggerToast(
-          lang === 'ar' ? 'تم إعادة تعيين الحالة' : 'Status reset',
-          lang === 'ar' ? 'تم إعادة تعيين حالتك إلى متاح' : 'Your status has been reset to available',
-          'success'
-        );
+      const shouldReset =
+        driver.status === 'BUSY' && !activeTrip ||
+        (!driver.isOnline && driver.status !== 'OFFLINE');
+      if (!shouldReset) {
+        resetDriverStatusOnceRef.current[selectedDriverId] = true;
+        return;
       }
+
+      const updated = {
+        ...driver,
+        isOnline: true,
+        status: 'AVAILABLE' as const,
+        lastSeen: new Date().toISOString(),
+      };
+      setDrivers(prev => prev.map(d => d.id === selectedDriverId ? updated : d));
+      await saveDriver(updated);
+      triggerToast(
+        lang === 'ar' ? 'تم إعادة تعيين الحالة' : 'Status reset',
+        lang === 'ar' ? 'تم إعادة تعيين حالتك إلى متاح' : 'Your status has been reset to available',
+        'success'
+      );
+      resetDriverStatusOnceRef.current[selectedDriverId] = true;
     };
 
     resetDriverToAvailable();
-  }, [driverIsLoggedIn, selectedDriverId, supabaseConnected, drivers]);
+  }, [driverIsLoggedIn, selectedDriverId, supabaseConnected, drivers, activeTrip]);
 
   // Online/Offline connectivity toast notifications (state tracking is handled by useNetworkStatus hook)
   useEffect(() => {
@@ -1184,25 +1196,8 @@ export default function App() {
             if (prev && prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
               return prev;
             }
-            if (
-              prev &&
-              !dismissedTripIdsRef.current.has(prev.id) &&
-              ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'].includes(prev.status)
-            ) {
-              fetchActiveTrip(userId, userRole).then((remote) => {
-                if (remote && remote !== 'NO_TABLE' && remote.id === prev.id && isMountedRef.current) {
-                  setActiveTripWithTracking(remote);
-                }
-              });
-              return prev;
-            }
-            return null;
-          }
-
-          // Verify trip has required fields before processing
-          if (!trip.id || !trip.status || !trip.pickup || !trip.dropoff) {
-            console.warn('[Realtime] Received invalid trip payload, ignoring');
-            return prev;
+            // When the active trip record is deleted from the DB, clear it locally
+            // unless it is a completed trip still pending feedback.
           }
 
           if (dismissedTripIdsRef.current.has(trip.id)) {
@@ -1271,10 +1266,8 @@ export default function App() {
               }
               return null;
             }
-            if (prev && prev.status === 'CANCELLED') {
-              return null;
-            }
-            return prev;
+            // If the trip disappeared from the DB, clear the local active trip immediately.
+            return null;
           });
           return;
         }
@@ -1565,32 +1558,32 @@ export default function App() {
   const lastNotifiedTripIdRef = useRef<string | null>(null);
   const lastNotifiedOfferedDriverIdRef = useRef<string | null>(null);
 
-     useEffect(() => {
-      if (!activeTrip) {
-        const prevStatus = lastTripStatusBeforeNullRef.current;
-        if (prevStatus === 'COMPLETED' || prevStatus === 'SEARCHING') {
-          notifiedEventsRef.current.add('cancelled_notified');
-          lastTripStatusBeforeNullRef.current = null;
-          return;
-        }
-        if (notifiedEventsRef.current.has('had_trip') && !notifiedEventsRef.current.has('cancelled_notified')) {
-          notifiedEventsRef.current.add('cancelled_notified');
-          if (lastTripCompletedRef.current) {
-            lastTripCompletedRef.current = false;
-            return;
-          }
-         if (lastTripCancelledRef.current) {
-           lastTripCancelledRef.current = false;
+      useEffect(() => {
+       if (!activeTrip) {
+         const prevStatus = lastTripStatusBeforeNullRef.current;
+         if (prevStatus === 'COMPLETED' || prevStatus === 'SEARCHING') {
+           notifiedEventsRef.current.add('cancelled_notified');
+           lastTripStatusBeforeNullRef.current = null;
            return;
          }
-         if (!['COMPLETED', 'SEARCHING'].includes(prevStatus || '')) {
-           playNotificationSound('alert');
-           sendNativeNotification('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', '❌');
-           triggerToast('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', 'warning');
+         if (notifiedEventsRef.current.has('had_trip') && !notifiedEventsRef.current.has('cancelled_notified')) {
+           notifiedEventsRef.current.add('cancelled_notified');
+           if (lastTripCompletedRef.current) {
+             lastTripCompletedRef.current = false;
+             return;
+           }
+          if (lastTripCancelledRef.current) {
+            lastTripCancelledRef.current = false;
+            return;
+          }
+          if (!['COMPLETED', 'SEARCHING'].includes(prevStatus || '')) {
+            playNotificationSound('alert');
+            sendNativeNotification('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', '❌');
+            triggerToast('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', 'warning');
+          }
          }
-        }
-        return;
-      }
+         return;
+       }
 
      lastTripStatusBeforeNullRef.current = activeTrip.status;
 
@@ -2209,9 +2202,26 @@ export default function App() {
     const dispatchTimer = DISPATCH_TIMER_SECONDS;
     const dispatchTimerMax = DISPATCH_TIMER_SECONDS;
 
-    if (eligibleDrivers.length > 0) {
+    // Filter eligible drivers by requested vehicle type to avoid dispatching wrong vehicle
+    const eligibleDriversByType = eligibleDrivers.filter(
+      (d) => String(d.vehicleType).toUpperCase() === requestedVehicleType
+    );
+
+    if (eligibleDriversByType.length === 0) {
+      setNoAvailableDrivers(true);
+      triggerToast(
+        lang === 'ar' ? 'لا يوجد سائقين من نوع المركبة المختار' : 'No drivers available for the selected vehicle type',
+        lang === 'ar'
+          ? 'عذراً، لا يوجد سائقين من هذا النوع في منطقتك حالياً. يرجى اختيار نوع آخر أو المحاولة لاحقاً.'
+          : 'Sorry, there are no drivers of the selected vehicle type in your area right now. Please choose another type or try again later.',
+        'warning'
+      );
+      return;
+    }
+
+    if (eligibleDriversByType.length > 0) {
       // Sort drivers by precise Haversine distance to pickup location
-      const sortedDrivers = eligibleDrivers
+      const sortedDrivers = eligibleDriversByType
         .map((d) => {
           const dCoords = getCoordsFromXY(d.currentX, d.currentY);
           const dist = calculateHaversineDistance(
@@ -2503,6 +2513,8 @@ export default function App() {
 
     lastTripCancelledRef.current = true;
     notifiedEventsRef.current.add('cancelled_notified');
+    // Mark local status change so polling/realtime won't immediately overwrite
+    markLocalStatusChange('CANCELLED');
     setActiveTripWithTracking(null);
     setNoAvailableDrivers(false);
     setPendingRequestCount(0);
@@ -2511,11 +2523,17 @@ export default function App() {
   // Handler: Driver Toggle Online
   const handleToggleOnline = (driverId: string) => {
     pendingDriverToggleRef.current = driverId;
+    const now = new Date().toISOString();
     setDrivers((prev) => {
       const updated = prev.map((d) => {
         if (d.id !== driverId) return d;
         const nextOnline = !d.isOnline;
-        return { ...d, isOnline: nextOnline, status: nextOnline ? 'AVAILABLE' as const : 'OFFLINE' as const };
+        return {
+          ...d,
+          isOnline: nextOnline,
+          status: nextOnline ? 'AVAILABLE' as const : 'OFFLINE' as const,
+          lastSeen: nextOnline ? now : d.lastSeen,
+        };
       });
       const driver = updated.find((d) => d.id === driverId);
       if (driver && supabaseConnected) {
