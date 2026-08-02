@@ -169,6 +169,7 @@ export default function App() {
   const lastTripCancelledRef = useRef(false);
   const cancelInProgressRef = useRef(false);
   const pendingDriverToggleRef = useRef<string | null>(null);
+  const resetDriverStatusOnceRef = useRef<Record<string, boolean>>({});
   const [noAvailableDrivers, setNoAvailableDrivers] = useState(false);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [tripsHistory, setTripsHistory] = useState<Trip[]>([]);
@@ -782,10 +783,10 @@ export default function App() {
   // Reset driver to AVAILABLE when driver session is restored or login occurs
   useEffect(() => {
     if (!driverIsLoggedIn || !selectedDriverId || !supabaseConnected) return;
+    if (resetDriverStatusOnceRef.current[selectedDriverId]) return;
 
     const resetDriverToAvailable = async () => {
       let driver = drivers.find(d => d.id === selectedDriverId);
-      
       if (!driver) {
         try {
           const freshDrivers = await fetchDrivers();
@@ -794,23 +795,34 @@ export default function App() {
           console.warn('[DriverReset] Could not fetch driver:', e);
         }
       }
-      
       if (!driver) return;
 
-      if (driver.status === 'BUSY' || !driver.isOnline) {
-        const updated = { ...driver, isOnline: true, status: 'AVAILABLE' as const };
-        setDrivers(prev => prev.map(d => d.id === selectedDriverId ? updated : d));
-        await saveDriver(updated);
-        triggerToast(
-          lang === 'ar' ? 'تم إعادة تعيين الحالة' : 'Status reset',
-          lang === 'ar' ? 'تم إعادة تعيين حالتك إلى متاح' : 'Your status has been reset to available',
-          'success'
-        );
+      const shouldReset =
+        driver.status === 'BUSY' && !activeTrip ||
+        (!driver.isOnline && driver.status !== 'OFFLINE');
+      if (!shouldReset) {
+        resetDriverStatusOnceRef.current[selectedDriverId] = true;
+        return;
       }
+
+      const updated = {
+        ...driver,
+        isOnline: true,
+        status: 'AVAILABLE' as const,
+        lastSeen: new Date().toISOString(),
+      };
+      setDrivers(prev => prev.map(d => d.id === selectedDriverId ? updated : d));
+      await saveDriver(updated);
+      triggerToast(
+        lang === 'ar' ? 'تم إعادة تعيين الحالة' : 'Status reset',
+        lang === 'ar' ? 'تم إعادة تعيين حالتك إلى متاح' : 'Your status has been reset to available',
+        'success'
+      );
+      resetDriverStatusOnceRef.current[selectedDriverId] = true;
     };
 
     resetDriverToAvailable();
-  }, [driverIsLoggedIn, selectedDriverId, supabaseConnected, drivers]);
+  }, [driverIsLoggedIn, selectedDriverId, supabaseConnected, drivers, activeTrip]);
 
   // Online/Offline connectivity toast notifications (state tracking is handled by useNetworkStatus hook)
   useEffect(() => {
@@ -2511,11 +2523,17 @@ export default function App() {
   // Handler: Driver Toggle Online
   const handleToggleOnline = (driverId: string) => {
     pendingDriverToggleRef.current = driverId;
+    const now = new Date().toISOString();
     setDrivers((prev) => {
       const updated = prev.map((d) => {
         if (d.id !== driverId) return d;
         const nextOnline = !d.isOnline;
-        return { ...d, isOnline: nextOnline, status: nextOnline ? 'AVAILABLE' as const : 'OFFLINE' as const };
+        return {
+          ...d,
+          isOnline: nextOnline,
+          status: nextOnline ? 'AVAILABLE' as const : 'OFFLINE' as const,
+          lastSeen: nextOnline ? now : d.lastSeen,
+        };
       });
       const driver = updated.find((d) => d.id === driverId);
       if (driver && supabaseConnected) {
