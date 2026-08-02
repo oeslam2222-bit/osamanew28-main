@@ -1926,15 +1926,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeTrip?.status, activeTrip?.id, activeTrip?.driverId]);
 
-  // Auto-complete trip after 2 minutes when started (simulating ride completion)
-  useEffect(() => {
-    if (!activeTrip || activeTrip.status !== 'STARTED') return;
-    const timer = setTimeout(() => {
-      handleTripCompleted();
-    }, 120000);
-    return () => clearTimeout(timer);
-  }, [activeTrip?.status, activeTrip?.id]);
-
   // Handler: Request Ride with dynamic commission rate calculation by mileage (distance-based commission request)
   const fetchEligibleDriversForRegion = async (regionId?: string): Promise<Driver[]> => {
     const now = Date.now();

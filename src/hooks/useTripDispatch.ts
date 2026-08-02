@@ -22,28 +22,9 @@ export const useTripDispatch = (
   speakText: (text: string, lang: string) => void,
   refreshWaitingTrip: () => Promise<boolean>,
   saveTripToHistory: (trip: Trip) => Promise<void>,
-  saveActiveTrip: (trip: Trip | null) => Promise<void>
+  saveActiveTrip: (trip: Trip | null, clearTripId?: string) => Promise<void>
 ) => {
   const lastRouteCacheUseRef = useRef<number>(Date.now());
-
-  // Auto-complete trip after 2 minutes when STARTED
-  useEffect(() => {
-    if (!activeTrip || activeTrip.status !== 'STARTED') return;
-
-    const timer = setTimeout(async () => {
-      if (!isMountedRef.current) return;
-      setActiveTripWithTracking((prev: Trip | null) => {
-        if (!prev || prev.status !== 'STARTED') return prev;
-        return {
-          ...prev,
-          status: 'COMPLETED' as TripStatus,
-          completedAt: new Date().toISOString(),
-        };
-      });
-    }, 120000);
-
-    return () => clearTimeout(timer);
-  }, [activeTrip?.status, activeTrip?.id]);
 
   // Dispatch timer countdown
   useEffect(() => {
