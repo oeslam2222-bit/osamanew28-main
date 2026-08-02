@@ -2221,9 +2221,24 @@ export default function App() {
     const dispatchTimer = DISPATCH_TIMER_SECONDS;
     const dispatchTimerMax = DISPATCH_TIMER_SECONDS;
 
-    if (eligibleDrivers.length > 0) {
+    // Filter eligible drivers by requested vehicle type to avoid dispatching wrong vehicle
+    const eligibleDriversByType = eligibleDrivers.filter(d => d.vehicleType === requestedVehicleType);
+
+    if (eligibleDriversByType.length === 0) {
+      setNoAvailableDrivers(true);
+      triggerToast(
+        lang === 'ar' ? 'لا يوجد سائقين من نوع المركبة المختار' : 'No drivers available for the selected vehicle type',
+        lang === 'ar'
+          ? 'عذراً، لا يوجد سائقين من هذا النوع في منطقتك حالياً. يرجى اختيار نوع آخر أو المحاولة لاحقاً.'
+          : 'Sorry, there are no drivers of the selected vehicle type in your area right now. Please choose another type or try again later.',
+        'warning'
+      );
+      return;
+    }
+
+    if (eligibleDriversByType.length > 0) {
       // Sort drivers by precise Haversine distance to pickup location
-      const sortedDrivers = eligibleDrivers
+      const sortedDrivers = eligibleDriversByType
         .map((d) => {
           const dCoords = getCoordsFromXY(d.currentX, d.currentY);
           const dist = calculateHaversineDistance(
@@ -2515,6 +2530,8 @@ export default function App() {
 
     lastTripCancelledRef.current = true;
     notifiedEventsRef.current.add('cancelled_notified');
+    // Mark local status change so polling/realtime won't immediately overwrite
+    markLocalStatusChange('CANCELLED');
     setActiveTripWithTracking(null);
     setNoAvailableDrivers(false);
     setPendingRequestCount(0);
