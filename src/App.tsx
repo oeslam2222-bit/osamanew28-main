@@ -1196,25 +1196,8 @@ export default function App() {
             if (prev && prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
               return prev;
             }
-            if (
-              prev &&
-              !dismissedTripIdsRef.current.has(prev.id) &&
-              ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'].includes(prev.status)
-            ) {
-              fetchActiveTrip(userId, userRole).then((remote) => {
-                if (remote && remote !== 'NO_TABLE' && remote.id === prev.id && isMountedRef.current) {
-                  setActiveTripWithTracking(remote);
-                }
-              });
-              return prev;
-            }
-            return null;
-          }
-
-          // Verify trip has required fields before processing
-          if (!trip.id || !trip.status || !trip.pickup || !trip.dropoff) {
-            console.warn('[Realtime] Received invalid trip payload, ignoring');
-            return prev;
+            // When the active trip record is deleted from the DB, clear it locally
+            // unless it is a completed trip still pending feedback.
           }
 
           if (dismissedTripIdsRef.current.has(trip.id)) {
@@ -1283,10 +1266,8 @@ export default function App() {
               }
               return null;
             }
-            if (prev && prev.status === 'CANCELLED') {
-              return null;
-            }
-            return prev;
+            // If the trip disappeared from the DB, clear the local active trip immediately.
+            return null;
           });
           return;
         }
