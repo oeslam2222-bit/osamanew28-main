@@ -447,7 +447,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
-              onClick={() => handleOnlineToggle(currentDriver.id)}
+              onClick={() => onToggleOnline(currentDriver.id)}
               className={`flex items-center gap-1 px-2.5 py-1 rounded-full font-black text-xs transition-all shadow-xs cursor-pointer pointer-events-auto ${
                 currentDriver.isOnline ? 'bg-white text-emerald-700' : 'bg-white/20 text-white/90 border border-white/20'
               }`}

@@ -2203,7 +2203,9 @@ export default function App() {
     const dispatchTimerMax = DISPATCH_TIMER_SECONDS;
 
     // Filter eligible drivers by requested vehicle type to avoid dispatching wrong vehicle
-    const eligibleDriversByType = eligibleDrivers.filter(d => d.vehicleType === requestedVehicleType);
+    const eligibleDriversByType = eligibleDrivers.filter(
+      (d) => String(d.vehicleType).toUpperCase() === requestedVehicleType
+    );
 
     if (eligibleDriversByType.length === 0) {
       setNoAvailableDrivers(true);
