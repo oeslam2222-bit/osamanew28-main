@@ -169,16 +169,43 @@ export const RiderView: React.FC<RiderViewProps> = ({
   const buildPlaceName = (data: any): { name: string; city: string } => {
     const address = data?.address || {};
     const parts = (data?.display_name || '').split(',').map((s: string) => s.trim()).filter(Boolean);
-    const road = address.road || address.pedestrian || address.footway || address.highway || '';
+    const road = address.road || address.pedestrian || address.footway || address.highway || address.street || address.lane || address.way || '';
     const houseNumber = address.house_number || '';
+    const building = address.building || '';
     const neighbourhood =
       address.neighbourhood || address.suburb || address.hamlet || address.village || address.quarter || '';
     const town = address.town || address.city || address.county || address.municipality || '';
     const state = address.state || address.governorate || '';
+    const amenity = address.amenity || '';
+    const shop = address.shop || '';
+    const tourism = address.tourism || '';
+    const railway = address.railway || '';
+    const busStop = address.bus_stop || '';
+    const placeOfWorship = address.place_of_worship || '';
+    const healthcare = address.healthcare || '';
 
-    // Closest recognizable point first
+    // Prefer a named POI / landmark when available (top-level name from Nominatim)
+    const poiName = data?.name || '';
+
+    // Closest recognizable point first: POI name > specific landmark > street > area
     let name = (lang === 'ar' ? 'موقعي الحالي' : 'My Location');
-    if (road && houseNumber) {
+    if (poiName) {
+      name = poiName;
+    } else if (amenity) {
+      name = amenity;
+    } else if (shop) {
+      name = shop;
+    } else if (placeOfWorship) {
+      name = placeOfWorship;
+    } else if (healthcare) {
+      name = healthcare;
+    } else if (railway) {
+      name = railway;
+    } else if (busStop) {
+      name = busStop;
+    } else if (building) {
+      name = building;
+    } else if (road && houseNumber) {
       name = `${houseNumber} ${road}`;
     } else if (road) {
       name = road;
@@ -298,12 +325,38 @@ export const RiderView: React.FC<RiderViewProps> = ({
   const applyPlaceResult = (item: { display_name: string; lat: number; lng: number; city: string }) => {
     const parts = item.display_name.split(',').map((s: string) => s.trim()).filter(Boolean);
     const address = (item as any).address || {};
-    const road = address.road || address.pedestrian || address.footway || address.highway || '';
-    const neighbourhood = address.neighbourhood || address.suburb || address.village || address.city || '';
+    const road = address.road || address.pedestrian || address.footway || address.highway || address.street || address.lane || address.way || '';
     const houseNumber = address.house_number || '';
+    const building = address.building || '';
+    const neighbourhood = address.neighbourhood || address.suburb || address.village || address.city || '';
+    const amenity = address.amenity || '';
+    const shop = address.shop || '';
+    const tourism = address.tourism || '';
+    const railway = address.railway || '';
+    const busStop = address.bus_stop || '';
+    const placeOfWorship = address.place_of_worship || '';
+    const healthcare = address.healthcare || '';
+
+    const poiName = (item as any).name || '';
 
     let name = '';
-    if (road && houseNumber) {
+    if (poiName) {
+      name = poiName;
+    } else if (amenity) {
+      name = amenity;
+    } else if (shop) {
+      name = shop;
+    } else if (placeOfWorship) {
+      name = placeOfWorship;
+    } else if (healthcare) {
+      name = healthcare;
+    } else if (railway) {
+      name = railway;
+    } else if (busStop) {
+      name = busStop;
+    } else if (building) {
+      name = building;
+    } else if (road && houseNumber) {
       name = `${houseNumber} ${road}`;
     } else if (road) {
       name = road;
