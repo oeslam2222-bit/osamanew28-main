@@ -1196,8 +1196,7 @@ export default function App() {
             if (prev && prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
               return prev;
             }
-            // When the active trip record is deleted from the DB, clear it locally
-            // unless it is a completed trip still pending feedback.
+            return null;
           }
 
           if (dismissedTripIdsRef.current.has(trip.id)) {
@@ -2939,7 +2938,7 @@ export default function App() {
       } else {
         setCurrentScreen('HOME');
       }
-     };
+    };
 
   const handleUpdateCommissionRate = (rate: number) => {
     setStats((prev) => ({ ...prev, commissionRate: rate }));

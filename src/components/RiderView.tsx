@@ -151,6 +151,13 @@ export const RiderView: React.FC<RiderViewProps> = ({
     const hasActiveTrip = !!activeTrip && !!activeTrip.status && activeTrip.status !== 'COMPLETED' && activeTrip.status !== 'CANCELLED';
     return hasActiveTrip;
   });
+
+  useEffect(() => {
+    if (!activeTrip) {
+      setShowMap(false);
+    }
+  }, [activeTrip]);
+
   const placeSearchCacheRef = React.useRef<Record<string, { display_name: string; lat: number; lng: number; city: string }[]>>({});
   const placeSearchLastRef = React.useRef<{ q: string; t: number } | null>(null);
   const placeSearchDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -332,6 +339,10 @@ export const RiderView: React.FC<RiderViewProps> = ({
 
   const pickupLoc = locations.find((l) => l.id === selectedPickup);
   const dropoffLoc = locations.find((l) => l.id === selectedDropoff);
+
+  const activeTripChatMessages = activeTrip && Array.isArray(activeTrip.chatMessages)
+    ? activeTrip.chatMessages.filter((msg) => msg && typeof msg.id === 'string')
+    : [];
 
   // Prefetch real road distance and route when both pickup and dropoff are selected
   useEffect(() => {
