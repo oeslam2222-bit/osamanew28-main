@@ -717,7 +717,9 @@ export const mapTripFromDB = (row: any): Trip => ({
   requestedVehicleType: row.requested_vehicle_type || undefined,
   createdAt: row.created_at || '',
   completedAt: row.completed_at || undefined,
-  chatMessages: row.chat_messages || [],
+  chatMessages: Array.isArray(row.chat_messages)
+    ? row.chat_messages.filter((msg: any) => msg && typeof msg.id === 'string')
+    : [],
   riderRatingToDriver: row.rider_rating_to_driver || undefined,
   riderFeedbackTags: row.rider_feedback_tags || [],
   riderFeedbackComment: row.rider_feedback_comment || undefined,
@@ -725,7 +727,9 @@ export const mapTripFromDB = (row: any): Trip => ({
   driverFeedbackTags: row.driver_feedback_tags || [],
   driverFeedbackComment: row.driver_feedback_comment || undefined,
   routeGeometry: row.route_geometry || undefined,
-  offeredDriverIds: row.offered_driver_ids || undefined,
+  offeredDriverIds: Array.isArray(row.offered_driver_ids)
+    ? row.offered_driver_ids.filter((id: any) => typeof id === 'string')
+    : undefined,
   currentOfferedDriverId: row.current_offered_driver_id || undefined,
   dispatchTimer: row.dispatch_timer ?? undefined,
   dispatchTimerMax: row.dispatch_timer_max ?? undefined,
@@ -751,7 +755,7 @@ export const mapTripToDB = (trip: Trip) => ({
   requested_vehicle_type: trip.requestedVehicleType || null,
   created_at: trip.createdAt,
   completed_at: trip.completedAt || null,
-  chat_messages: trip.chatMessages || [],
+  chat_messages: trip.chatMessages?.filter((msg) => msg && typeof msg.id === 'string') || [],
   rider_rating_to_driver: trip.riderRatingToDriver || null,
   rider_feedback_tags: trip.riderFeedbackTags || [],
   rider_feedback_comment: trip.riderFeedbackComment || null,

@@ -53,9 +53,15 @@ export const filterDriversByRegion = (drivers: any[], region: Region | null) => 
 };
 
 export const mergeChatMessages = (localMessages: any[], remoteMessages: any[]) => {
-  const localMsgIds = new Set(localMessages.map(m => m.id));
-  const merged = [...localMessages];
-  for (const m of remoteMessages) {
+  const normalizedLocalMessages = Array.isArray(localMessages)
+    ? localMessages.filter((m: any) => m && typeof m.id === 'string')
+    : [];
+  const normalizedRemoteMessages = Array.isArray(remoteMessages)
+    ? remoteMessages.filter((m: any) => m && typeof m.id === 'string')
+    : [];
+  const localMsgIds = new Set(normalizedLocalMessages.map((m) => m.id));
+  const merged = [...normalizedLocalMessages];
+  for (const m of normalizedRemoteMessages) {
     if (!localMsgIds.has(m.id)) {
       merged.push(m);
     }

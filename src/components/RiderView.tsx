@@ -924,8 +924,8 @@ export const RiderView: React.FC<RiderViewProps> = ({
                 </div>
 
                 <div className="bg-slate-50 rounded-xl p-2 max-h-[120px] overflow-y-auto space-y-1.5 border border-slate-100 flex flex-col pointer-events-auto">
-                  {activeTrip.chatMessages && activeTrip.chatMessages.length > 0 ? (
-                    [...activeTrip.chatMessages]
+                  {activeTripChatMessages.length > 0 ? (
+                    [...activeTripChatMessages]
                       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
                       .map((msg) => (
                       <div
