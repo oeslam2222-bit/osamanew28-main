@@ -75,6 +75,8 @@ import { hashPassword, verifyPassword, isSecureHash } from './utils/security';
 import { auditLogger } from './utils/auditLog';
 import { riderAuthLimiter, driverAuthLimiter, adminAuthLimiter } from './utils/security';
 import { supabase } from './supabaseClient';
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined) || '';
+const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || '';
 
 // Support secure data storage with password obfuscation / encryption
 const obfuscatePassword = (password: string): string => {
@@ -823,6 +825,29 @@ export default function App() {
 
     resetDriverToAvailable();
   }, [driverIsLoggedIn, selectedDriverId, supabaseConnected, drivers, activeTrip]);
+
+  // Notify Service Worker when driver logs in/out for background polling
+  useEffect(() => {
+    if (!('serviceWorker' in navigator) || !navigator.serviceWorker?.ready) return;
+
+    const notifySW = async () => {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        if (driverIsLoggedIn && selectedDriverId) {
+          registration.active?.postMessage({
+            type: 'DRIVER_LOGIN',
+            driverId: selectedDriverId,
+            supabaseUrl: SUPABASE_URL || '',
+            supabaseKey: SUPABASE_ANON_KEY || '',
+          });
+        } else {
+          registration.active?.postMessage({ type: 'DRIVER_LOGOUT' });
+        }
+      } catch {}
+    };
+
+    notifySW();
+  }, [driverIsLoggedIn, selectedDriverId, supabaseConnected]);
 
   // Online/Offline connectivity toast notifications (state tracking is handled by useNetworkStatus hook)
   useEffect(() => {
