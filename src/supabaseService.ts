@@ -1743,14 +1743,6 @@ export const saveSession = async (role: 'RIDER' | 'DRIVER' | 'ADMIN', userId: st
       localStorage.setItem('ezz_device_id', deviceId);
     } catch {}
 
-  // Allow at most one active session per (role, user_id).
-  const { error: deleteError } = await supabase
-    .from('ezz_sessions')
-    .delete()
-    .eq('role', role)
-    .eq('user_id', userId);
-  if (deleteError) throw deleteError;
-
   const id = `session_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
   const { error } = await supabase.from('ezz_sessions').insert({
     id,
