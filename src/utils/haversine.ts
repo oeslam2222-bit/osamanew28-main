@@ -92,10 +92,10 @@ export function getVehiclePricing(stats: any, vehicleType: string): VehiclePrici
   const prefix = vehicleType.toLowerCase();
   return {
     baseFare: stats[`${prefix}BaseFare`] ?? stats.baseFare ?? VEHICLE_PRICING_DEFAULTS[vehicleType]?.baseFare ?? 15,
-    minFareKm: stats[`${prefix}MinFare`] ?? stats.freeKmThreshold ?? VEHICLE_PRICING_DEFAULTS[vehicleType]?.minFareKm ?? 2,
-    pricePerKm0to20: stats[`${prefix}PricePerKm`] ?? stats[`${prefix}PricePerKm20to50`] ?? stats.pricePerKm ?? VEHICLE_PRICING_DEFAULTS[vehicleType]?.pricePerKm0to20 ?? 8,
-    pricePerKm20to50: stats[`${prefix}PricePerKm20to50`] ?? stats[`${prefix}PricePerKm`] ?? stats.pricePerKm ?? VEHICLE_PRICING_DEFAULTS[vehicleType]?.pricePerKm20to50 ?? 8,
-    pricePerKm50plus: stats[`${prefix}PricePerKm50plus`] ?? stats[`${prefix}PricePerKm20to50`] ?? stats[`${prefix}PricePerKm`] ?? stats.pricePerKm ?? VEHICLE_PRICING_DEFAULTS[vehicleType]?.pricePerKm50plus ?? 8,
+    minFareKm: stats[`${prefix}MinFare`] ?? VEHICLE_PRICING_DEFAULTS[vehicleType]?.minFareKm ?? 2,
+    pricePerKm0to20: stats[`${prefix}PricePerKm0to20`] ?? stats[`${prefix}PricePerKm`] ?? stats[`${prefix}PricePerKm20to50`] ?? stats.pricePerKm ?? VEHICLE_PRICING_DEFAULTS[vehicleType]?.pricePerKm0to20 ?? 8,
+    pricePerKm20to50: stats[`${prefix}PricePerKm20to50`] ?? stats[`${prefix}PricePerKm`] ?? stats[`${prefix}PricePerKm0to20`] ?? stats.pricePerKm ?? VEHICLE_PRICING_DEFAULTS[vehicleType]?.pricePerKm20to50 ?? 8,
+    pricePerKm50plus: stats[`${prefix}PricePerKm50plus`] ?? stats[`${prefix}PricePerKm20to50`] ?? stats[`${prefix}PricePerKm0to20`] ?? stats[`${prefix}PricePerKm`] ?? stats.pricePerKm ?? VEHICLE_PRICING_DEFAULTS[vehicleType]?.pricePerKm50plus ?? 8,
   };
 }
 
@@ -151,7 +151,7 @@ export function calculateFullTripFare(
   computedBase = Math.round(computedBase * timeMultiplier);
   const discountedBase = Math.max(1, computedBase - appliedDiscount);
 
-  const commissionMode = stats?.commissionMode || 'fixed';
+  const commissionMode = stats?.commissionMode ?? 'percent';
   const commissionRateValue = stats?.incomingCommissionPercent ?? stats?.commissionRate ?? 10;
   const incomingCommissionFixed = stats?.incomingCommission ?? 5;
   const outgoingCommissionFixed = stats?.outgoingCommission ?? 5;

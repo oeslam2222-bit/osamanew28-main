@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Driver, Trip, SystemStats, Location, Rider, PromoCode, Region, Ad } from '../types';
 import { DollarSign, ShieldAlert, Award, TrendingUp, Settings, Percent, CheckCircle, Star, Users, MapPin, Database, Sparkles, Search, Upload, AlertCircle, HelpCircle, Globe, Loader2, Calendar, Clock, BarChart2, Car, Map, Trash2, Plus, Megaphone, Phone, Eye, EyeOff } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, AreaChart, Area } from 'recharts';
-import { fetchTripsHistoryFilteredPaginated, fetchTripsHistoryCount, generatePromoCode, fetchPromoCodes, fetchRegions, saveRegion, deleteRegionInDB, fetchAds, saveAd, deleteAd } from '../supabaseService';
+import { fetchTripsHistoryFilteredPaginated, fetchTripsHistoryCount, generatePromoCode, fetchPromoCodes, fetchRegions, saveRegion, deleteRegionInDB, fetchAds, saveAd, deleteAd, loadSession, getDeviceId } from '../supabaseService';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE, DATA_RETENTION_POLICY } from '../utils/legal';
 import { exportBackup, importBackup } from '../utils/backup';
 import { AVAILABLE_CITIES } from '../constants';
@@ -73,6 +73,15 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   const [activeTab, setActiveTab] = useState<'overview' | 'drivers' | 'riders' | 'history' | 'analytics' | 'legal' | 'regions' | 'ads'>('overview');
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [adminUserId, setAdminUserId] = useState<string>('');
+
+  useEffect(() => {
+    loadSession().then(session => {
+      if (session?.role === 'ADMIN') {
+        setAdminUserId(session.userId);
+      }
+    });
+  }, []);
 
   const [pricingForm, setPricingForm] = useState({
     distanceBuffer: stats.distanceBuffer ?? 1.25,
@@ -370,9 +379,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
       const matched = drivers.find(d => d.name === drv.name);
       return {
         name: drv.name,
-        [lang === 'ar' ? 'الرحلات' : 'Rides']: drv.rides || (matched ? Math.round(matched.totalTrips / 10) : 5),
-        [lang === 'ar' ? 'الأرباح' : 'Earnings']: drv.revenue || (matched ? Math.round(matched.totalEarnings / 10) : 250),
-        [lang === 'ar' ? 'العمولات' : 'Commissions']: drv.commission || (matched ? Math.round(matched.totalCommissionPaid / 10) : 37)
+        [lang === 'ar' ? 'الرحلات' : 'Rides']: drv.rides,
+        [lang === 'ar' ? 'الأرباح' : 'Earnings']: drv.revenue,
+        [lang === 'ar' ? 'العمولات' : 'Commissions']: drv.commission
       };
     }).sort((a, b) => {
       const valB = b[lang === 'ar' ? 'الرحلات' : 'Rides'] as number;
@@ -387,16 +396,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
     const daysEn = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const weekDays = lang === 'ar' ? daysAr : daysEn;
 
-    // Standard starting weights so the chart looks incredibly natural and fully populated
-    const dayCounts: { [key: string]: number } = {
-      [weekDays[0]]: 3, // Sun
-      [weekDays[1]]: 4, // Mon
-      [weekDays[2]]: 6, // Tue
-      [weekDays[3]]: 8, // Wed (peak)
-      [weekDays[4]]: 5, // Thu
-      [weekDays[5]]: 2, // Fri
-      [weekDays[6]]: 4, // Sat
-    };
+    const dayCounts: { [key: string]: number } = {};
+    weekDays.forEach(day => {
+      dayCounts[day] = 0;
+    });
 
     adminTrips.filter(t => t.status === 'COMPLETED').forEach(t => {
       const dateStr = t.completedAt || t.createdAt;
@@ -419,10 +422,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
   };
 
   const loadAdminTrips = async (reset = false) => {
+    if (!adminUserId) return;
     const page = reset ? 0 : adminTripsPage;
     setIsLoadingTrips(true);
     try {
       const result = await fetchTripsHistoryFilteredPaginated({
+        userId: adminUserId || undefined,
+        role: 'admin',
+        deviceId: getDeviceId(),
         dateFrom: tripDateFrom || undefined,
         dateTo: tripDateTo || undefined,
         statusFilter: tripHistoryStatusFilter,

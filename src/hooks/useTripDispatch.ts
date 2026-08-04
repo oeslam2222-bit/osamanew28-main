@@ -21,7 +21,7 @@ export const useTripDispatch = (
   playNotificationSound: (sound: string) => void,
   speakText: (text: string, lang: string) => void,
   refreshWaitingTrip: () => Promise<boolean>,
-  saveTripToHistory: (trip: Trip) => Promise<void>,
+  saveTripToHistory: (trip: Trip, userId?: string, role?: 'rider' | 'driver' | 'admin', deviceId?: string) => Promise<void>,
   saveActiveTrip: (trip: Trip | null, clearTripId?: string) => Promise<void>
 ) => {
   const lastRouteCacheUseRef = useRef<number>(Date.now());
@@ -43,7 +43,7 @@ export const useTripDispatch = (
           const cancelled = { ...prev, status: 'CANCELLED' as TripStatus, completedAt: new Date().toISOString() };
           setTripsHistory((history: Trip[]) => [cancelled, ...history]);
           if (supabaseConnected) {
-            saveTripToHistory(cancelled);
+             saveTripToHistory(cancelled);
             saveActiveTrip(null, prev.id).catch(() => {});
           }
           playNotificationSound('alert');

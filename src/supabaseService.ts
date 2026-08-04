@@ -1167,12 +1167,13 @@ export const subscribeToActiveTrips = (
 };
 
 // Fetch Trips History
-export const fetchTripsHistory = async ({ userId, role }: { userId?: string; role?: 'rider' | 'driver' } = {}): Promise<Trip[] | null> => {
+export const fetchTripsHistory = async ({ userId, role, deviceId }: { userId?: string; role?: 'rider' | 'driver'; deviceId?: string } = {}): Promise<Trip[] | null> => {
   try {
     if (!userId || !role) return null;
     const { data, error } = await supabase.rpc('get_my_trips', {
       p_user_id: userId,
       p_role: role,
+      p_device_id: deviceId || null,
       p_page: 0,
       p_limit: 50,
       p_date_from: null,
@@ -1189,9 +1190,19 @@ export const fetchTripsHistory = async ({ userId, role }: { userId?: string; rol
 };
 
 // Add to Trips History
-export const saveTripToHistory = async (trip: Trip): Promise<boolean> => {
+export const saveTripToHistory = async (
+  trip: Trip,
+  userId?: string,
+  role?: 'rider' | 'driver' | 'admin',
+  deviceId?: string
+): Promise<boolean> => {
   try {
-    const { error } = await supabase.from('ezz_trips_history').upsert(mapTripToDB(trip));
+    const { error } = await supabase.rpc('save_trip_to_history', {
+      p_user_id: userId || '',
+      p_role: role || 'rider',
+      p_device_id: deviceId || '',
+      p_trip: mapTripToDB(trip),
+    });
     if (error) throw error;
     return true;
   } catch (err: any) {
@@ -1203,11 +1214,13 @@ export const saveTripToHistory = async (trip: Trip): Promise<boolean> => {
 export const fetchTripsHistoryCount = async ({
   userId,
   role,
+  deviceId,
   dateFrom,
   dateTo,
 }: {
   userId?: string;
   role?: 'rider' | 'driver';
+  deviceId?: string;
   dateFrom?: string;
   dateTo?: string;
 }): Promise<number> => {
@@ -1216,6 +1229,7 @@ export const fetchTripsHistoryCount = async ({
     const { data, error } = await supabase.rpc('count_my_trips', {
       p_user_id: userId,
       p_role: role,
+      p_device_id: deviceId || null,
       p_date_from: dateFrom || null,
       p_date_to: dateTo || null,
       p_status_filter: 'all',
@@ -1232,6 +1246,7 @@ export const fetchTripsHistoryCount = async ({
 export const fetchTripsHistoryPaginated = async ({
   userId,
   role,
+  deviceId,
   dateFrom,
   dateTo,
   statusFilter,
@@ -1241,6 +1256,7 @@ export const fetchTripsHistoryPaginated = async ({
 }: {
   userId?: string;
   role?: 'rider' | 'driver';
+  deviceId?: string;
   dateFrom?: string;
   dateTo?: string;
   statusFilter?: string;
@@ -1255,6 +1271,7 @@ export const fetchTripsHistoryPaginated = async ({
     const { data, error } = await supabase.rpc('get_my_trips', {
       p_user_id: userId,
       p_role: role,
+      p_device_id: deviceId || null,
       p_page: page,
       p_limit: limit,
       p_date_from: dateFrom || null,
@@ -1275,6 +1292,7 @@ export const fetchTripsHistoryPaginated = async ({
 export const fetchTripsHistoryFilteredPaginated = async ({
   userId,
   role,
+  deviceId,
   dateFrom,
   dateTo,
   statusFilter,
@@ -1283,7 +1301,8 @@ export const fetchTripsHistoryFilteredPaginated = async ({
   limit = PAGE_SIZE,
 }: {
   userId?: string;
-  role?: 'rider' | 'driver';
+  role?: 'rider' | 'driver' | 'admin';
+  deviceId?: string;
   dateFrom?: string;
   dateTo?: string;
   statusFilter?: string;
@@ -1292,7 +1311,10 @@ export const fetchTripsHistoryFilteredPaginated = async ({
   limit?: number;
 }): Promise<{ trips: Trip[]; hasMore: boolean }> => {
   try {
+    const adminId = role === 'admin' ? userId : undefined;
     const { data, error } = await supabase.rpc('get_admin_trips', {
+      p_admin_user_id: adminId || userId || '',
+      p_device_id: deviceId || null,
       p_page: page,
       p_limit: limit,
       p_date_from: dateFrom || null,
@@ -1311,9 +1333,11 @@ export const fetchTripsHistoryFilteredPaginated = async ({
 };
 
 // Fetch all trips (admin/backup usage)
-export const fetchAllTrips = async (limit: number = 1000): Promise<Trip[]> => {
+export const fetchAllTrips = async (limit: number = 1000, adminUserId?: string, deviceId?: string): Promise<Trip[]> => {
   try {
     const { data, error } = await supabase.rpc('get_admin_trips', {
+      p_admin_user_id: adminUserId || '',
+      p_device_id: deviceId || null,
       p_page: 0,
       p_limit: limit,
       p_date_from: null,
@@ -1330,9 +1354,12 @@ export const fetchAllTrips = async (limit: number = 1000): Promise<Trip[]> => {
 };
 
 // Clear Trips History (admin only - uses secure RPC)
-export const clearTripsHistoryInDB = async (): Promise<boolean> => {
+export const clearTripsHistoryInDB = async (adminUserId?: string, deviceId?: string): Promise<boolean> => {
   try {
-    const { error } = await supabase.rpc('admin_clear_all_trips');
+    const { error } = await supabase.rpc('admin_clear_all_trips', {
+      p_admin_user_id: adminUserId || '',
+      p_device_id: deviceId || null,
+    });
     if (error) throw error;
     return true;
   } catch (err: any) {
@@ -1689,9 +1716,8 @@ export const logAuditToDB = async (entry: AuditLogEntry): Promise<boolean> => {
 
 // --- SESSIONS (keep user logged in across reloads & support multi-account tabs) ---
 
-const getDeviceId = (): string => {
+export const getDeviceId = (): string => {
   try {
-    // Priority to tab-isolated device ID so multiple tabs can run different accounts concurrently
     let deviceId = sessionStorage.getItem('ezz_tab_device_id');
     if (!deviceId) {
       const sharedDeviceId = localStorage.getItem('ezz_device_id');

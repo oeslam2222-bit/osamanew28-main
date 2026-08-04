@@ -2,7 +2,7 @@ import React, { useState, useEffect, lazy, Suspense, Dispatch, SetStateAction } 
 import { Location, Driver, Trip, Rider, Region, Ad } from '../types';
 import { MapPin, ArrowRightLeft, Navigation, Phone, Star, DollarSign, Loader2, Sparkles, AlertCircle, Car, HelpCircle, MessageSquare, Search, Check, X, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { calculateHaversineDistance, estimateDrivingDistance, calculateDynamicFare, getVehiclePricing, calculateVehicleFare, calculateFullTripFare } from '../utils/haversine';
-import { fetchTripsHistoryPaginated, saveRiderPreferences, validatePromoCode } from '../supabaseService';
+import { fetchTripsHistoryPaginated, saveRiderPreferences, validatePromoCode, getDeviceId } from '../supabaseService';
 import { RiderPreferences } from '../types';
 import { AdBanner } from './AdBanner';
 
@@ -450,6 +450,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
       const result = await fetchTripsHistoryPaginated({
         userId: rider.id,
         role: 'rider',
+        deviceId: getDeviceId(),
         dateFrom: myTripDateFrom || undefined,
         dateTo: myTripDateTo || undefined,
         page,

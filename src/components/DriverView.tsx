@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Driver, Trip, Location, SystemStats, Region } from '../types';
 import { ToggleLeft, ToggleRight, MapPin, Navigation, DollarSign, Wallet, Check, AlertTriangle, Users, Star, MessageSquare, Bell, ShieldAlert, Loader2, ChevronRight, ChevronLeft, Plus, X } from 'lucide-react';
-import { fetchTripsHistoryPaginated } from '../supabaseService';
+import { fetchTripsHistoryPaginated, getDeviceId } from '../supabaseService';
 
 interface DriverViewProps {
   drivers: Driver[];
@@ -215,6 +215,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
       let result = await fetchTripsHistoryPaginated({
         userId: currentDriver.id,
         role: 'driver',
+        deviceId: getDeviceId(),
         dateFrom: myTripDateFrom || undefined,
         dateTo: myTripDateTo || undefined,
         page,

@@ -28,6 +28,7 @@ import {
   saveStats,
   fetchLocations,
   saveLocationInDB,
+  getDeviceId,
   authenticateAdmin,
   deleteDriverInDB,
   deleteRiderInDB,
@@ -638,6 +639,7 @@ export default function App() {
   const [adminPassword, setAdminPassword] = useState<string>(() => {
     return localStorage.getItem('ezz_admin_password') || '';
   });
+  const [adminUserId, setAdminUserId] = useState<string>('');
   const [adminLoginError, setAdminLoginError] = useState('');
 
   // Prevent duplicate login submissions (button spam / rapid Enter presses)
@@ -1151,7 +1153,7 @@ export default function App() {
           }
 
           const userRole = session.role.toLowerCase() as 'rider' | 'driver';
-          const dbHistory = await fetchTripsHistory({ userId: session.userId, role: userRole });
+          const dbHistory = await fetchTripsHistory({ userId: session.userId, role: userRole, deviceId: getDeviceId() });
           if (dbHistory && dbHistory.length > 0) {
             setTripsHistory(dbHistory);
           }
@@ -2412,7 +2414,7 @@ export default function App() {
           const cancelled = { ...prev, status: 'CANCELLED' as TripStatus, completedAt: new Date().toISOString() };
           setTripsHistory((history) => [cancelled, ...history]);
           if (supabaseConnected) {
-            saveTripToHistory(cancelled);
+            saveTripToHistory(cancelled, rider.id, 'rider', getDeviceId());
             saveActiveTrip(null, prev.id).catch(() => {});
           }
           playNotificationSound('alert');
@@ -2502,7 +2504,7 @@ export default function App() {
     setTripsHistory((prev) => [cancelledTrip, ...prev]);
 
     if (supabaseConnected) {
-      saveTripToHistory(cancelledTrip);
+      saveTripToHistory(cancelledTrip, rider.id, 'rider', getDeviceId());
       saveActiveTrip(null, cancelledTripId).then((ok) => {
         console.log('[handleCancelRide] Cleared active trip from DB, result:', ok);
         cancelInProgressRef.current = false;
@@ -2911,7 +2913,7 @@ export default function App() {
 
     if (supabaseConnected) {
       saveActiveTrip(completed);
-      saveTripToHistory(completed);
+      saveTripToHistory(completed, driverId, 'driver', getDeviceId());
     }
 
     setActiveTripWithTracking(completed);
@@ -3169,7 +3171,7 @@ export default function App() {
     await Promise.allSettled([
       clearAllDriversInDB(),
       clearAllRidersInDB(),
-      clearTripsHistoryInDB()
+      clearTripsHistoryInDB(adminUserId, getDeviceId())
     ]);
 
     alert(lang === 'ar' ? 'تم مسح جميع البيانات الوهمية نهائياً' : 'All fake data has been permanently cleared');
@@ -4561,6 +4563,7 @@ if (activeTrip) {
                                   const admin = await authenticateAdmin(adminPhone.trim(), adminPassword.trim());
                                   if (admin) {
                                     setAdminIsLoggedIn(true);
+                                    setAdminUserId(admin.id);
                                     localStorage.setItem('ezz_admin_phone', adminPhone.trim());
                                     localStorage.setItem('ezz_admin_password', adminPassword.trim());
                                     if (supabaseConnected) {
@@ -4654,8 +4657,9 @@ if (activeTrip) {
                          onDeleteRider={handleDeleteRider}
                          onClearAllFakeData={handleClearAllFakeData}
                         lang={lang}
-                         onLogout={() => {
+                          onLogout={() => {
                             setAdminIsLoggedIn(false);
+                            setAdminUserId('');
                             if (supabaseConnected) clearSession('ADMIN');
                           }}
                          onTriggerToast={triggerToast}

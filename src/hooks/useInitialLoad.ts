@@ -11,6 +11,7 @@ import {
   fetchStats,
   saveStats,
   loadSession,
+  getDeviceId,
 } from '../supabaseService';
 import { requestNotificationPermission } from '../utils/notifications';
 import { supabase } from '../supabaseClient';
@@ -109,7 +110,7 @@ export const useInitialLoad = ({
           if (session) {
             if (session.role !== 'ADMIN') {
               const userRole = session.role.toLowerCase() as 'rider' | 'driver';
-              const dbHistory = await fetchTripsHistory({ userId: session.userId, role: userRole });
+              const dbHistory = await fetchTripsHistory({ userId: session.userId, role: userRole, deviceId: getDeviceId() });
               if (dbHistory && dbHistory.length > 0) {
                 setTripsHistory(dbHistory);
               }
