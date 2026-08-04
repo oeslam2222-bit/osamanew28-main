@@ -7,7 +7,7 @@ import {
   fetchDrivers,
   fetchRiders,
   fetchLocations,
-  fetchTripsHistory,
+  fetchAllTrips,
   fetchStats,
   saveDriver,
   saveRider,
@@ -32,7 +32,7 @@ export const exportBackup = async (): Promise<BackupData | null> => {
       fetchDrivers(),
       fetchRiders(),
       fetchLocations(),
-      fetchTripsHistory(),
+      fetchAllTrips(1000),
       fetchStats(),
     ]);
 

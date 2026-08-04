@@ -476,19 +476,175 @@ CREATE POLICY "anon_write_active_trip" ON ezz_active_trip FOR ALL TO anon USING 
 -- تفعيل Realtime على جدول الرحلة النشطة (مطلوب لوصول الطلب للسائق فوراً)
 ALTER PUBLICATION supabase_realtime ADD TABLE ezz_active_trip;
 
--- Trips History: الإدمن يقرأ الكل، Rider/Sdriver يقرأ سجلهم فقط
+-- Trips History: منع القراءة المباشرة، واستخدام RPC functions فقط للعزل
 DROP POLICY IF EXISTS "Allow public read trips_history" ON ezz_trips_history;
-CREATE POLICY "rider_read_own_trips" ON ezz_trips_history FOR SELECT TO anon USING (
-  rider_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'RIDER')
-);
-CREATE POLICY "driver_read_own_trips" ON ezz_trips_history FOR SELECT TO anon USING (
-  driver_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'DRIVER')
-);
-CREATE POLICY "admin_read_all_trips" ON ezz_trips_history FOR SELECT TO anon USING (
-  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
-);
+DROP POLICY IF EXISTS "rider_read_own_trips" ON ezz_trips_history;
+DROP POLICY IF EXISTS "driver_read_own_trips" ON ezz_trips_history;
+DROP POLICY IF EXISTS "admin_read_all_trips" ON ezz_trips_history;
 DROP POLICY IF EXISTS "Allow public write trips_history" ON ezz_trips_history;
-CREATE POLICY "anon_write_trips_history" ON ezz_trips_history FOR ALL TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "anon_write_trips_history" ON ezz_trips_history;
+
+CREATE POLICY "deny_anon_read_trips" ON ezz_trips_history
+  FOR SELECT TO anon
+  USING (false);
+
+CREATE POLICY "anon_write_trips" ON ezz_trips_history
+  FOR INSERT, UPDATE TO anon
+  USING (true)
+  WITH CHECK (true);
+
+CREATE POLICY "admin_delete_trips" ON ezz_trips_history
+  FOR DELETE TO anon
+  USING (
+    EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+  );
+
+-- RPC: Get paginated trips for current user (rider or driver)
+CREATE OR REPLACE FUNCTION get_my_trips(
+  p_user_id TEXT,
+  p_role TEXT,
+  p_page INTEGER DEFAULT 0,
+  p_limit INTEGER DEFAULT 10,
+  p_date_from TEXT DEFAULT NULL,
+  p_date_to TEXT DEFAULT NULL,
+  p_status_filter TEXT DEFAULT 'all',
+  p_search TEXT DEFAULT NULL
+)
+RETURNS SETOF ezz_trips_history
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  SELECT * FROM ezz_trips_history
+  WHERE 
+    (p_role = 'rider' AND rider_id = p_user_id)
+    OR (p_role = 'driver' AND driver_id = p_user_id)
+  AND (p_date_from IS NULL OR created_at >= p_date_from)
+  AND (p_date_to IS NULL OR created_at <= p_date_to)
+  AND (
+    p_status_filter = 'all' 
+    OR (p_status_filter = 'ACTIVE' AND status IN ('ACCEPTED', 'ARRIVED', 'STARTED'))
+    OR status = p_status_filter
+  )
+  AND (
+    p_search IS NULL OR p_search = '' OR
+    LOWER(rider_name) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(driver_name, '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+  )
+  ORDER BY created_at DESC
+  LIMIT p_limit OFFSET (p_page * p_limit);
+$$;
+
+-- RPC: Count trips for current user (rider or driver)
+CREATE OR REPLACE FUNCTION count_my_trips(
+  p_user_id TEXT,
+  p_role TEXT,
+  p_date_from TEXT DEFAULT NULL,
+  p_date_to TEXT DEFAULT NULL,
+  p_status_filter TEXT DEFAULT 'all',
+  p_search TEXT DEFAULT NULL
+)
+RETURNS BIGINT
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  SELECT COUNT(*) FROM ezz_trips_history
+  WHERE 
+    (p_role = 'rider' AND rider_id = p_user_id)
+    OR (p_role = 'driver' AND driver_id = p_user_id)
+  AND (p_date_from IS NULL OR created_at >= p_date_from)
+  AND (p_date_to IS NULL OR created_at <= p_date_to)
+  AND (
+    p_status_filter = 'all' 
+    OR (p_status_filter = 'ACTIVE' AND status IN ('ACCEPTED', 'ARRIVED', 'STARTED'))
+    OR status = p_status_filter
+  )
+  AND (
+    p_search IS NULL OR p_search = '' OR
+    LOWER(rider_name) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(driver_name, '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+  );
+$$;
+
+-- RPC: Get paginated trips for admin (all trips with filtering)
+CREATE OR REPLACE FUNCTION get_admin_trips(
+  p_page INTEGER DEFAULT 0,
+  p_limit INTEGER DEFAULT 20,
+  p_date_from TEXT DEFAULT NULL,
+  p_date_to TEXT DEFAULT NULL,
+  p_status_filter TEXT DEFAULT 'all',
+  p_search TEXT DEFAULT NULL
+)
+RETURNS SETOF ezz_trips_history
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  SELECT * FROM ezz_trips_history
+  WHERE (p_date_from IS NULL OR created_at >= p_date_from)
+  AND (p_date_to IS NULL OR created_at <= p_date_to)
+  AND (
+    p_status_filter = 'all' 
+    OR (p_status_filter = 'ACTIVE' AND status IN ('ACCEPTED', 'ARRIVED', 'STARTED'))
+    OR status = p_status_filter
+  )
+  AND (
+    p_search IS NULL OR p_search = '' OR
+    LOWER(rider_name) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(driver_name, '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+  )
+  ORDER BY created_at DESC
+  LIMIT p_limit OFFSET (p_page * p_limit);
+$$;
+
+-- RPC: Count all trips for admin
+CREATE OR REPLACE FUNCTION count_admin_trips(
+  p_date_from TEXT DEFAULT NULL,
+  p_date_to TEXT DEFAULT NULL,
+  p_status_filter TEXT DEFAULT 'all',
+  p_search TEXT DEFAULT NULL
+)
+RETURNS BIGINT
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  SELECT COUNT(*) FROM ezz_trips_history
+  WHERE (p_date_from IS NULL OR created_at >= p_date_from)
+  AND (p_date_to IS NULL OR created_at <= p_date_to)
+  AND (
+    p_status_filter = 'all' 
+    OR (p_status_filter = 'ACTIVE' AND status IN ('ACCEPTED', 'ARRIVED', 'STARTED'))
+    OR status = p_status_filter
+  )
+  AND (
+    p_search IS NULL OR p_search = '' OR
+    LOWER(rider_name) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(driver_name, '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+  );
+$$;
+
+-- RPC: Admin clear all trips
+CREATE OR REPLACE FUNCTION admin_clear_all_trips()
+RETURNS VOID
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  DELETE FROM ezz_trips_history;
+$$;
 
 -- Stats: القراءة للجميع، التعديل للإدمن فقط
 DROP POLICY IF EXISTS "Allow public read stats" ON ezz_stats;
@@ -1013,21 +1169,19 @@ export const subscribeToActiveTrips = (
 // Fetch Trips History
 export const fetchTripsHistory = async ({ userId, role }: { userId?: string; role?: 'rider' | 'driver' } = {}): Promise<Trip[] | null> => {
   try {
-    let query = supabase
-      .from('ezz_trips_history')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(50);
-
-    if (role === 'rider' && userId) {
-      query = query.eq('rider_id', userId);
-    } else if (role === 'driver' && userId) {
-      query = query.eq('driver_id', userId);
-    }
-
-    const { data, error } = await query;
+    if (!userId || !role) return null;
+    const { data, error } = await supabase.rpc('get_my_trips', {
+      p_user_id: userId,
+      p_role: role,
+      p_page: 0,
+      p_limit: 50,
+      p_date_from: null,
+      p_date_to: null,
+      p_status_filter: 'all',
+      p_search: null,
+    });
     if (error) throw error;
-    return data.map(mapTripFromDB);
+    return (data || []).map(mapTripFromDB);
   } catch (err: any) {
     console.warn('Could not fetch trips history from Supabase:', err.message);
     return null;
@@ -1058,24 +1212,17 @@ export const fetchTripsHistoryCount = async ({
   dateTo?: string;
 }): Promise<number> => {
   try {
-    let query = supabase.from('ezz_trips_history').select('*', { count: 'exact', head: true });
-
-    if (role === 'rider' && userId) {
-      query = query.eq('rider_id', userId);
-    } else if (role === 'driver' && userId) {
-      query = query.eq('driver_id', userId);
-    }
-
-    if (dateFrom) {
-      query = query.gte('created_at', dateFrom);
-    }
-    if (dateTo) {
-      query = query.lte('created_at', dateTo);
-    }
-
-    const { count, error } = await query;
+    if (!userId || !role) return 0;
+    const { data, error } = await supabase.rpc('count_my_trips', {
+      p_user_id: userId,
+      p_role: role,
+      p_date_from: dateFrom || null,
+      p_date_to: dateTo || null,
+      p_status_filter: 'all',
+      p_search: null,
+    });
     if (error) throw error;
-    return count || 0;
+    return Number(data) || 0;
   } catch (err: any) {
     console.warn('Could not count trips history from Supabase:', err.message);
     return 0;
@@ -1102,52 +1249,22 @@ export const fetchTripsHistoryPaginated = async ({
   limit?: number;
 }): Promise<{ trips: Trip[]; hasMore: boolean }> => {
   try {
-    let query = supabase.from('ezz_trips_history').select('*');
-
-    if (role === 'rider' && userId) {
-      query = query.eq('rider_id', userId);
-    } else if (role === 'driver' && userId) {
-      query = query.eq('driver_id', userId);
+    if (!userId || !role) {
+      return { trips: [], hasMore: false };
     }
-
-    if (dateFrom) {
-      query = query.gte('created_at', dateFrom);
-    }
-    if (dateTo) {
-      query = query.lte('created_at', dateTo);
-    }
-
-    if (statusFilter && statusFilter !== 'all') {
-      if (statusFilter === 'ACTIVE') {
-        query = query.in('status', ['ACCEPTED', 'ARRIVED', 'STARTED']);
-      } else {
-        query = query.eq('status', statusFilter);
-      }
-    }
-
-    const from = page * limit;
-    const to = from + limit - 1;
-
-    query = query.order('created_at', { ascending: false }).range(from, to);
-
-    const { data, error } = await query;
+    const { data, error } = await supabase.rpc('get_my_trips', {
+      p_user_id: userId,
+      p_role: role,
+      p_page: page,
+      p_limit: limit,
+      p_date_from: dateFrom || null,
+      p_date_to: dateTo || null,
+      p_status_filter: statusFilter || 'all',
+      p_search: searchQuery || null,
+    });
     if (error) throw error;
 
-    let trips = (data || []).map(mapTripFromDB);
-
-    if (searchQuery && searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      trips = trips.filter(
-        (trip) =>
-          trip.riderName.toLowerCase().includes(q) ||
-          (trip.driverName && trip.driverName.toLowerCase().includes(q)) ||
-          trip.pickup.nameAr.toLowerCase().includes(q) ||
-          trip.pickup.nameEn.toLowerCase().includes(q) ||
-          trip.dropoff.nameAr.toLowerCase().includes(q) ||
-          trip.dropoff.nameEn.toLowerCase().includes(q)
-      );
-    }
-
+    const trips = (data || []).map(mapTripFromDB);
     return { trips, hasMore: trips.length === limit };
   } catch (err: any) {
     console.warn('Could not fetch paginated trips history from Supabase:', err.message);
@@ -1175,52 +1292,17 @@ export const fetchTripsHistoryFilteredPaginated = async ({
   limit?: number;
 }): Promise<{ trips: Trip[]; hasMore: boolean }> => {
   try {
-    let query = supabase.from('ezz_trips_history').select('*');
-
-    if (role === 'rider' && userId) {
-      query = query.eq('rider_id', userId);
-    } else if (role === 'driver' && userId) {
-      query = query.eq('driver_id', userId);
-    }
-
-    if (dateFrom) {
-      query = query.gte('created_at', dateFrom);
-    }
-    if (dateTo) {
-      query = query.lte('created_at', dateTo);
-    }
-
-    if (statusFilter && statusFilter !== 'all') {
-      if (statusFilter === 'ACTIVE') {
-        query = query.in('status', ['ACCEPTED', 'ARRIVED', 'STARTED']);
-      } else {
-        query = query.eq('status', statusFilter);
-      }
-    }
-
-    const from = page * limit;
-    const to = from + limit - 1;
-
-    query = query.order('created_at', { ascending: false }).range(from, to);
-
-    const { data, error } = await query;
+    const { data, error } = await supabase.rpc('get_admin_trips', {
+      p_page: page,
+      p_limit: limit,
+      p_date_from: dateFrom || null,
+      p_date_to: dateTo || null,
+      p_status_filter: statusFilter || 'all',
+      p_search: searchQuery || null,
+    });
     if (error) throw error;
 
-    let trips = (data || []).map(mapTripFromDB);
-
-    if (searchQuery && searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      trips = trips.filter(
-        (trip) =>
-          trip.riderName.toLowerCase().includes(q) ||
-          (trip.driverName && trip.driverName.toLowerCase().includes(q)) ||
-          trip.pickup.nameAr.toLowerCase().includes(q) ||
-          trip.pickup.nameEn.toLowerCase().includes(q) ||
-          trip.dropoff.nameAr.toLowerCase().includes(q) ||
-          trip.dropoff.nameEn.toLowerCase().includes(q)
-      );
-    }
-
+    const trips = (data || []).map(mapTripFromDB);
     return { trips, hasMore: trips.length === limit };
   } catch (err: any) {
     console.warn('Could not fetch filtered paginated trips history from Supabase:', err.message);
@@ -1228,10 +1310,29 @@ export const fetchTripsHistoryFilteredPaginated = async ({
   }
 };
 
-// Clear Trips History
+// Fetch all trips (admin/backup usage)
+export const fetchAllTrips = async (limit: number = 1000): Promise<Trip[]> => {
+  try {
+    const { data, error } = await supabase.rpc('get_admin_trips', {
+      p_page: 0,
+      p_limit: limit,
+      p_date_from: null,
+      p_date_to: null,
+      p_status_filter: 'all',
+      p_search: null,
+    });
+    if (error) throw error;
+    return (data || []).map(mapTripFromDB);
+  } catch (err: any) {
+    console.warn('Could not fetch all trips from Supabase:', err.message);
+    return [];
+  }
+};
+
+// Clear Trips History (admin only - uses secure RPC)
 export const clearTripsHistoryInDB = async (): Promise<boolean> => {
   try {
-    const { error } = await supabase.from('ezz_trips_history').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    const { error } = await supabase.rpc('admin_clear_all_trips');
     if (error) throw error;
     return true;
   } catch (err: any) {
