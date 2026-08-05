@@ -171,8 +171,12 @@ export default function App() {
   const lastTripCompletedRef = useRef(false);
   const lastTripCancelledRef = useRef(false);
   const cancelInProgressRef = useRef(false);
+  const endTripInProgressRef = useRef(false);
+  const requestInProgressRef = useRef(false);
   const pendingDriverToggleRef = useRef<string | null>(null);
   const resetDriverStatusOnceRef = useRef<Record<string, boolean>>({});
+  const driversRef = useRef<Driver[]>(drivers);
+  driversRef.current = drivers;
   const [noAvailableDrivers, setNoAvailableDrivers] = useState(false);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [tripsHistory, setTripsHistory] = useState<Trip[]>([]);
@@ -255,18 +259,25 @@ export default function App() {
       : undefined;
 
     if (nextDriverId) {
-      const nextDrv = drivers.find(d => d.id === nextDriverId);
+      const nextDrv = driversRef.current.find(d => d.id === nextDriverId);
       const updatedTrip = {
         ...currentTrip,
         status: 'SEARCHING' as TripStatus,
         driverId: undefined,
         driverName: undefined,
         currentOfferedDriverId: nextDriverId,
+        dispatchTimer: currentTrip.dispatchTimerMax || currentTrip.dispatchTimer || 300,
       };
       setActiveTripWithTracking(updatedTrip);
       setDrivers((prev) => prev.map((d) => (d.id === currentDriverId ? { ...d, status: 'AVAILABLE' } : d)));
       if (supabaseConnected) {
         saveActiveTrip(updatedTrip).then((ok) => console.log('[handleTransferTrip] saved updated trip:', ok));
+        if (currentDriverId) {
+          const currentDrv = driversRef.current.find(d => d.id === currentDriverId);
+          if (currentDrv) {
+            saveDriver({ ...currentDrv, status: 'AVAILABLE' }).catch(() => {});
+          }
+        }
       }
       if (nextDrv) {
         setDrivers((prev) =>
@@ -320,7 +331,7 @@ export default function App() {
 
   const getRealRoute = useCallback(async (pickup: Location, dropoff: Location): Promise<RouteResult | null> => {
     const cacheKey = `${pickup.lat.toFixed(4)}_${pickup.lng.toFixed(4)}_${dropoff.lat.toFixed(4)}_${dropoff.lng.toFixed(4)}`;
-    const cached = routeCache[cacheKey] || getCachedRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng);
+    const cached = routeCache[cacheKey] || getCachedRoute([pickup.lat, pickup.lng, dropoff.lat, dropoff.lng]);
     if (cached && cached.distance > 0) return cached;
 
     const coordStr = `${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}`;
@@ -396,7 +407,7 @@ export default function App() {
           }
           if (distance > 0 && geometry && geometry.length > 1) {
             const result: RouteResult = { distance, geometry, durationSeconds, steps };
-            setCachedRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng, result);
+            setCachedRoute([pickup.lat, pickup.lng, dropoff.lat, dropoff.lng], result);
             lastRouteCacheUseRef.current = Date.now();
             setRouteCache(prev => {
               const updated = { ...prev, [cacheKey]: result };
@@ -423,7 +434,7 @@ export default function App() {
     dropoff: Location
   ): Promise<RouteResult | null> => {
     const cacheKey = `nav_${driverLat.toFixed(4)}_${driverLng.toFixed(4)}_${pickup.lat.toFixed(4)}_${pickup.lng.toFixed(4)}_${dropoff.lat.toFixed(4)}_${dropoff.lng.toFixed(4)}`;
-    const cached = routeCache[cacheKey] || getCachedRoute(driverLat, driverLng, pickup.lat, pickup.lng);
+    const cached = routeCache[cacheKey] || getCachedRoute([driverLat, driverLng, pickup.lat, pickup.lng, dropoff.lat, dropoff.lng], 'nav_');
     if (cached && cached.distance > 0) return cached;
 
     const coordStr = `${driverLng},${driverLat};${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}`;
@@ -506,6 +517,7 @@ export default function App() {
               const updated = { ...prev, [cacheKey]: result };
               return updated;
             });
+            setCachedRoute([driverLat, driverLng, pickup.lat, pickup.lng, dropoff.lat, dropoff.lng], result, 'nav_');
             console.log(`[nav] ${provider.name} OK: ${distance} km, ${geometry.length} pts, ${steps.length} steps`);
             return result;
           }
@@ -1284,7 +1296,7 @@ export default function App() {
       try {
         const remoteActiveTrip = await fetchActiveTrip(driverIsLoggedIn ? selectedDriverId : (rider.id || undefined), driverIsLoggedIn ? 'driver' : (rider.id ? 'rider' : undefined));
         if (!isMountedRef.current) return;
-        if (!remoteActiveTrip || remoteActiveTrip === 'NO_TABLE') {
+        if (!remoteActiveTrip) {
           setActiveTripWithTracking((prev) => {
             if (prev && prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
               if (!prev.driverRatingToRider) {
@@ -1295,6 +1307,11 @@ export default function App() {
             // If the trip disappeared from the DB, clear the local active trip immediately.
             return null;
           });
+          return;
+        }
+
+        if (remoteActiveTrip === 'NO_TABLE') {
+          console.warn('[Polling] fetchActiveTrip returned NO_TABLE, keeping local active trip');
           return;
         }
 
@@ -2149,199 +2166,206 @@ export default function App() {
     requestedVehicleType: 'CAR' | 'MOTORCYCLE' | 'TOKTOK' | 'TRICYCLE' = 'CAR',
     pickupLandmark?: string,
     promoCode?: string,
-    promoCodeId?: string
+    promoCodeId?: string,
+    promoDiscount?: number
   ) => {
-    if (!selectedPickup || !selectedDropoff) return;
-    if (!riderPickupRegion) {
-      triggerToast(
-        lang === 'ar' ? 'اختر المنطقة أولاً' : 'Select a region first',
-        lang === 'ar' ? 'يرجى تحديد منطقة الالتقاء قبل طلب الرحلة.' : 'Please select your pickup region before requesting a ride.',
-        'warning'
-      );
-      return;
-    }
-    const pLoc = locations.find((l) => l.id === selectedPickup);
-    const dLoc = locations.find((l) => l.id === selectedDropoff);
-    if (!pLoc || !dLoc) return;
-    setNoAvailableDrivers(false);
-
-    // Use ONLY real road distance from cache or ORS/OSRM API
-    let distance: number | null = null;
-    let etaMinutes: number | undefined;
-    let routeGeometry: [number, number][] | undefined;
-    const cacheKey = `${pLoc.lat.toFixed(4)}_${pLoc.lng.toFixed(4)}_${dLoc.lat.toFixed(4)}_${dLoc.lng.toFixed(4)}`;
-    const cachedRoute = routeCache[cacheKey];
-    if (cachedRoute && cachedRoute.distance > 0) {
-      distance = Math.max(1, parseFloat(cachedRoute.distance.toFixed(2)));
-      etaMinutes = cachedRoute.durationSeconds ? Math.max(1, Math.round(cachedRoute.durationSeconds / 60)) : undefined;
-      routeGeometry = cachedRoute.geometry;
-    } else {
-      try {
-        const realRoute = await getRealRoute(pLoc, dLoc);
-        if (realRoute && realRoute.distance > 0) {
-          distance = Math.max(1, parseFloat(realRoute.distance.toFixed(2)));
-          etaMinutes = realRoute.durationSeconds ? Math.max(1, Math.round(realRoute.durationSeconds / 60)) : undefined;
-          routeGeometry = realRoute.geometry;
-        }
-      } catch {
-        // ignore
+    if (requestInProgressRef.current) return;
+    requestInProgressRef.current = true;
+    try {
+      if (!selectedPickup || !selectedDropoff) return;
+      if (!riderPickupRegion) {
+        triggerToast(
+          lang === 'ar' ? 'اختر المنطقة أولاً' : 'Select a region first',
+          lang === 'ar' ? 'يرجى تحديد منطقة الالتقاء قبل طلب الرحلة.' : 'Please select your pickup region before requesting a ride.',
+          'warning'
+        );
+        return;
       }
-    }
+      const pLoc = locations.find((l) => l.id === selectedPickup);
+      const dLoc = locations.find((l) => l.id === selectedDropoff);
+      if (!pLoc || !dLoc) return;
+      setNoAvailableDrivers(false);
 
-    // Fallback: if real route unavailable, use estimated distance so trip still proceeds
-    if (!distance) {
-      const directDistance = calculateHaversineDistance(pLoc.lat, pLoc.lng, dLoc.lat, dLoc.lng);
-      const fallbackDistance = estimateDrivingDistance(directDistance, stats.distanceBuffer ?? 1.25) + (stats.additionalKm ?? 0.0);
-      distance = Math.max(1, parseFloat(fallbackDistance.toFixed(2)));
-    }
-
-    let appliedDiscount = 0;
-    let appliedPromoCode: string | undefined;
-    let appliedPromoDiscount: number | undefined;
-
-    if (promoCode && promoCodeId) {
-      appliedDiscount = 0;
-      appliedPromoCode = promoCode;
-      appliedPromoDiscount = 0;
-    } else if (promoCode && stats?.promoCode && promoCode.trim().toUpperCase() === stats.promoCode.trim().toUpperCase()) {
-      appliedDiscount = stats.promoValue || 5;
-      appliedPromoCode = promoCode;
-      appliedPromoDiscount = appliedDiscount;
-    }
-
-    const { baseFare, commission, finalFare } = calculateFullTripFare(distance, requestedVehicleType, stats, appliedDiscount);
-    const fare = finalFare;
-
-    // Broadcast dispatch to up to 5 available drivers in the region simultaneously.
-    // The first driver to accept wins the ride. 5-minute acceptance window.
-    const MAX_OFFERED_DRIVERS = 5;
-    const DISPATCH_TIMER_SECONDS = 300;
-
-    let currentOfferedDriverId: string | undefined = undefined;
-    let offeredDriverIds: string[] = [];
-
-    const eligibleDrivers = await fetchEligibleDriversForRegion(riderPickupRegion);
-
-    // Filter drivers by the pickup region selected by this rider.
-    const selectedRegion = regions.find((r) => r.id === riderPickupRegion);
-
-    const dispatchTimer = DISPATCH_TIMER_SECONDS;
-    const dispatchTimerMax = DISPATCH_TIMER_SECONDS;
-
-    // Filter eligible drivers by requested vehicle type to avoid dispatching wrong vehicle
-    const eligibleDriversByType = eligibleDrivers.filter(
-      (d) => String(d.vehicleType).toUpperCase() === requestedVehicleType
-    );
-
-    if (eligibleDriversByType.length === 0) {
-      setNoAvailableDrivers(true);
-      triggerToast(
-        lang === 'ar' ? 'لا يوجد سائقين من نوع المركبة المختار' : 'No drivers available for the selected vehicle type',
-        lang === 'ar'
-          ? 'عذراً، لا يوجد سائقين من هذا النوع في منطقتك حالياً. يرجى اختيار نوع آخر أو المحاولة لاحقاً.'
-          : 'Sorry, there are no drivers of the selected vehicle type in your area right now. Please choose another type or try again later.',
-        'warning'
-      );
-      return;
-    }
-
-    if (eligibleDriversByType.length > 0) {
-      // Sort drivers by precise Haversine distance to pickup location
-      const sortedDrivers = eligibleDriversByType
-        .map((d) => {
-          const dCoords = getCoordsFromXY(d.currentX, d.currentY);
-          const dist = calculateHaversineDistance(
-            dCoords.lat,
-            dCoords.lng,
-            pLoc.lat,
-            pLoc.lng
-          );
-          return { driver: d, distance: dist };
-        })
-        .sort((a, b) => a.distance - b.distance);
-
-      offeredDriverIds = sortedDrivers.slice(0, MAX_OFFERED_DRIVERS).map((item) => item.driver.id);
-      currentOfferedDriverId = offeredDriverIds[0];
-
-      // Send push notification to all offered drivers immediately
-      const notifiedDrivers = drivers.filter(d => offeredDriverIds.includes(d.id));
-      const newTrip: Trip = {
-        id: `trip_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-        riderId: rider.id,
-        riderName: rider.name,
-        riderPhone: rider.phone,
-        pickup: pLoc,
-        dropoff: dLoc,
-        pickupLandmark,
-        status: 'SEARCHING',
-        fare,
-        commission,
-        distance,
-        routeGeometry,
-        etaMinutes,
-        requestedVehicleType,
-        createdAt: new Date().toISOString(),
-        chatMessages: [],
-        currentOfferedDriverId,
-        offeredDriverIds,
-        dispatchTimer,
-        dispatchTimerMax,
-        appliedPromoCode,
-        appliedPromoDiscount,
-        pickupRegionId: selectedRegion?.id,
-        pickupRegionName: selectedRegion?.nameAr,
-      };
-
-      setActiveTripWithTracking(newTrip);
-
-      playNotificationSound('new_trip');
-      triggerToast(
-        lang === 'ar' ? 'تم طلب الرحلة بنجاح' : 'Ride request sent',
-        lang === 'ar'
-          ? `رحلتك من ${pLoc.nameAr} إلى ${dLoc.nameAr} | ${fare} ج.م`
-          : `Ride from ${pLoc.nameEn} to ${dLoc.nameEn} | ${fare} EGP`,
-        'new_trip'
-      );
-      sendNativeNotification(
-        '🚖 تم طلب رحلة جديدة',
-        lang === 'ar'
-          ? `رحلتك من ${pLoc.nameAr} إلى ${dLoc.nameAr} | ${fare} ج.م`
-          : `Ride from ${pLoc.nameEn} to ${dLoc.nameEn} | ${fare} EGP`,
-        '🚖'
-      );
-
-      if (supabaseConnected) {
-        saveActiveTrip(newTrip).then((ok) => {
-          console.log('[handleRequestRide] saveActiveTrip result:', ok);
-          if (ok && promoCodeId) {
-            markPromoCodeAsUsed(promoCodeId, newTrip.id).catch(() => {});
+      // Use ONLY real road distance from cache or ORS/OSRM API
+      let distance: number | null = null;
+      let etaMinutes: number | undefined;
+      let routeGeometry: [number, number][] | undefined;
+      const cacheKey = `${pLoc.lat.toFixed(4)}_${pLoc.lng.toFixed(4)}_${dLoc.lat.toFixed(4)}_${dLoc.lng.toFixed(4)}`;
+      const cachedRoute = routeCache[cacheKey];
+      if (cachedRoute && cachedRoute.distance > 0) {
+        distance = Math.max(1, parseFloat(cachedRoute.distance.toFixed(2)));
+        etaMinutes = cachedRoute.durationSeconds ? Math.max(1, Math.round(cachedRoute.durationSeconds / 60)) : undefined;
+        routeGeometry = cachedRoute.geometry;
+      } else {
+        try {
+          const realRoute = await getRealRoute(pLoc, dLoc);
+          if (realRoute && realRoute.distance > 0) {
+            distance = Math.max(1, parseFloat(realRoute.distance.toFixed(2)));
+            etaMinutes = realRoute.durationSeconds ? Math.max(1, Math.round(realRoute.durationSeconds / 60)) : undefined;
+            routeGeometry = realRoute.geometry;
           }
-          if (ok) {
-            sendNewTripNotification({
-              tripId: newTrip.id,
-              origin: pLoc.nameAr,
-              destination: dLoc.nameAr,
-              fare,
-              distance,
-            }).catch(() => {});
-          }
-        });
-
-        const waitingAds = await fetchActiveAdsForPlacement('waiting');
-        if (waitingAds && waitingAds.length > 0) {
-          setAds(waitingAds);
+        } catch {
+          // ignore
         }
       }
-    } else {
-      setNoAvailableDrivers(true);
-      triggerToast(
-        lang === 'ar' ? 'لا يوجد سائقين متاحين' : 'No available drivers',
-        lang === 'ar'
-          ? 'عذراً، لا يوجد سائقين متاحين في منطقتك حالياً. يرجى المحاولة مرة أخرى لاحقاً.'
-          : 'Sorry, there are no available drivers in your area right now. Please try again later.',
-        'warning'
+
+      // Fallback: if real route unavailable, use estimated distance so trip still proceeds
+      if (!distance) {
+        const directDistance = calculateHaversineDistance(pLoc.lat, pLoc.lng, dLoc.lat, dLoc.lng);
+        const fallbackDistance = estimateDrivingDistance(directDistance, stats.distanceBuffer ?? 1.25) + (stats.additionalKm ?? 0.0);
+        distance = Math.max(1, parseFloat(fallbackDistance.toFixed(2)));
+      }
+
+      let appliedDiscount = 0;
+      let appliedPromoCode: string | undefined;
+      let appliedPromoDiscount: number | undefined;
+
+      if (promoCode && promoCodeId) {
+        appliedDiscount = promoDiscount || 0;
+        appliedPromoCode = promoCode;
+        appliedPromoDiscount = appliedDiscount;
+      } else if (promoCode && stats?.promoCode && promoCode.trim().toUpperCase() === stats.promoCode.trim().toUpperCase()) {
+        appliedDiscount = stats.promoValue || 5;
+        appliedPromoCode = promoCode;
+        appliedPromoDiscount = appliedDiscount;
+      }
+
+      const { baseFare, commission, finalFare } = calculateFullTripFare(distance, requestedVehicleType, stats, appliedDiscount);
+      const fare = finalFare;
+
+      // Broadcast dispatch to up to 5 available drivers in the region simultaneously.
+      // The first driver to accept wins the ride. 5-minute acceptance window.
+      const MAX_OFFERED_DRIVERS = 5;
+      const DISPATCH_TIMER_SECONDS = 300;
+
+      let currentOfferedDriverId: string | undefined = undefined;
+      let offeredDriverIds: string[] = [];
+
+      const eligibleDrivers = await fetchEligibleDriversForRegion(riderPickupRegion);
+
+      // Filter drivers by the pickup region selected by this rider.
+      const selectedRegion = regions.find((r) => r.id === riderPickupRegion);
+
+      const dispatchTimer = DISPATCH_TIMER_SECONDS;
+      const dispatchTimerMax = DISPATCH_TIMER_SECONDS;
+
+      // Filter eligible drivers by requested vehicle type to avoid dispatching wrong vehicle
+      const eligibleDriversByType = eligibleDrivers.filter(
+        (d) => String(d.vehicleType).toUpperCase() === requestedVehicleType
       );
-      return;
+
+      if (eligibleDriversByType.length === 0) {
+        setNoAvailableDrivers(true);
+        triggerToast(
+          lang === 'ar' ? 'لا يوجد سائقين من نوع المركبة المختار' : 'No drivers available for the selected vehicle type',
+          lang === 'ar'
+            ? 'عذراً، لا يوجد سائقين من هذا النوع في منطقتك حالياً. يرجى اختيار نوع آخر أو المحاولة لاحقاً.'
+            : 'Sorry, there are no drivers of the selected vehicle type in your area right now. Please choose another type or try again later.',
+          'warning'
+        );
+        return;
+      }
+
+      if (eligibleDriversByType.length > 0) {
+        // Sort drivers by precise Haversine distance to pickup location
+        const sortedDrivers = eligibleDriversByType
+          .map((d) => {
+            const dCoords = getCoordsFromXY(d.currentX, d.currentY);
+            const dist = calculateHaversineDistance(
+              dCoords.lat,
+              dCoords.lng,
+              pLoc.lat,
+              pLoc.lng
+            );
+            return { driver: d, distance: dist };
+          })
+          .sort((a, b) => a.distance - b.distance);
+
+        offeredDriverIds = sortedDrivers.slice(0, MAX_OFFERED_DRIVERS).map((item) => item.driver.id);
+        currentOfferedDriverId = offeredDriverIds[0];
+
+        // Send push notification to all offered drivers immediately
+        const notifiedDrivers = drivers.filter(d => offeredDriverIds.includes(d.id));
+        const newTrip: Trip = {
+          id: `trip_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+          riderId: rider.id,
+          riderName: rider.name,
+          riderPhone: rider.phone,
+          pickup: pLoc,
+          dropoff: dLoc,
+          pickupLandmark,
+          status: 'SEARCHING',
+          fare,
+          commission,
+          distance,
+          routeGeometry,
+          etaMinutes,
+          requestedVehicleType,
+          createdAt: new Date().toISOString(),
+          chatMessages: [],
+          currentOfferedDriverId,
+          offeredDriverIds,
+          dispatchTimer,
+          dispatchTimerMax,
+          appliedPromoCode,
+          appliedPromoDiscount,
+          pickupRegionId: selectedRegion?.id,
+          pickupRegionName: selectedRegion?.nameAr,
+        };
+
+        setActiveTripWithTracking(newTrip);
+
+        playNotificationSound('new_trip');
+        triggerToast(
+          lang === 'ar' ? 'تم طلب الرحلة بنجاح' : 'Ride request sent',
+          lang === 'ar'
+            ? `رحلتك من ${pLoc.nameAr} إلى ${dLoc.nameAr} | ${fare} ج.م`
+            : `Ride from ${pLoc.nameEn} to ${dLoc.nameEn} | ${fare} EGP`,
+          'new_trip'
+        );
+        sendNativeNotification(
+          '🚖 تم طلب رحلة جديدة',
+          lang === 'ar'
+            ? `رحلتك من ${pLoc.nameAr} إلى ${dLoc.nameAr} | ${fare} ج.م`
+            : `Ride from ${pLoc.nameEn} to ${dLoc.nameEn} | ${fare} EGP`,
+          '🚖'
+        );
+
+        if (supabaseConnected) {
+          saveActiveTrip(newTrip).then((ok) => {
+            console.log('[handleRequestRide] saveActiveTrip result:', ok);
+            if (ok && promoCodeId) {
+              markPromoCodeAsUsed(promoCodeId, newTrip.id).catch(() => {});
+            }
+            if (ok) {
+              sendNewTripNotification({
+                tripId: newTrip.id,
+                origin: pLoc.nameAr,
+                destination: dLoc.nameAr,
+                fare,
+                distance,
+              }).catch(() => {});
+            }
+          });
+
+          const waitingAds = await fetchActiveAdsForPlacement('waiting');
+          if (waitingAds && waitingAds.length > 0) {
+            setAds(waitingAds);
+          }
+        }
+      } else {
+        setNoAvailableDrivers(true);
+        triggerToast(
+          lang === 'ar' ? 'لا يوجد سائقين متاحين' : 'No available drivers',
+          lang === 'ar'
+            ? 'عذراً، لا يوجد سائقين متاحين في منطقتك حالياً. يرجى المحاولة مرة أخرى لاحقاً.'
+            : 'Sorry, there are no available drivers in your area right now. Please try again later.',
+          'warning'
+        );
+        return;
+      }
+    } finally {
+      requestInProgressRef.current = false;
     }
   };
 
@@ -2357,10 +2381,10 @@ export default function App() {
   // Refresh a waiting trip: re-evaluate eligible drivers and re-dispatch
   const refreshWaitingTrip = async (tripOverride?: Trip): Promise<boolean> => {
     const trip = tripOverride ?? activeTrip;
-    if (!trip || trip.status !== 'SEARCHING' || !rider.isLoggedIn || !selectedPickup || !selectedDropoff) return false;
+    if (!trip || trip.status !== 'SEARCHING' || !rider.isLoggedIn) return false;
 
-    const pLoc = locations.find((l) => l.id === selectedPickup);
-    const dLoc = locations.find((l) => l.id === selectedDropoff);
+    const pLoc = trip.pickup;
+    const dLoc = trip.dropoff;
     const regionId = trip.pickupRegionId ?? riderPickupRegion;
     if (!pLoc || !dLoc || !regionId) return false;
 
@@ -2481,7 +2505,7 @@ export default function App() {
   };
 
   // Handler: Cancel Ride
-  const handleCancelRide = () => {
+  const handleCancelRide = async () => {
     if (!activeTrip || cancelInProgressRef.current) return;
 
     cancelInProgressRef.current = true;
@@ -2503,15 +2527,15 @@ export default function App() {
 
     setTripsHistory((prev) => [cancelledTrip, ...prev]);
 
-    if (supabaseConnected) {
-      saveTripToHistory(cancelledTrip, rider.id, 'rider', getDeviceId());
-      saveActiveTrip(null, cancelledTripId).then((ok) => {
-        console.log('[handleCancelRide] Cleared active trip from DB, result:', ok);
-        cancelInProgressRef.current = false;
-      }).catch(() => {
-        cancelInProgressRef.current = false;
-      });
-    } else {
+    try {
+      if (supabaseConnected) {
+        await saveTripToHistory(cancelledTrip, rider.id, 'rider', getDeviceId());
+        await saveActiveTrip(null, cancelledTripId);
+        console.log('[handleCancelRide] Cleared active trip from DB');
+      }
+    } catch (err) {
+      console.warn('[handleCancelRide] Error clearing trip:', err);
+    } finally {
       cancelInProgressRef.current = false;
     }
 
@@ -2563,20 +2587,23 @@ export default function App() {
       });
       const driver = updated.find((d) => d.id === driverId);
       if (driver && supabaseConnected) {
-        saveDriver(driver).then((ok) => {
-          if (ok) {
-            console.log('[handleToggleOnline] Driver status saved:', driverId, driver.isOnline ? 'online' : 'offline');
-          } else {
-            console.warn('[handleToggleOnline] Failed to save driver status:', driverId);
-          }
-          pendingDriverToggleRef.current = null;
-        });
+        saveDriver(driver)
+          .then((ok) => {
+            if (ok) {
+              console.log('[handleToggleOnline] Driver status saved:', driverId, driver.isOnline ? 'online' : 'offline');
+            } else {
+              console.warn('[handleToggleOnline] Failed to save driver status:', driverId);
+            }
+          })
+          .catch(() => {
+            console.warn('[handleToggleOnline] Error saving driver status:', driverId);
+          })
+          .finally(() => {
+            pendingDriverToggleRef.current = null;
+          });
       }
       return updated;
     });
-    setTimeout(() => {
-      pendingDriverToggleRef.current = null;
-    }, 10000);
   };
 
   const handleUpdateDriverLocation = (driverId: string, lat: number, lng: number, x: number, y: number) => {
@@ -2591,7 +2618,7 @@ export default function App() {
       const timeSince = now - last;
       const SHOULD_SAVE_MS = 5000; // at most once every 5s per driver
       if (supabaseConnected && (timeSince >= SHOULD_SAVE_MS)) {
-        const drv = drivers.find(d => d.id === driverId);
+        const drv = driversRef.current.find(d => d.id === driverId);
         if (drv) {
           const toSave = { ...drv, lat, lng, currentX: x, currentY: y };
           saveDriver(toSave).then((ok) => {
@@ -2669,22 +2696,43 @@ export default function App() {
       const driverLat = drv?.lat ?? (drv ? getCoordsFromXY(drv.currentX, drv.currentY).lat : undefined);
       const driverLng = drv?.lng ?? (drv ? getCoordsFromXY(drv.currentX, drv.currentY).lng : undefined);
 
-      if (driverLat !== undefined && driverLng !== undefined) {
-        const route = await getNavigationRoute(driverLat, driverLng, activeTrip.pickup, activeTrip.dropoff);
-        if (route) {
-          const routeUpdated: Trip = {
-            ...acceptedTrip,
-            routeGeometry: route.geometry,
-            etaMinutes: route.durationSeconds ? Math.ceil(route.durationSeconds / 60) : acceptedTrip.etaMinutes,
-          };
-          setActiveTripWithTracking(routeUpdated);
-          if (supabaseConnected) {
-            saveActiveTrip(routeUpdated).then((ok) => console.log('[handleAcceptTrip] saveActiveTrip route result:', ok));
-          }
-        }
+      if (driverLat === undefined || driverLng === undefined) {
+        throw new Error('Driver coordinates unavailable');
+      }
+
+      const route = await getNavigationRoute(driverLat, driverLng, activeTrip.pickup, activeTrip.dropoff);
+      if (!route) {
+        throw new Error('No route found');
+      }
+
+      const routeUpdated: Trip = {
+        ...acceptedTrip,
+        routeGeometry: route.geometry,
+        etaMinutes: route.durationSeconds ? Math.ceil(route.durationSeconds / 60) : acceptedTrip.etaMinutes,
+      };
+      setActiveTripWithTracking(routeUpdated);
+      if (supabaseConnected) {
+        await saveActiveTrip(routeUpdated);
       }
     } catch (err) {
-      console.warn('[handleAcceptTrip] route calculation failed:', err);
+      console.warn('[handleAcceptTrip] route calculation failed, rolling back:', err);
+      setActiveTripWithTracking((prev) => {
+        if (!prev || prev.status !== 'ACCEPTED') return prev;
+        return { ...prev, status: 'SEARCHING' as TripStatus, driverId: undefined, driverName: undefined, routeGeometry: undefined, etaMinutes: undefined };
+      });
+      setDrivers((prev) =>
+        prev.map((d) => (d.id === driverId ? { ...d, status: 'AVAILABLE' } : d))
+      );
+      if (supabaseConnected) {
+        saveActiveTrip({ ...acceptedTrip, status: 'SEARCHING', driverId: undefined, driverName: undefined, routeGeometry: undefined, etaMinutes: undefined }).catch(() => {});
+        saveDriver({ ...drv, status: 'AVAILABLE' }).catch(() => {});
+      }
+      triggerToast(
+        lang === 'ar' ? 'تنبيه' : 'Notice',
+        lang === 'ar' ? 'لم يتم العثور على مسار. تم إلغاء قبول الرحلة.' : 'No route found. Ride acceptance cancelled.',
+        'warning'
+      );
+      return;
     }
 
     if (drv) {
@@ -2725,7 +2773,11 @@ export default function App() {
       : undefined;
 
     if (nextDriverId) {
-      const updatedTrip = { ...currentTrip, currentOfferedDriverId: nextDriverId };
+      const updatedTrip = { 
+        ...currentTrip, 
+        currentOfferedDriverId: nextDriverId,
+        dispatchTimer: currentTrip.dispatchTimerMax || currentTrip.dispatchTimer || 300,
+      };
       setActiveTripWithTracking(updatedTrip);
       if (supabaseConnected) {
         saveActiveTrip(updatedTrip).then((ok) => {
@@ -2750,6 +2802,12 @@ export default function App() {
         saveActiveTrip(resetTrip).then((ok) => {
           console.log('[handleRejectTrip] Re-dispatching after reject, result:', ok);
         });
+        if (rejectingDriverId) {
+          const rejectingDrv = driversRef.current.find(d => d.id === rejectingDriverId);
+          if (rejectingDrv) {
+            saveDriver({ ...rejectingDrv, status: 'AVAILABLE' }).catch(() => {});
+          }
+        }
       }
       if (!resetTrip.currentOfferedDriverId) {
         refreshWaitingTrip(resetTrip);
@@ -2860,83 +2918,89 @@ export default function App() {
     }
   };
 
-  const handleEndTrip = () => {
-    if (!activeTrip || activeTrip.status !== 'STARTED') return;
+  const handleEndTrip = async () => {
+    if (!activeTrip || activeTrip.status !== 'STARTED' || endTripInProgressRef.current) return;
+
+    endTripInProgressRef.current = true;
 
     const { driverId, fare, commission } = activeTrip;
     const netEarnings = fare - commission;
 
-    if (driverId) {
-      setDrivers((prev) => {
-        const updated = prev.map((d) => {
-          if (d.id !== driverId) return d;
-          return {
-            ...d,
-            status: 'OFFLINE' as const,
-            isOnline: false,
-            totalTrips: d.totalTrips + 1,
-            totalEarnings: d.totalEarnings + netEarnings,
-            totalCommissionPaid: d.totalCommissionPaid + commission,
-          };
+    try {
+      if (driverId) {
+        setDrivers((prev) => {
+          const updated = prev.map((d) => {
+            if (d.id !== driverId) return d;
+            return {
+              ...d,
+              status: 'OFFLINE' as const,
+              isOnline: false,
+              totalTrips: d.totalTrips + 1,
+              totalEarnings: d.totalEarnings + netEarnings,
+              totalCommissionPaid: d.totalCommissionPaid + commission,
+            };
+          });
+          const updatedDriver = updated.find((d) => d.id === driverId);
+          if (updatedDriver && supabaseConnected) {
+            saveDriver(updatedDriver).catch(() => {});
+          }
+          return updated;
         });
-        const updatedDriver = updated.find((d) => d.id === driverId);
-        if (updatedDriver && supabaseConnected) {
-          saveDriver(updatedDriver).catch(() => {});
-        }
-        return updated;
+      }
+
+      setStats((s) => ({
+        ...s,
+        totalRevenue: s.totalRevenue + fare,
+        totalCommission: s.totalCommission + commission,
+        totalCompletedTrips: s.totalCompletedTrips + 1,
+      }));
+
+      const completed: Trip = {
+        ...activeTrip,
+        status: 'COMPLETED' as TripStatus,
+        completedAt: new Date().toISOString(),
+      };
+
+      lastRouteCacheUseRef.current = Date.now();
+      setRouteCache((cache) => {
+        const { pickup, dropoff } = completed;
+        const key = `${pickup.lat.toFixed(4)}_${pickup.lng.toFixed(4)}_${dropoff.lat.toFixed(4)}_${dropoff.lng.toFixed(4)}`;
+        const next = { ...cache };
+        delete next[key];
+        return next;
       });
-    }
 
-    setStats((s) => ({
-      ...s,
-      totalRevenue: s.totalRevenue + fare,
-      totalCommission: s.totalCommission + commission,
-      totalCompletedTrips: s.totalCompletedTrips + 1,
-    }));
+      setTripsHistory((history) => [completed, ...history]);
 
-    const completed: Trip = {
-      ...activeTrip,
-      status: 'COMPLETED' as TripStatus,
-      completedAt: new Date().toISOString(),
-    };
+      if (supabaseConnected) {
+        await saveActiveTrip(completed);
+        await saveTripToHistory(completed, driverId, 'driver', getDeviceId());
+      }
 
-    lastRouteCacheUseRef.current = Date.now();
-    setRouteCache((cache) => {
-      const { pickup, dropoff } = completed;
-      const key = `${pickup.lat.toFixed(4)}_${pickup.lng.toFixed(4)}_${dropoff.lat.toFixed(4)}_${dropoff.lng.toFixed(4)}`;
-      const next = { ...cache };
-      delete next[key];
-      return next;
-    });
+      setActiveTripWithTracking(completed);
 
-    setTripsHistory((history) => [completed, ...history]);
-
-    if (supabaseConnected) {
-      saveActiveTrip(completed);
-      saveTripToHistory(completed, driverId, 'driver', getDeviceId());
-    }
-
-    setActiveTripWithTracking(completed);
-
-    if (driverIsLoggedIn && driverId === selectedDriverId) {
-      playNotificationSound('trip_completed');
-      speakText(
-        lang === 'ar'
-          ? 'تم إنهاء الرحلة بنجاح. حمد لله على السلامة.'
-          : 'Trip completed successfully. Thank you.',
-        lang === 'ar' ? 'ar-EG' : 'en-US'
-      );
-      sendNativeNotification(
-        '🎉 تم إنهاء الرحلة',
-        'تم إكمال الرحلة بنجاح.',
-        '✨'
-      );
-      triggerVibration([200, 100, 200, 100, 300]);
-      triggerToast(
-        '🎉 تم إنهاء الرحلة',
-        'تم إكمال الرحلة بنجاح.',
-        'success'
-      );
+      if (driverIsLoggedIn && driverId === selectedDriverId) {
+        playNotificationSound('trip_completed');
+        speakText(
+          lang === 'ar'
+            ? 'تم إنهاء الرحلة بنجاح. حمد لله على السلامة.'
+            : 'Trip completed successfully. Thank you.',
+          lang === 'ar' ? 'ar-EG' : 'en-US'
+        );
+        sendNativeNotification(
+          '🎉 تم إنهاء الرحلة',
+          'تم إكمال الرحلة بنجاح.',
+          '✨'
+        );
+        triggerVibration([200, 100, 200, 100, 300]);
+        triggerToast(
+          '🎉 تم إنهاء الرحلة',
+          'تم إكمال الرحلة بنجاح.',
+          'success'
+        );
+      }
+    } finally {
+      endTripInProgressRef.current = false;
     }
   };
 

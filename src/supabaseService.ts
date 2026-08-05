@@ -1030,7 +1030,8 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
     }
     // admin gets all
 
-    const { data, error } = await query.limit(1);
+    const isDriverQuery = userId && userRole === 'driver';
+    const { data, error } = await query.limit(isDriverQuery ? 5 : 1);
     if (error) {
       if (error.code === 'PGRST116') {
         console.log('[fetchActiveTrip] No active trip in DB (empty table)');
@@ -1106,7 +1107,13 @@ export const saveActiveTrip = async (trip: Trip | null, clearTripId?: string): P
             merged.push(m);
           }
         }
-        trip.chatMessages = merged;
+        const tripToSave = { ...trip, chatMessages: merged };
+        const { error: insertError } = await supabase
+          .from('ezz_active_trip')
+          .upsert(mapTripToDB(tripToSave), { onConflict: 'id' });
+        if (insertError) throw insertError;
+        console.log('[saveActiveTrip] Trip saved successfully, chatMessages count after merge:', tripToSave.chatMessages?.length || 0);
+        return true;
       }
     }
 

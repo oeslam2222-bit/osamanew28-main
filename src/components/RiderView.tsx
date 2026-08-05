@@ -26,7 +26,7 @@ interface RiderViewProps {
   setSelectedPickupRegion: (regionId: string) => void;
   setSelectedPickup: (id: string) => void;
   setSelectedDropoff: (id: string) => void;
-  onRequestRide: (requestedVehicleType: 'CAR' | 'MOTORCYCLE' | 'TOKTOK' | 'TRICYCLE', pickupLandmark?: string, promoCode?: string, promoCodeId?: string) => void;
+  onRequestRide: (requestedVehicleType: 'CAR' | 'MOTORCYCLE' | 'TOKTOK' | 'TRICYCLE', pickupLandmark?: string, promoCode?: string, promoCodeId?: string, promoDiscount?: number) => void;
   onCancelRide: () => void;
   onTripCompleted: () => void;
   onConfirmArrival?: () => void;
@@ -1638,7 +1638,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
               type="button"
               disabled={!selectedPickup || !selectedDropoff || !selectedPickupRegion || availableDrivers.length === 0}
                 onClick={() => {
-                  onRequestRide(requestedVehicleType, pickupLandmark, appliedPromo?.code, appliedPromo?.promoCodeId);
+                  onRequestRide(requestedVehicleType, pickupLandmark, appliedPromo?.code, appliedPromo?.promoCodeId, appliedPromo?.discount);
                   setPickupLandmark('');
                 }}
               className="w-full py-3 bg-slate-900 hover:bg-black disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-xs rounded-xl shadow-md disabled:shadow-none hover:scale-[1.01] transition-all cursor-pointer"
@@ -1773,7 +1773,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
                           type="button"
                           onClick={() => {
                             setConfirmStep('SENDING');
-                            onRequestRide(confirmVehicleType, confirmPickupLandmark || undefined, appliedPromo?.code, appliedPromo?.promoCodeId);
+                            onRequestRide(confirmVehicleType, confirmPickupLandmark || undefined, appliedPromo?.code, appliedPromo?.promoCodeId, appliedPromo?.discount);
                             setPickupLandmark('');
                             setShowConfirmModal(false);
                           }}
