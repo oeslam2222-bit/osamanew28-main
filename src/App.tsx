@@ -173,6 +173,7 @@ export default function App() {
   const cancelInProgressRef = useRef(false);
   const endTripInProgressRef = useRef(false);
   const requestInProgressRef = useRef(false);
+  const rejectTripInProgressRef = useRef(false);
   const pendingDriverToggleRef = useRef<string | null>(null);
   const resetDriverStatusOnceRef = useRef<Record<string, boolean>>({});
   const driversRef = useRef<Driver[]>(drivers);
@@ -251,7 +252,7 @@ export default function App() {
   // Handler: Transfer trip to next offered driver when current driver cancels/requests transfer
   const handleTransferTrip = () => {
     const currentTrip = activeTrip;
-    if (!currentTrip) return;
+    if (!currentTrip || (currentTrip.status !== 'SEARCHING' && currentTrip.status !== 'ACCEPTED')) return;
     const currentDriverId = currentTrip.driverId;
     const currentIdx = currentTrip.offeredDriverIds?.indexOf(currentDriverId || '') ?? -1;
     const nextDriverId = (currentTrip.offeredDriverIds && currentIdx !== -1 && currentIdx + 1 < currentTrip.offeredDriverIds.length)
@@ -1601,37 +1602,37 @@ export default function App() {
   const lastNotifiedTripIdRef = useRef<string | null>(null);
   const lastNotifiedOfferedDriverIdRef = useRef<string | null>(null);
 
-      useEffect(() => {
-       if (!activeTrip) {
-         const prevStatus = lastTripStatusBeforeNullRef.current;
-         if (prevStatus === 'COMPLETED' || prevStatus === 'SEARCHING') {
-           notifiedEventsRef.current.add('cancelled_notified');
-           lastTripStatusBeforeNullRef.current = null;
-           return;
-         }
-         if (notifiedEventsRef.current.has('had_trip') && !notifiedEventsRef.current.has('cancelled_notified')) {
-           notifiedEventsRef.current.add('cancelled_notified');
-           if (lastTripCompletedRef.current) {
-             lastTripCompletedRef.current = false;
-             return;
-           }
-          if (lastTripCancelledRef.current) {
-            lastTripCancelledRef.current = false;
-            return;
-          }
-          if (!['COMPLETED', 'SEARCHING'].includes(prevStatus || '')) {
-            playNotificationSound('alert');
-            sendNativeNotification('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', '❌');
-            triggerToast('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', 'warning');
-          }
-         }
-         return;
-       }
+  useEffect(() => {
+    if (!activeTrip) {
+      const prevStatus = lastTripStatusBeforeNullRef.current;
+      if (prevStatus === 'COMPLETED' || prevStatus === 'SEARCHING') {
+        notifiedEventsRef.current.add('cancelled_notified');
+        lastTripStatusBeforeNullRef.current = null;
+        return;
+      }
+      if (notifiedEventsRef.current.has('had_trip') && !notifiedEventsRef.current.has('cancelled_notified')) {
+        notifiedEventsRef.current.add('cancelled_notified');
+        if (lastTripCompletedRef.current) {
+          lastTripCompletedRef.current = false;
+          return;
+        }
+        if (lastTripCancelledRef.current) {
+          lastTripCancelledRef.current = false;
+          return;
+        }
+        if (!['COMPLETED', 'SEARCHING'].includes(prevStatus || '')) {
+          playNotificationSound('alert');
+          sendNativeNotification('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', '❌');
+          triggerToast('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', 'warning');
+        }
+      }
+      return;
+    }
 
-     lastTripStatusBeforeNullRef.current = activeTrip.status;
+    lastTripStatusBeforeNullRef.current = activeTrip.status;
 
-     notifiedEventsRef.current.add('had_trip');
-     notifiedEventsRef.current.delete('cancelled_notified');
+    notifiedEventsRef.current.add('had_trip');
+    notifiedEventsRef.current.delete('cancelled_notified');
 
     const currentTripId = activeTrip.id;
     const currentStatus = activeTrip.status;
@@ -1639,114 +1640,114 @@ export default function App() {
 
     const statusEventKey = `${currentTripId}_status_${currentStatus}`;
 
-     if (!notifiedEventsRef.current.has(statusEventKey)) {
-         if (currentStatus === 'SEARCHING' && driverIsLoggedIn) {
-           notifiedEventsRef.current.add(statusEventKey);
-           lastTripCompletedRef.current = false;
-           lastTripCancelledRef.current = false;
-         } else if (currentStatus === 'ACCEPTED' && !isDriverActor) {
-           notifiedEventsRef.current.add(statusEventKey);
-         playNotificationSound('trip_accepted');
-         speakText(
-           lang === 'ar'
-             ? `تم قبول رحلتك، الكابتن ${activeTrip.driverName || 'عز الدين'} في الطريق إليك الآن.`
-             : `Your ride has been accepted. Captain ${activeTrip.driverName || 'Ezz'} is on the way.`,
-           lang === 'ar' ? 'ar-EG' : 'en-US'
-         );
-         sendNativeNotification(
-           '🚗 تم قبول رحلتك!',
-           `الكابتن ${activeTrip.driverName || 'عز الدين'} في الطريق إليك الآن.`,
-           '✅'
-         );
-         startTitleFlash('🚗 الكابتن قادم!');
-         setTimeout(stopTitleFlash, 5000);
-         triggerVibration([200, 100, 200, 100, 300]);
-         triggerToast(
-           '🚗 تم قبول رحلتك!',
-           `الكابتن ${activeTrip.driverName || 'عز الدين'} في الطريق إليك الآن.`,
-           'success'
-         );
-       } else if (currentStatus === 'ARRIVED' && !isDriverActor) {
-           notifiedEventsRef.current.add(statusEventKey);
-         playNotificationSound('trip_accepted');
-         speakText(
-           lang === 'ar'
-             ? 'وصل الكابتن إلى موقعك وهو في انتظارك الآن.'
-             : 'The captain has arrived at your location.',
-           lang === 'ar' ? 'ar-EG' : 'en-US'
-         );
-         sendNativeNotification(
-           '📍 الكابتن وصل!',
-           'الكابتن متواجد في نقطة الركوب الآن بانتظارك.',
-           '⭐'
-         );
-         triggerToast(
-           '📍 الكابتن وصل!',
-           'الكابتن متواجد في نقطة الركوب الآن بانتظارك.',
-           'info'
-         );
-       } else if (currentStatus === 'STARTED' && !isDriverActor) {
-           notifiedEventsRef.current.add(statusEventKey);
-         playNotificationSound('trip_accepted');
-         speakText(
-           lang === 'ar'
-             ? 'بدأت الرحلة الآن، نتمنى لك مشواراً آمناً.'
-             : 'The ride has started, wish you a safe trip.',
-           lang === 'ar' ? 'ar-EG' : 'en-US'
-         );
-         triggerToast(
-           '🚀 بدأت الرحلة الآن!',
-           'نتمنى لك رحلة سعيدة وآمنة مع كابتن عز.',
-           'success'
-         );
-       } else if (currentStatus === 'COMPLETED' && !isDriverActor) {
-           notifiedEventsRef.current.add(statusEventKey);
-         lastTripCompletedRef.current = true;
-         playNotificationSound('trip_completed');
-         speakText(
-           lang === 'ar'
-             ? 'حمد لله على السلامة، تم إكمال الرحلة بنجاح وشكراً لاختيارك عز.'
-             : 'Welcome back, trip completed successfully. Thank you for choosing Ezz.',
-           lang === 'ar' ? 'ar-EG' : 'en-US'
-         );
-         sendNativeNotification(
-           '🎉 وصلت بالسلامة!',
-           'تم إكمال الرحلة بنجاح. شكراً لك على اختيارك كابتن عز!',
-           '✨'
-         );
-         startTitleFlash('✨ وصلت بالسلامة!');
-         setTimeout(stopTitleFlash, 5000);
-         triggerToast(
-           '🎉 وصلت بالسلامة!',
-           'تم إكمال الرحلة بنجاح. شكراً لك على اختيارك كابتن عز!',
-           'success'
-         );
-       } else if (currentStatus === 'CANCELLED') {
-           notifiedEventsRef.current.add(statusEventKey);
-         lastTripCancelledRef.current = true;
-         playNotificationSound('alert');
-         speakText(
-           lang === 'ar'
-             ? 'تم إلغاء الرحلة بسبب عدم قبول أي سائق. يمكنك طلب رحلة جديدة.'
-             : 'The ride was cancelled because no driver accepted. You can request a new ride.',
-           lang === 'ar' ? 'ar-EG' : 'en-US'
-         );
-         sendNativeNotification(
-           '❌ تم إلغاء الرحلة',
-           lang === 'ar'
-             ? 'لم يقبل أي سائق الرحلة. يمكنك طلب رحلة جديدة.'
-             : 'No driver accepted the ride. You can request a new ride.',
-           '❌'
-         );
-         triggerToast(
-           '❌ تم إلغاء الرحلة',
-           lang === 'ar'
-             ? 'لم يقبل أي سائق الرحلة. يمكنك طلب رحلة جديدة.'
-             : 'No driver accepted the ride. You can request a new ride.',
-           'warning'
-         );
-       }
-     }
+    if (!notifiedEventsRef.current.has(statusEventKey)) {
+      if (currentStatus === 'SEARCHING' && driverIsLoggedIn) {
+        notifiedEventsRef.current.add(statusEventKey);
+        lastTripCompletedRef.current = false;
+        lastTripCancelledRef.current = false;
+      } else if (currentStatus === 'ACCEPTED' && !isDriverActor) {
+        notifiedEventsRef.current.add(statusEventKey);
+        playNotificationSound('trip_accepted');
+        speakText(
+          lang === 'ar'
+            ? `تم قبول رحلتك، الكابتن ${activeTrip.driverName || 'عز الدين'} في الطريق إليك الآن.`
+            : `Your ride has been accepted. Captain ${activeTrip.driverName || 'Ezz'} is on the way.`,
+          lang === 'ar' ? 'ar-EG' : 'en-US'
+        );
+        sendNativeNotification(
+          '🚗 تم قبول رحلتك!',
+          `الكابتن ${activeTrip.driverName || 'عز الدين'} في الطريق إليك الآن.`,
+          '✅'
+        );
+        startTitleFlash('🚗 الكابتن قادم!');
+        setTimeout(stopTitleFlash, 5000);
+        triggerVibration([200, 100, 200, 100, 300]);
+        triggerToast(
+          '🚗 تم قبول رحلتك!',
+          `الكابتن ${activeTrip.driverName || 'عز الدين'} في الطريق إليك الآن.`,
+          'success'
+        );
+      } else if (currentStatus === 'ARRIVED' && !isDriverActor) {
+        notifiedEventsRef.current.add(statusEventKey);
+        playNotificationSound('trip_accepted');
+        speakText(
+          lang === 'ar'
+            ? 'وصل الكابتن إلى موقعك وهو في انتظارك الآن.'
+            : 'The captain has arrived at your location.',
+          lang === 'ar' ? 'ar-EG' : 'en-US'
+        );
+        sendNativeNotification(
+          '📍 الكابتن وصل!',
+          'الكابتن متواجد في نقطة الركوب الآن بانتظارك.',
+          '⭐'
+        );
+        triggerToast(
+          '📍 الكابتن وصل!',
+          'الكابتن متواجد في نقطة الركوب الآن بانتظارك.',
+          'info'
+        );
+      } else if (currentStatus === 'STARTED' && !isDriverActor) {
+        notifiedEventsRef.current.add(statusEventKey);
+        playNotificationSound('trip_accepted');
+        speakText(
+          lang === 'ar'
+            ? 'بدأت الرحلة الآن، نتمنى لك مشواراً آمناً.'
+            : 'The ride has started, wish you a safe trip.',
+          lang === 'ar' ? 'ar-EG' : 'en-US'
+        );
+        triggerToast(
+          '🚀 بدأت الرحلة الآن!',
+          'نتمنى لك رحلة سعيدة وآمنة مع كابتن عز.',
+          'success'
+        );
+      } else if (currentStatus === 'COMPLETED' && !isDriverActor) {
+        notifiedEventsRef.current.add(statusEventKey);
+        lastTripCompletedRef.current = true;
+        playNotificationSound('trip_completed');
+        speakText(
+          lang === 'ar'
+            ? 'حمد لله على السلامة، تم إكمال الرحلة بنجاح وشكراً لاختيارك عز.'
+            : 'Welcome back, trip completed successfully. Thank you for choosing Ezz.',
+          lang === 'ar' ? 'ar-EG' : 'en-US'
+        );
+        sendNativeNotification(
+          '🎉 وصلت بالسلامة!',
+          'تم إكمال الرحلة بنجاح. شكراً لك على اختيارك كابتن عز!',
+          '✨'
+        );
+        startTitleFlash('✨ وصلت بالسلامة!');
+        setTimeout(stopTitleFlash, 5000);
+        triggerToast(
+          '🎉 وصلت بالسلامة!',
+          'تم إكمال الرحلة بنجاح. شكراً لك على اختيارك كابتن عز!',
+          'success'
+        );
+      } else if (currentStatus === 'CANCELLED') {
+        notifiedEventsRef.current.add(statusEventKey);
+        lastTripCancelledRef.current = true;
+        playNotificationSound('alert');
+        speakText(
+          lang === 'ar'
+            ? 'تم إلغاء الرحلة بسبب عدم قبول أي سائق. يمكنك طلب رحلة جديدة.'
+            : 'The ride was cancelled because no driver accepted. You can request a new ride.',
+          lang === 'ar' ? 'ar-EG' : 'en-US'
+        );
+        sendNativeNotification(
+          '❌ تم إلغاء الرحلة',
+          lang === 'ar'
+            ? 'لم يقبل أي سائق الرحلة. يمكنك طلب رحلة جديدة.'
+            : 'No driver accepted the ride. You can request a new ride.',
+          '❌'
+        );
+        triggerToast(
+          '❌ تم إلغاء الرحلة',
+          lang === 'ar'
+            ? 'لم يقبل أي سائق الرحلة. يمكنك طلب رحلة جديدة.'
+            : 'No driver accepted the ride. You can request a new ride.',
+          'warning'
+        );
+      }
+    }
 
     // Chat Message Notifications — short tone only, no native push, no toast
     if (activeTrip.chatMessages && activeTrip.chatMessages.length > 0) {
@@ -2170,6 +2171,7 @@ export default function App() {
     promoDiscount?: number
   ) => {
     if (requestInProgressRef.current) return;
+    if (!rider.isLoggedIn) return;
     requestInProgressRef.current = true;
     try {
       if (!selectedPickup || !selectedDropoff) return;
@@ -2284,8 +2286,6 @@ export default function App() {
         offeredDriverIds = sortedDrivers.slice(0, MAX_OFFERED_DRIVERS).map((item) => item.driver.id);
         currentOfferedDriverId = offeredDriverIds[0];
 
-        // Send push notification to all offered drivers immediately
-        const notifiedDrivers = drivers.filter(d => offeredDriverIds.includes(d.id));
         const newTrip: Trip = {
           id: `trip_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
           riderId: rider.id,
@@ -2763,55 +2763,57 @@ export default function App() {
     }
   };
 
-  const handleRejectTrip = () => {
+  const handleRejectTrip = async () => {
+    if (rejectTripInProgressRef.current) return;
     const currentTrip = activeTrip;
     if (!currentTrip || currentTrip.status !== 'SEARCHING' || !currentTrip.currentOfferedDriverId) return;
 
+    rejectTripInProgressRef.current = true;
     const currentIdx = currentTrip.offeredDriverIds?.indexOf(currentTrip.currentOfferedDriverId) ?? -1;
     const nextDriverId = (currentTrip.offeredDriverIds && currentIdx !== -1 && currentIdx + 1 < currentTrip.offeredDriverIds.length)
       ? currentTrip.offeredDriverIds[currentIdx + 1]
       : undefined;
 
-    if (nextDriverId) {
-      const updatedTrip = { 
-        ...currentTrip, 
-        currentOfferedDriverId: nextDriverId,
-        dispatchTimer: currentTrip.dispatchTimerMax || currentTrip.dispatchTimer || 300,
-      };
-      setActiveTripWithTracking(updatedTrip);
-      if (supabaseConnected) {
-        saveActiveTrip(updatedTrip).then((ok) => {
-          console.log('[handleRejectTrip] Advanced to next driver, result:', ok);
-        });
-      }
-    } else {
-      const rejectingDriverId = currentTrip.currentOfferedDriverId;
-      setDrivers((prev) =>
-        prev.map((d) => (d.id === rejectingDriverId ? { ...d, status: 'AVAILABLE' } : d))
-      );
-      const withoutRejector = (currentTrip.offeredDriverIds || []).filter((id) => id !== rejectingDriverId);
-      const resetTrip: Trip = {
-        ...currentTrip,
-        status: 'SEARCHING' as TripStatus,
-        offeredDriverIds: withoutRejector,
-        currentOfferedDriverId: withoutRejector[0],
-        dispatchTimer: currentTrip.dispatchTimerMax || currentTrip.dispatchTimer || 300,
-      };
-      setActiveTripWithTracking(resetTrip);
-      if (supabaseConnected) {
-        saveActiveTrip(resetTrip).then((ok) => {
-          console.log('[handleRejectTrip] Re-dispatching after reject, result:', ok);
-        });
-        if (rejectingDriverId) {
-          const rejectingDrv = driversRef.current.find(d => d.id === rejectingDriverId);
-          if (rejectingDrv) {
-            saveDriver({ ...rejectingDrv, status: 'AVAILABLE' }).catch(() => {});
+    try {
+      if (nextDriverId) {
+        const updatedTrip = { 
+          ...currentTrip, 
+          currentOfferedDriverId: nextDriverId,
+          dispatchTimer: currentTrip.dispatchTimerMax || currentTrip.dispatchTimer || 300,
+        };
+        setActiveTripWithTracking(updatedTrip);
+        if (supabaseConnected) {
+          await saveActiveTrip(updatedTrip);
+        }
+      } else {
+        const rejectingDriverId = currentTrip.currentOfferedDriverId;
+        setDrivers((prev) =>
+          prev.map((d) => (d.id === rejectingDriverId ? { ...d, status: 'AVAILABLE' } : d))
+        );
+        const withoutRejector = (currentTrip.offeredDriverIds || []).filter((id) => id !== rejectingDriverId);
+        const resetTrip: Trip = {
+          ...currentTrip,
+          status: 'SEARCHING' as TripStatus,
+          offeredDriverIds: withoutRejector,
+          currentOfferedDriverId: withoutRejector[0],
+          dispatchTimer: currentTrip.dispatchTimerMax || currentTrip.dispatchTimer || 300,
+        };
+        setActiveTripWithTracking(resetTrip);
+        if (supabaseConnected) {
+          await saveActiveTrip(resetTrip);
+          if (rejectingDriverId) {
+            const rejectingDrv = driversRef.current.find(d => d.id === rejectingDriverId);
+            if (rejectingDrv) {
+              await saveDriver({ ...rejectingDrv, status: 'AVAILABLE' }).catch(() => {});
+            }
           }
         }
+        if (!resetTrip.currentOfferedDriverId) {
+          await refreshWaitingTrip(resetTrip);
+        }
       }
-      if (!resetTrip.currentOfferedDriverId) {
-        refreshWaitingTrip(resetTrip);
-      }
+    } finally {
+      rejectTripInProgressRef.current = false;
     }
   };
 
