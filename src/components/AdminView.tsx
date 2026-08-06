@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Driver, Trip, SystemStats, Location, Rider, PromoCode, Region, Ad } from '../types';
 import { DollarSign, ShieldAlert, Award, TrendingUp, Settings, Percent, CheckCircle, Star, Users, MapPin, Database, Sparkles, Search, Upload, AlertCircle, HelpCircle, Globe, Loader2, Calendar, Clock, BarChart2, Car, Map, Trash2, Plus, Megaphone, Phone, Eye, EyeOff } from 'lucide-react';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, AreaChart, Area } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, AreaChart, Area, PieChart, Pie, Cell } from 'recharts';
 import { fetchTripsHistoryFilteredPaginated, fetchTripsHistoryCount, generatePromoCode, fetchPromoCodes, fetchRegions, saveRegion, deleteRegionInDB, fetchAds, saveAd, deleteAd, loadSession, getDeviceId } from '../supabaseService';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE, DATA_RETENTION_POLICY } from '../utils/legal';
 import { exportBackup, importBackup } from '../utils/backup';
@@ -17,7 +17,7 @@ interface AdminViewProps {
   onUpdateCommissionRate: (rate: number) => void;
   onUpdatePricingStats: (updated: Partial<SystemStats>) => void;
   onSavePricingStats: (stats: SystemStats) => void;
-  onSettleDriverCommissions: (driverId: string) => void;
+  onSettleDriverCommissions: (driverId: string) => Promise<void>;
   onUpdateLocations: (newLocs: Location[]) => void;
   onUpdateRegions: (newRegions: Region[]) => void;
   onApproveDriver: (driverId: string) => void;
@@ -419,6 +419,64 @@ export const AdminView: React.FC<AdminViewProps> = ({
       name,
       [lang === 'ar' ? 'عدد الرحلات' : 'Rides']: dayCounts[name] || 0
     }));
+  };
+
+  // 3. Data Processor: Trip Status Breakdown
+  const getTripStatusData = () => {
+    const statusCounts: { [key: string]: number } = {
+      COMPLETED: 0,
+      CANCELLED: 0,
+      SEARCHING: 0,
+      ACCEPTED: 0,
+      ARRIVED: 0,
+      STARTED: 0,
+    };
+
+    adminTrips.forEach(t => {
+      if (statusCounts[t.status] !== undefined) {
+        statusCounts[t.status] += 1;
+      }
+    });
+
+    const statusLabels: { [key: string]: string } = {
+      COMPLETED: lang === 'ar' ? 'مكتملة' : 'Completed',
+      CANCELLED: lang === 'ar' ? 'ملغية' : 'Cancelled',
+      SEARCHING: lang === 'ar' ? 'بحث' : 'Searching',
+      ACCEPTED: lang === 'ar' ? 'مقبولة' : 'Accepted',
+      ARRIVED: lang === 'ar' ? 'وصل' : 'Arrived',
+      STARTED: lang === 'ar' ? 'جارية' : 'Started',
+    };
+
+    const statusColors: { [key: string]: string } = {
+      COMPLETED: '#10b981',
+      CANCELLED: '#ef4444',
+      SEARCHING: '#f59e0b',
+      ACCEPTED: '#3b82f6',
+      ARRIVED: '#8b5cf6',
+      STARTED: '#06b6d4',
+    };
+
+    return Object.entries(statusCounts)
+      .filter(([_, count]) => count > 0)
+      .map(([status, count]) => ({
+        name: statusLabels[status] || status,
+        value: count,
+        fill: statusColors[status] || '#64748b',
+      }));
+  };
+
+  // 4. Data Processor: Driver Performance Metrics
+  const getDriverPerformanceData = () => {
+    return drivers
+      .filter(d => d.approvalStatus === 'APPROVED')
+      .map(d => ({
+        name: d.name,
+        [lang === 'ar' ? 'رحلات' : 'Rides']: d.totalTrips || 0,
+        [lang === 'ar' ? 'أرباح' : 'Earnings']: Math.round(d.totalEarnings || 0),
+        [lang === 'ar' ? 'عمولة' : 'Commission']: Math.round(d.totalCommissionPaid || 0),
+      }))
+      .sort((a, b) => (b[lang === 'ar' ? 'رحلات' : 'Rides'] as number) - (a[lang === 'ar' ? 'رحلات' : 'Rides'] as number))
+      .slice(0, 10);
   };
 
   const loadAdminTrips = async (reset = false) => {
@@ -2477,7 +2535,106 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     <p className="font-extrabold text-amber-800">{drivers.filter(d => d.approvalStatus === 'PENDING').length}</p>
                     <p className="text-[7.5px] text-amber-600 mt-0.5">{lang === 'ar' ? 'بانتظار الموافقة' : 'Pending Verification'}</p>
                   </div>
+                 </div>
+               </div>
+             </div>
+
+            {/* Card 7: Profit & Loss / Financial Health */}
+            <div className="col-span-2 bg-gradient-to-br from-emerald-900 via-emerald-800 to-slate-900 text-white p-4 rounded-2xl shadow-md border border-emerald-500/20 relative overflow-hidden">
+              <div className="absolute left-0 top-0 -translate-x-4 -translate-y-4 opacity-10">
+                <TrendingUp className="w-32 h-32" />
+              </div>
+              <div className="flex justify-between items-start relative z-10">
+                <div>
+                  <span className="px-2 py-0.5 text-[8px] font-extrabold bg-emerald-500/30 text-emerald-200 rounded-full border border-emerald-500/30">
+                    {lang === 'ar' ? 'سجل الأرباح والخسائر' : 'Profit & Loss Archive'}
+                  </span>
+                  <p className="text-[10px] text-slate-300 font-bold mt-1.5">
+                    {lang === 'ar' ? 'صافي أرباح المنصة وأرباح السائقين' : 'Platform net earnings & driver payouts'}
+                  </p>
+                  <div className="mt-2 flex gap-3">
+                    <div>
+                      <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'إجمالي الدخل' : 'Gross Revenue'}</p>
+                      <p className="text-sm font-black text-white">{stats.totalRevenue} {lang === 'ar' ? 'ج.م' : 'EGP'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'عمولة المنصة' : 'Platform Commission'}</p>
+                      <p className="text-sm font-black text-amber-300">{stats.totalCommission} {lang === 'ar' ? 'ج.م' : 'EGP'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'أرباح السائقين' : 'Driver Earnings'}</p>
+                      <p className="text-sm font-black text-emerald-300">{Math.round((stats.totalRevenue || 0) - (stats.totalCommission || 0))} {lang === 'ar' ? 'ج.م' : 'EGP'}</p>
+                    </div>
+                  </div>
                 </div>
+                <div className="p-2.5 bg-white/10 rounded-xl">
+                  <DollarSign className="w-5 h-5 text-emerald-400" />
+                </div>
+              </div>
+            </div>
+
+            {/* Card 8: Trip Status Analysis */}
+            <div className="bg-white border border-slate-200 p-3.5 rounded-2xl shadow-xs">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                  {lang === 'ar' ? 'تحليل حالات الرحلات' : 'Trip Status Breakdown'}
+                </span>
+                <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
+                  <BarChart2 className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="h-40 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={getTripStatusData()}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={30}
+                      outerRadius={55}
+                      paddingAngle={2}
+                      dataKey="value"
+                    >
+                      {getTripStatusData().map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.fill} stroke="none" />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ background: '#0f172a', borderRadius: '12px', border: 'none', color: '#fff', fontSize: '10px' }}
+                      formatter={(value: any, name: any) => [`${value} ${lang === 'ar' ? 'رحلة' : 'trips'}`, name]}
+                    />
+                    <Legend
+                      iconType="circle"
+                      wrapperStyle={{ fontSize: '9px', fontFamily: 'sans-serif' }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Card 9: Driver Performance Metrics */}
+            <div className="bg-white border border-slate-200 p-3.5 rounded-2xl shadow-xs">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                  {lang === 'ar' ? 'أداء السائقين' : 'Driver Performance'}
+                </span>
+                <div className="p-1.5 bg-amber-50 text-amber-600 rounded-lg">
+                  <Award className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="h-40 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={getDriverPerformanceData()} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="name" stroke="#64748b" tickLine={false} tick={{ fontSize: 9 }} />
+                    <YAxis stroke="#64748b" tickLine={false} tick={{ fontSize: 9 }} />
+                    <Tooltip
+                      contentStyle={{ background: '#0f172a', borderRadius: '12px', border: 'none', color: '#fff', fontSize: '10px' }}
+                    />
+                    <Bar dataKey={lang === 'ar' ? 'أرباح' : 'Earnings'} fill="#10b981" radius={[4, 4, 0, 0]} barSize={16} />
+                    <Bar dataKey={lang === 'ar' ? 'عمولة' : 'Commission'} fill="#ef4444" radius={[4, 4, 0, 0]} barSize={16} />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </div>
 
