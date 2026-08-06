@@ -445,8 +445,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
         setAdminTripsPage((prev) => prev + 1);
       }
       setAdminTripsHasMore(result.hasMore);
-    } catch {
-      // silently fail
+    } catch (err) {
+      console.warn('[AdminView] Failed to load trips:', err);
+      triggerToast(
+        lang === 'ar' ? 'خطأ' : 'Error',
+        lang === 'ar' ? 'فشل تحميل سجل الرحلات. تحقق من اتصالك.' : 'Failed to load trip history. Check your connection.',
+        'warning'
+      );
     } finally {
       setIsLoadingTrips(false);
     }

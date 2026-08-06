@@ -303,7 +303,7 @@ export default function App() {
       }
     } else {
       // No next driver -> cancel the trip
-      handleCancelRide();
+      handleCancelRide({ userId: currentDriverId, role: 'driver' });
     }
   };
 
@@ -2505,13 +2505,16 @@ export default function App() {
   };
 
   // Handler: Cancel Ride
-  const handleCancelRide = async () => {
+  const handleCancelRide = async (cancelledBy?: { userId: string; role: 'rider' | 'driver' }) => {
     if (!activeTrip || cancelInProgressRef.current) return;
 
     cancelInProgressRef.current = true;
     dismissedTripIdsRef.current.add(activeTrip.id);
     const { driverId } = activeTrip;
     const cancelledTripId = activeTrip.id;
+
+    const cancelUserId = cancelledBy?.userId || rider.id || '';
+    const cancelRole = cancelledBy?.role || 'rider';
 
     if (driverId) {
       setDrivers((prev) =>
@@ -2529,7 +2532,7 @@ export default function App() {
 
     try {
       if (supabaseConnected) {
-        await saveTripToHistory(cancelledTrip, rider.id, 'rider', getDeviceId());
+        await saveTripToHistory(cancelledTrip, cancelUserId, cancelRole, getDeviceId());
         await saveActiveTrip(null, cancelledTripId);
         console.log('[handleCancelRide] Cleared active trip from DB');
       }
