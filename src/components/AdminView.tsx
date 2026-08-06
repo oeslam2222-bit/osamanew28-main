@@ -243,8 +243,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const registeredRidersCount = riders.length;
   const [driverSearchQuery, setDriverSearchQuery] = useState('');
   const [driverStatusFilter, setDriverStatusFilter] = useState<'all' | 'ACTIVE' | 'FROZEN' | 'REJECTED'>('all');
+  const [driverPeriodFilter, setDriverPeriodFilter] = useState<'all' | 'week' | 'month' | '30days'>('all');
   const [riderSearchQuery, setRiderSearchQuery] = useState('');
   const [riderStatusFilter, setRiderStatusFilter] = useState<'all' | 'ACTIVE' | 'FROZEN' | 'BLOCKED' | 'REJECTED'>('all');
+  const [riderPeriodFilter, setRiderPeriodFilter] = useState<'all' | 'week' | 'month' | '30days'>('all');
   const [selectedRiderForDetails, setSelectedRiderForDetails] = useState<Rider | null>(null);
   const [riderDetailTrips, setRiderDetailTrips] = useState<Trip[]>([]);
   const [isLoadingRiderTrips, setIsLoadingRiderTrips] = useState(false);
@@ -477,6 +479,50 @@ export const AdminView: React.FC<AdminViewProps> = ({
       }))
       .sort((a, b) => (b[lang === 'ar' ? 'رحلات' : 'Rides'] as number) - (a[lang === 'ar' ? 'رحلات' : 'Rides'] as number))
       .slice(0, 10);
+  };
+
+  const getFilteredTripsForPeriod = (period: 'all' | 'week' | 'month' | '30days') => {
+    if (period === 'all') return adminTrips;
+    const now = new Date();
+    const from = new Date();
+    if (period === 'week') {
+      from.setDate(now.getDate() - 7);
+    } else if (period === 'month') {
+      from.setMonth(now.getMonth() - 1);
+    } else if (period === '30days') {
+      from.setDate(now.getDate() - 30);
+    }
+    return adminTrips.filter(t => {
+      const dateStr = t.completedAt || t.createdAt;
+      if (!dateStr) return false;
+      const tripDate = new Date(dateStr);
+      return tripDate >= from && tripDate <= now;
+    });
+  };
+
+  const getDriverStatsForPeriod = (period: 'all' | 'week' | 'month' | '30days') => {
+    const trips = getFilteredTripsForPeriod(period);
+    const statsObj: { [key: string]: { trips: number; earnings: number; commission: number } } = {};
+    trips.forEach(t => {
+      const name = t.driverName || (lang === 'ar' ? 'كابتن مجهول' : 'Unknown');
+      if (!statsObj[name]) statsObj[name] = { trips: 0, earnings: 0, commission: 0 };
+      statsObj[name].trips += 1;
+      statsObj[name].earnings += t.fare;
+      statsObj[name].commission += t.commission;
+    });
+    return statsObj;
+  };
+
+  const getRiderStatsForPeriod = (period: 'all' | 'week' | 'month' | '30days') => {
+    const trips = getFilteredTripsForPeriod(period);
+    const statsObj: { [key: string]: { trips: number; spent: number } } = {};
+    trips.forEach(t => {
+      const name = t.riderName || (lang === 'ar' ? 'راكب مجهول' : 'Unknown');
+      if (!statsObj[name]) statsObj[name] = { trips: 0, spent: 0 };
+      statsObj[name].trips += 1;
+      statsObj[name].spent += t.fare;
+    });
+    return statsObj;
   };
 
   const loadAdminTrips = async (reset = false) => {
@@ -1615,18 +1661,42 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       >
                         {lang === 'ar' ? 'موقوف / مجمد' : 'Frozen'}
                       </button>
-                      <button
-                        onClick={() => setDriverStatusFilter('REJECTED')}
-                        className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold transition-all cursor-pointer ${
-                          driverStatusFilter === 'REJECTED'
-                            ? 'bg-slate-500 text-white'
-                            : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        {lang === 'ar' ? 'مرفوض' : 'Rejected'}
-                      </button>
-                    </div>
-                  </div>
+                       <button
+                         onClick={() => setDriverStatusFilter('REJECTED')}
+                         className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold transition-all cursor-pointer ${
+                           driverStatusFilter === 'REJECTED'
+                             ? 'bg-slate-500 text-white'
+                             : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                         }`}
+                       >
+                         {lang === 'ar' ? 'مرفوض' : 'Rejected'}
+                       </button>
+                     </div>
+
+                     <div className="flex flex-wrap gap-1">
+                       <span className="text-[8px] font-bold text-slate-500 self-center mr-1">
+                         {lang === 'ar' ? 'الفترة:' : 'Period:'}
+                       </span>
+                       {[
+                         { id: 'all', labelAr: 'الكل', labelEn: 'All' },
+                         { id: 'week', labelAr: 'أسبوع', labelEn: 'Week' },
+                         { id: 'month', labelAr: 'شهر', labelEn: 'Month' },
+                         { id: '30days', labelAr: '30 يوم', labelEn: '30 Days' },
+                       ].map((periodItem) => (
+                         <button
+                           key={periodItem.id}
+                           onClick={() => setDriverPeriodFilter(periodItem.id as any)}
+                           className={`px-2 py-0.5 rounded-full text-[8px] font-bold transition-all cursor-pointer ${
+                             driverPeriodFilter === periodItem.id
+                               ? 'bg-indigo-600 text-white'
+                               : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                           }`}
+                         >
+                           {lang === 'ar' ? periodItem.labelAr : periodItem.labelEn}
+                         </button>
+                       ))}
+                     </div>
+                   </div>
 
                   <div className="space-y-2">
                     {drivers
@@ -1647,65 +1717,66 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           (d.vehicleName && d.vehicleName.toLowerCase().includes(q))
                         );
                       })
-                      .map((drv) => {
-                        const isFrozen = drv.approvalStatus === 'FROZEN';
-                        const isRejected = drv.approvalStatus === 'REJECTED';
-                        
-                        return (
-                        <div key={drv.id} className={`border border-slate-100 p-3 rounded-xl space-y-2.5 ${isFrozen ? 'bg-red-50/20 border-red-100' : isRejected ? 'bg-slate-50 border-slate-200' : 'bg-white'}`}>
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <h5 className="text-xs font-black text-slate-800 flex items-center gap-1.5">
-                                <span>{drv.name}</span>
-                                <span className={`w-2 h-2 rounded-full inline-block ${drv.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
-                              </h5>
-                              <p className="text-[9px] text-slate-400 mt-0.5">
-                                {drv.vehicleType === 'CAR'
-                                  ? (lang === 'ar' ? '🚖 سيارة' : '🚖 Car')
-                                  : drv.vehicleType === 'MOTORCYCLE'
-                                  ? (lang === 'ar' ? '🏍️ موتوسيكل' : '🏍️ Motorcycle')
-                                  : drv.vehicleType === 'TOKTOK'
-                                  ? (lang === 'ar' ? '🛺 توكتوك' : '🛺 TukTuk')
-                                  : (lang === 'ar' ? '🚲 تروسيكل' : '🚲 Tricycle')
-                                } | {drv.vehicleName} | {drv.carPlate}
-                              </p>
-                            </div>
-                            <div className="flex flex-col items-end gap-1">
-                              <div className="flex items-center gap-0.5 text-amber-500 text-[10px] font-bold">
-                                <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
-                                <span>{drv.rating}</span>
-                              </div>
-                              {isFrozen ? (
-                                <span className="text-[8px] bg-red-100 text-red-800 font-extrabold px-1.5 py-0.5 rounded">
-                                  {lang === 'ar' ? 'موقوف/مجمد' : 'Suspended'}
-                                </span>
-                              ) : isRejected ? (
-                                <span className="text-[8px] bg-slate-200 text-slate-600 font-extrabold px-1.5 py-0.5 rounded">
-                                  {lang === 'ar' ? 'مرفوض' : 'Rejected'}
-                                </span>
-                              ) : (
-                                <span className="text-[8px] bg-emerald-100 text-emerald-800 font-extrabold px-1.5 py-0.5 rounded">
-                                  {lang === 'ar' ? 'نشط ومفعل' : 'Active'}
-                                </span>
-                              )}
-                            </div>
-                          </div>
+                       .map((drv) => {
+                         const isFrozen = drv.approvalStatus === 'FROZEN';
+                         const isRejected = drv.approvalStatus === 'REJECTED';
+                         const driverPeriodStats = getDriverStatsForPeriod(driverPeriodFilter)[drv.name] || { trips: 0, earnings: 0, commission: 0 };
 
-                          {/* Ledger stats */}
-                          <div className="grid grid-cols-3 gap-2 bg-slate-50 p-2 rounded-lg text-center text-[10px]">
-                            <div>
-                              <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'الرحلات' : 'Rides'}</p>
-                              <p className="font-bold text-slate-700 mt-0.5">{drv.totalTrips}</p>
-                            </div>
-                            <div>
-                              <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'أرباح السائق' : 'Driver Net'}</p>
-                              <p className="font-bold text-slate-700 mt-0.5">{drv.totalEarnings} ج.م</p>
-                            </div>
-                            <div>
-                              <p className="text-[8px] text-rose-500">{lang === 'ar' ? 'عمولة التطبيق' : 'Due Ezz'}</p>
-                              <p className="font-bold text-rose-600 mt-0.5">{drv.totalCommissionPaid} ج.م</p>
-                            </div>
-                          </div>
+                         return (
+                         <div key={drv.id} className={`border border-slate-100 p-3 rounded-xl space-y-2.5 ${isFrozen ? 'bg-red-50/20 border-red-100' : isRejected ? 'bg-slate-50 border-slate-200' : 'bg-white'}`}>
+                           <div className="flex items-start justify-between">
+                             <div>
+                               <h5 className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                                 <span>{drv.name}</span>
+                                 <span className={`w-2 h-2 rounded-full inline-block ${drv.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                               </h5>
+                               <p className="text-[9px] text-slate-400 mt-0.5">
+                                 {drv.vehicleType === 'CAR'
+                                   ? (lang === 'ar' ? '🚖 سيارة' : '🚖 Car')
+                                   : drv.vehicleType === 'MOTORCYCLE'
+                                   ? (lang === 'ar' ? '🏍️ موتوسيكل' : '🏍️ Motorcycle')
+                                   : drv.vehicleType === 'TOKTOK'
+                                   ? (lang === 'ar' ? '🛺 توكتوك' : '🛺 TukTuk')
+                                   : (lang === 'ar' ? '🚲 تروسيكل' : '🚲 Tricycle')
+                                 } | {drv.vehicleName} | {drv.carPlate}
+                               </p>
+                             </div>
+                             <div className="flex flex-col items-end gap-1">
+                               <div className="flex items-center gap-0.5 text-amber-500 text-[10px] font-bold">
+                                 <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+                                 <span>{drv.rating}</span>
+                               </div>
+                               {isFrozen ? (
+                                 <span className="text-[8px] bg-red-100 text-red-800 font-extrabold px-1.5 py-0.5 rounded">
+                                   {lang === 'ar' ? 'موقوف/مجمد' : 'Suspended'}
+                                 </span>
+                               ) : isRejected ? (
+                                 <span className="text-[8px] bg-slate-200 text-slate-600 font-extrabold px-1.5 py-0.5 rounded">
+                                   {lang === 'ar' ? 'مرفوض' : 'Rejected'}
+                                 </span>
+                               ) : (
+                                 <span className="text-[8px] bg-emerald-100 text-emerald-800 font-extrabold px-1.5 py-0.5 rounded">
+                                   {lang === 'ar' ? 'نشط ومفعل' : 'Active'}
+                                 </span>
+                               )}
+                             </div>
+                           </div>
+
+                           {/* Ledger stats */}
+                           <div className="grid grid-cols-3 gap-2 bg-slate-50 p-2 rounded-lg text-center text-[10px]">
+                             <div>
+                               <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'الرحلات' : 'Rides'}</p>
+                               <p className="font-bold text-slate-700 mt-0.5">{driverPeriodStats.trips}</p>
+                             </div>
+                             <div>
+                               <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'أرباح السائق' : 'Driver Net'}</p>
+                               <p className="font-bold text-slate-700 mt-0.5">{Math.round(driverPeriodStats.earnings)} ج.م</p>
+                             </div>
+                             <div>
+                               <p className="text-[8px] text-rose-500">{lang === 'ar' ? 'عمولة التطبيق' : 'Due Ezz'}</p>
+                               <p className="font-bold text-rose-600 mt-0.5">{Math.round(driverPeriodStats.commission)} ج.م</p>
+                             </div>
+                           </div>
 
                           {/* Service Areas Assignment */}
                           {onUpdateDriverServiceAreas && regions.length > 0 && (
@@ -1891,18 +1962,42 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   >
                     {lang === 'ar' ? 'محظور' : 'Blocked'}
                   </button>
-                  <button
-                    onClick={() => setRiderStatusFilter('REJECTED')}
-                    className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold transition-all cursor-pointer ${
-                      riderStatusFilter === 'REJECTED'
-                        ? 'bg-slate-500 text-white'
-                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    {lang === 'ar' ? 'مرفوض' : 'Rejected'}
-                  </button>
-                </div>
-              </div>
+                     <button
+                       onClick={() => setRiderStatusFilter('REJECTED')}
+                       className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold transition-all cursor-pointer ${
+                         riderStatusFilter === 'REJECTED'
+                           ? 'bg-slate-500 text-white'
+                           : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                       }`}
+                     >
+                       {lang === 'ar' ? 'مرفوض' : 'Rejected'}
+                     </button>
+                   </div>
+
+                   <div className="flex flex-wrap gap-1">
+                     <span className="text-[8px] font-bold text-slate-500 self-center mr-1">
+                       {lang === 'ar' ? 'الفترة:' : 'Period:'}
+                     </span>
+                     {[
+                       { id: 'all', labelAr: 'الكل', labelEn: 'All' },
+                       { id: 'week', labelAr: 'أسبوع', labelEn: 'Week' },
+                       { id: 'month', labelAr: 'شهر', labelEn: 'Month' },
+                       { id: '30days', labelAr: '30 يوم', labelEn: '30 Days' },
+                     ].map((periodItem) => (
+                       <button
+                         key={periodItem.id}
+                         onClick={() => setRiderPeriodFilter(periodItem.id as any)}
+                         className={`px-2 py-0.5 rounded-full text-[8px] font-bold transition-all cursor-pointer ${
+                           riderPeriodFilter === periodItem.id
+                             ? 'bg-indigo-600 text-white'
+                             : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                         }`}
+                       >
+                         {lang === 'ar' ? periodItem.labelAr : periodItem.labelEn}
+                       </button>
+                     ))}
+                   </div>
+                 </div>
 
               <div className="space-y-2">
                 {riders
@@ -1921,60 +2016,65 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       r.phone.includes(q)
                     );
                   })
-                  .map((rider) => {
-                    const isFrozen = rider.approvalStatus === 'FROZEN';
-                    const isBlocked = rider.approvalStatus === 'BLOCKED';
-                    const isRejected = rider.approvalStatus === 'REJECTED';
+                   .map((rider) => {
+                     const isFrozen = rider.approvalStatus === 'FROZEN';
+                     const isBlocked = rider.approvalStatus === 'BLOCKED';
+                     const isRejected = rider.approvalStatus === 'REJECTED';
+                     const riderPeriodStats = getRiderStatsForPeriod(riderPeriodFilter)[rider.name] || { trips: 0, spent: 0 };
 
-                    return (
-                      <div
-                        key={rider.id}
-                        className={`border border-slate-100 p-3 rounded-xl space-y-2.5 ${
-                          isFrozen
-                            ? 'bg-amber-50/30 border-amber-100'
-                            : isBlocked
-                            ? 'bg-rose-50/30 border-rose-100'
-                            : isRejected
-                            ? 'bg-slate-50 border-slate-200'
-                            : 'bg-white'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <h5 className="text-xs font-black text-slate-800">{rider.name}</h5>
-                            <p className="text-[9px] text-slate-400 mt-0.5">📞 {rider.phone}</p>
-                          </div>
-                          <div className="flex flex-col items-end gap-1">
-                            {isFrozen ? (
-                              <span className="text-[8px] bg-amber-100 text-amber-800 font-extrabold px-1.5 py-0.5 rounded">
-                                {lang === 'ar' ? 'موقوف مؤقتاً' : 'Frozen'}
-                              </span>
-                            ) : isBlocked ? (
-                              <span className="text-[8px] bg-rose-100 text-rose-800 font-extrabold px-1.5 py-0.5 rounded">
-                                {lang === 'ar' ? 'محظور' : 'Blocked'}
-                              </span>
-                            ) : isRejected ? (
-                              <span className="text-[8px] bg-slate-200 text-slate-600 font-extrabold px-1.5 py-0.5 rounded">
-                                {lang === 'ar' ? 'مرفوض' : 'Rejected'}
-                              </span>
-                            ) : (
-                              <span className="text-[8px] bg-emerald-100 text-emerald-800 font-extrabold px-1.5 py-0.5 rounded">
-                                {lang === 'ar' ? 'نشط' : 'Active'}
-                              </span>
-                            )}
-                          </div>
-                        </div>
+                     return (
+                       <div
+                         key={rider.id}
+                         className={`border border-slate-100 p-3 rounded-xl space-y-2.5 ${
+                           isFrozen
+                             ? 'bg-amber-50/30 border-amber-100'
+                             : isBlocked
+                             ? 'bg-rose-50/30 border-rose-100'
+                             : isRejected
+                             ? 'bg-slate-50 border-slate-200'
+                             : 'bg-white'
+                         }`}
+                       >
+                         <div className="flex items-start justify-between">
+                           <div>
+                             <h5 className="text-xs font-black text-slate-800">{rider.name}</h5>
+                             <p className="text-[9px] text-slate-400 mt-0.5">📞 {rider.phone}</p>
+                           </div>
+                           <div className="flex flex-col items-end gap-1">
+                             {isFrozen ? (
+                               <span className="text-[8px] bg-amber-100 text-amber-800 font-extrabold px-1.5 py-0.5 rounded">
+                                 {lang === 'ar' ? 'موقوف مؤقتاً' : 'Frozen'}
+                               </span>
+                             ) : isBlocked ? (
+                               <span className="text-[8px] bg-rose-100 text-rose-800 font-extrabold px-1.5 py-0.5 rounded">
+                                 {lang === 'ar' ? 'محظور' : 'Blocked'}
+                               </span>
+                             ) : isRejected ? (
+                               <span className="text-[8px] bg-slate-200 text-slate-600 font-extrabold px-1.5 py-0.5 rounded">
+                                 {lang === 'ar' ? 'مرفوض' : 'Rejected'}
+                               </span>
+                             ) : (
+                               <span className="text-[8px] bg-emerald-100 text-emerald-800 font-extrabold px-1.5 py-0.5 rounded">
+                                 {lang === 'ar' ? 'نشط' : 'Active'}
+                               </span>
+                             )}
+                           </div>
+                         </div>
 
-                        <div className="grid grid-cols-3 gap-2 bg-slate-50 p-2 rounded-lg text-center text-[10px]">
-                          <div>
-                            <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'الرحلات' : 'Trips'}</p>
-                            <p className="font-bold text-slate-700 mt-0.5">{rider.totalTrips ?? 0}</p>
-                          </div>
-                          <div>
-                            <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'التقييم' : 'Rating'}</p>
-                            <p className="font-bold text-slate-700 mt-0.5">{rider.rating?.toFixed(1) ?? '5.0'}</p>
-                          </div>
-                        </div>
+                         <div className="grid grid-cols-3 gap-2 bg-slate-50 p-2 rounded-lg text-center text-[10px]">
+                           <div>
+                             <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'الرحلات' : 'Trips'}</p>
+                             <p className="font-bold text-slate-700 mt-0.5">{riderPeriodStats.trips}</p>
+                           </div>
+                           <div>
+                             <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'التقييم' : 'Rating'}</p>
+                             <p className="font-bold text-slate-700 mt-0.5">{rider.rating?.toFixed(1) ?? '5.0'}</p>
+                           </div>
+                           <div>
+                             <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'إجمالي الإنفاق' : 'Spent'}</p>
+                             <p className="font-bold text-slate-700 mt-0.5">{Math.round(riderPeriodStats.spent)} ج.م</p>
+                           </div>
+                         </div>
 
                         <div className="grid grid-cols-1 gap-1.5 text-[9px] font-bold">
                           <a
