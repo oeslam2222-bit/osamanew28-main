@@ -945,13 +945,15 @@ export const fetchDrivers = async (): Promise<Driver[] | null> => {
 // Save Driver
 export const saveDriver = async (driver: Driver): Promise<boolean> => {
   try {
-    const passwordToStore = isSecureHash(driver.password)
-      ? driver.password
-      : await hashPassword(driver.password || generateUUID());
-    const { error } = await supabase.from('ezz_drivers').upsert({
-      ...mapDriverToDB(driver),
-      password: passwordToStore,
-    });
+    const driverData = { ...mapDriverToDB(driver) };
+    if (driver.password && isSecureHash(driver.password)) {
+      driverData.password = driver.password;
+    } else if (driver.password && !isSecureHash(driver.password)) {
+      driverData.password = await hashPassword(driver.password);
+    } else {
+      delete driverData.password;
+    }
+    const { error } = await supabase.from('ezz_drivers').upsert(driverData);
     if (error) throw error;
     return true;
   } catch (err: any) {
@@ -987,13 +989,15 @@ export const fetchRiders = async (): Promise<Rider[] | null> => {
 // Save Rider
 export const saveRider = async (rider: Rider): Promise<boolean> => {
   try {
-    const passwordToStore = isSecureHash(rider.password)
-      ? rider.password
-      : await hashPassword(rider.password || generateUUID());
-    const { error } = await supabase.from('ezz_riders').upsert({
-      ...mapRiderToDB(rider),
-      password: passwordToStore,
-    });
+    const riderData = { ...mapRiderToDB(rider) };
+    if (rider.password && isSecureHash(rider.password)) {
+      riderData.password = rider.password;
+    } else if (rider.password && !isSecureHash(rider.password)) {
+      riderData.password = await hashPassword(rider.password);
+    } else {
+      delete riderData.password;
+    }
+    const { error } = await supabase.from('ezz_riders').upsert(riderData);
     if (error) throw error;
     return true;
   } catch (err: any) {

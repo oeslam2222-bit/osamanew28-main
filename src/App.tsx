@@ -2947,7 +2947,9 @@ export default function App() {
           });
           const updatedDriver = updated.find((d) => d.id === driverId);
           if (updatedDriver && supabaseConnected) {
-            saveDriver(updatedDriver).catch(() => {});
+            saveDriver(updatedDriver).catch((err) => {
+              console.warn('[handleEndTrip] Failed to save driver stats:', err);
+            });
           }
           return updated;
         });
@@ -3080,10 +3082,18 @@ export default function App() {
     }
   };
 
-  const handleSettleDriverCommissions = (driverId: string) => {
-    setDrivers((prev) =>
-      prev.map((d) => (d.id === driverId ? { ...d, totalCommissionPaid: 0 } : d))
-    );
+  const handleSettleDriverCommissions = async (driverId: string) => {
+    setDrivers((prev) => {
+      const target = prev.find((d) => d.id === driverId);
+      if (!target) return prev;
+      const cleared = { ...target, totalCommissionPaid: 0 };
+      if (supabaseConnected) {
+        saveDriver(cleared).catch((err) => {
+          console.warn('[handleSettleDriverCommissions] Failed to save cleared driver:', err);
+        });
+      }
+      return prev.map((d) => (d.id === driverId ? cleared : d));
+    });
   };
 
   // Handler: Update Regions (admin areas management)

@@ -459,7 +459,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   useEffect(() => {
     loadAdminTrips(true);
-  }, [tripDateFrom, tripDateTo, tripHistoryStatusFilter, tripHistorySearchQuery]);
+  }, [tripDateFrom, tripDateTo, tripHistoryStatusFilter, tripHistorySearchQuery, adminUserId]);
 
   // OpenStreetMap Nominatim Live Search State
   const [osmQuery, setOsmQuery] = useState('');
