@@ -21,9 +21,7 @@ export const getEligibleDrivers = (
           areaLower.includes(regionNameLower) ||
           areaLower.includes(regionId) ||
           areaLower === 'all regions' ||
-          areaLower === 'جميع المناطق' ||
-          areaLower.includes('beni suef') ||
-          areaLower.includes('بني سويف')
+          areaLower === 'جميع المناطق'
         );
       });
       if (!regionMatch) return false;
@@ -44,9 +42,7 @@ export const filterDriversByRegion = (drivers: any[], region: Region | null) => 
         areaLower.includes(regionNameLower) ||
         areaLower.includes(regionId) ||
         areaLower === 'all regions' ||
-        areaLower === 'جميع المناطق' ||
-        areaLower.includes('beni suef') ||
-        areaLower.includes('بني سويف')
+        areaLower === 'جميع المناطق'
       );
     });
   });

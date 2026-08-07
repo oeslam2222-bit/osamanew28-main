@@ -208,7 +208,9 @@ CREATE TABLE IF NOT EXISTS ezz_promo_codes (
   is_active BOOLEAN DEFAULT TRUE,
   used_at TEXT,
   created_at TEXT DEFAULT NOW()::TEXT,
-  expires_at TEXT
+  expires_at TEXT,
+  usage_limit INTEGER,
+  usage_count INTEGER DEFAULT 0
 );
 
 ALTER PUBLICATION supabase_realtime ADD TABLE ezz_promo_codes;
@@ -230,6 +232,7 @@ CREATE POLICY "Allow anon delete promo_codes" ON ezz_promo_codes FOR DELETE USIN
 CREATE INDEX IF NOT EXISTS idx_promo_code ON ezz_promo_codes(code);
 CREATE INDEX IF NOT EXISTS idx_promo_rider ON ezz_promo_codes(rider_id);
 CREATE INDEX IF NOT EXISTS idx_promo_used ON ezz_promo_codes(used);
+CREATE INDEX IF NOT EXISTS idx_promo_usage ON ezz_promo_codes(usage_limit, usage_count);
 
 -- ============================================================
 -- 6. جدول إحصائيات النظام
@@ -340,8 +343,11 @@ CREATE TABLE IF NOT EXISTS ads (
   ad_fee DOUBLE PRECISION DEFAULT 0,
   daily_impression_limit INTEGER DEFAULT 0,
   impressions INTEGER DEFAULT 0,
+  region_id TEXT,
   created_at TEXT DEFAULT NOW()::TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_ads_region ON ads(region_id);
 
 -- دوال زيادة عدادات الإعلانات (تستخدمها الواجهة عند الضغط/المشاهدة)
 CREATE OR REPLACE FUNCTION increment_ad_click(ad_id TEXT)
@@ -857,7 +863,7 @@ export const mapRegionToDB = (region: Region) => ({
 // --- TRIP TRANSFORMS ---
 export const mapTripFromDB = (row: any): Trip => ({
   id: row.id,
-  riderId: row.rider_id || '',
+  riderId: row.rider_id || undefined,
   riderName: row.rider_name || '',
   riderPhone: row.rider_phone || '',
   driverId: row.driver_id || undefined,
@@ -1528,24 +1534,33 @@ const mapPromoCodeFromDB = (row: any): PromoCode => ({
   usedAt: row.used_at || undefined,
   createdAt: row.created_at,
   expiresAt: row.expires_at || undefined,
+  usageLimit: row.usage_limit ?? undefined,
+  usageCount: row.usage_count || 0,
 });
 
-export const generatePromoCode = async (discountAmount: number, riderId?: string, expiresAt?: string): Promise<PromoCode | null> => {
+export const generatePromoCode = async (discountAmount: number, riderId?: string, expiresAt?: string, usageLimit?: number | null): Promise<PromoCode | null> => {
   try {
     const code = `EZZ${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     const id = `promo_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
+    const insertData: any = {
+      id,
+      code,
+      discount_amount: discountAmount,
+      rider_id: riderId || null,
+      expires_at: expiresAt || null,
+      used: false,
+      usage_count: 0,
+      created_at: new Date().toISOString(),
+    };
+
+    if (usageLimit !== undefined && usageLimit !== null && usageLimit > 0) {
+      insertData.usage_limit = usageLimit;
+    }
+
     const { data, error } = await supabase
       .from('ezz_promo_codes')
-      .insert({
-        id,
-        code,
-        discount_amount: discountAmount,
-        rider_id: riderId || null,
-        expires_at: expiresAt || null,
-        used: false,
-        created_at: new Date().toISOString(),
-      })
+      .insert(insertData)
       .select()
       .single();
 
@@ -1572,6 +1587,10 @@ export const validatePromoCode = async (code: string, riderId?: string): Promise
       return null;
     }
 
+    if (data.usage_limit !== null && data.usage_limit !== undefined && (data.usage_count || 0) >= data.usage_limit) {
+      return null;
+    }
+
     if (data.rider_id && data.rider_id !== riderId) {
       return null;
     }
@@ -1585,10 +1604,22 @@ export const validatePromoCode = async (code: string, riderId?: string): Promise
 
 export const markPromoCodeAsUsed = async (promoCodeId: string, tripId: string): Promise<boolean> => {
   try {
+    const { data: existing, error: fetchError } = await supabase
+      .from('ezz_promo_codes')
+      .select('usage_limit, usage_count, used')
+      .eq('id', promoCodeId)
+      .single();
+
+    if (fetchError || !existing || existing.used) return false;
+
+    const newCount = (existing.usage_count || 0) + 1;
+    const shouldMarkUsed = existing.usage_limit !== null && existing.usage_limit !== undefined && newCount >= existing.usage_limit;
+
     const { error } = await supabase
       .from('ezz_promo_codes')
       .update({
-        used: true,
+        usage_count: newCount,
+        used: shouldMarkUsed,
         trip_id: tripId,
         used_at: new Date().toISOString(),
       })
@@ -1599,6 +1630,21 @@ export const markPromoCodeAsUsed = async (promoCodeId: string, tripId: string): 
     return true;
   } catch (err) {
     console.warn('Could not mark promo code as used:', err);
+    return false;
+  }
+};
+
+export const deletePromoCode = async (promoCodeId: string): Promise<boolean> => {
+  try {
+    const { error } = await supabase
+      .from('ezz_promo_codes')
+      .delete()
+      .eq('id', promoCodeId);
+
+    if (error) throw error;
+    return true;
+  } catch (err: any) {
+    console.warn('Could not delete promo code:', err.message);
     return false;
   }
 };
@@ -1863,6 +1909,7 @@ const mapAdRow = (row: any): Ad => ({
   adFee: row.ad_fee ?? row.adFee ?? 0,
   dailyImpressionLimit: row.daily_impression_limit ?? row.dailyImpressionLimit ?? 0,
   impressions: row.impressions ?? 0,
+  regionId: row.region_id ?? undefined,
   createdAt: row.created_at ?? new Date().toISOString(),
 });
 
@@ -1880,6 +1927,7 @@ const adToRow = (ad: Partial<Ad>) => ({
   ad_fee: ad.adFee ?? 0,
   daily_impression_limit: ad.dailyImpressionLimit ?? 0,
   whatsapp_clicks: ad.whatsappClicks ?? 0,
+  region_id: ad.regionId ?? null,
 });
 
 export const fetchAds = async (): Promise<Ad[]> => {

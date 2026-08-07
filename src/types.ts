@@ -71,6 +71,8 @@ export interface PromoCode {
   usedAt?: string;
   createdAt: string;
   expiresAt?: string;
+  usageLimit?: number | null;
+  usageCount?: number;
 }
 
 export interface Driver {
@@ -228,6 +230,7 @@ export interface Ad {
   impressions?: number; // عدد مرات الظهور
   clicks: number; // عدد مرات الاتصال الهاتفي
   whatsappClicks?: number; // عدد مرات فتح الواتساب
+  regionId?: string; // المنطقة المستهدفة (فارغ = كل المناطق)
   createdAt: string;
 }
 

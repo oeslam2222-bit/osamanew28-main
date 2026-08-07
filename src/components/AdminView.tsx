@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Driver, Trip, SystemStats, Location, Rider, PromoCode, Region, Ad } from '../types';
 import { DollarSign, ShieldAlert, Award, TrendingUp, Settings, Percent, CheckCircle, Star, Users, MapPin, Database, Sparkles, Search, Upload, AlertCircle, HelpCircle, Globe, Loader2, Calendar, Clock, BarChart2, Car, Map, Trash2, Plus, Megaphone, Phone, Eye, EyeOff } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, AreaChart, Area, PieChart, Pie, Cell } from 'recharts';
-import { fetchTripsHistoryFilteredPaginated, fetchTripsHistoryCount, generatePromoCode, fetchPromoCodes, fetchRegions, saveRegion, deleteRegionInDB, fetchAds, saveAd, deleteAd, loadSession, getDeviceId } from '../supabaseService';
+import { fetchTripsHistoryFilteredPaginated, fetchTripsHistoryCount, generatePromoCode, fetchPromoCodes, deletePromoCode, fetchRegions, saveRegion, deleteRegionInDB, fetchAds, saveAd, deleteAd, loadSession, getDeviceId } from '../supabaseService';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE, DATA_RETENTION_POLICY } from '../utils/legal';
 import { exportBackup, importBackup } from '../utils/backup';
 import { AVAILABLE_CITIES } from '../constants';
@@ -206,12 +206,23 @@ export const AdminView: React.FC<AdminViewProps> = ({
   };
 
   const handleGeneratePromoCode = async () => {
-    const code = await generatePromoCode(promoDiscount, selectedRiderForPromo || undefined);
+    const code = await generatePromoCode(promoDiscount, selectedRiderForPromo || undefined, undefined, promoUsageLimit === '' ? null : Number(promoUsageLimit));
     if (code) {
       setPromoCodes(prev => [code, ...prev]);
+      setPromoUsageLimit('');
       triggerToast(lang === 'ar' ? 'تم توليد الكود الترويجي بنجاح' : 'Promo code generated successfully', 'success');
     } else {
       triggerToast(lang === 'ar' ? 'فشل توليد الكود' : 'Failed to generate promo code', 'error');
+    }
+  };
+
+  const handleDeletePromoCode = async (promoCodeId: string) => {
+    const success = await deletePromoCode(promoCodeId);
+    if (success) {
+      setPromoCodes(prev => prev.filter(c => c.id !== promoCodeId));
+      triggerToast(lang === 'ar' ? 'تم حذف الكود الترويجي' : 'Promo code deleted', 'success');
+    } else {
+      triggerToast(lang === 'ar' ? 'فشل حذف الكود' : 'Failed to delete promo code', 'error');
     }
   };
 
@@ -253,6 +264,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [promoDiscount, setPromoDiscount] = useState(5);
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
   const [selectedRiderForPromo, setSelectedRiderForPromo] = useState('');
+  const [promoUsageLimit, setPromoUsageLimit] = useState<number | ''>('');
   const [tripHistorySearchQuery, setTripHistorySearchQuery] = useState('');
   const [tripHistoryStatusFilter, setTripHistoryStatusFilter] = useState<'all' | 'COMPLETED' | 'CANCELLED' | 'ACTIVE'>('all');
   const [expandedTripId, setExpandedTripId] = useState<string | null>(null);
@@ -290,6 +302,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
     endDate: '',
     adFee: 0,
     dailyImpressionLimit: 0,
+    regionId: '',
   });
   const [editingAdId, setEditingAdId] = useState<string | null>(null);
   const [adError, setAdError] = useState('');
@@ -1404,6 +1417,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
               placeholder={lang === 'ar' ? 'قيمة الخصم (ج.م)' : 'Discount amount (EGP)'}
               className="flex-1 px-2 py-1.5 text-[10px] border border-slate-200 rounded-lg text-center font-bold"
             />
+            <input
+              type="number"
+              min="1"
+              value={promoUsageLimit}
+              onChange={(e) => setPromoUsageLimit(e.target.value === '' ? '' : Number(e.target.value))}
+              placeholder={lang === 'ar' ? 'عدد الاستخدامات (اتركه فارغ لغير محدود)' : 'Usage limit (empty = unlimited)'}
+              className="w-[130px] px-2 py-1.5 text-[10px] border border-slate-200 rounded-lg text-center font-bold"
+            />
             <select
               value={selectedRiderForPromo}
               onChange={(e) => setSelectedRiderForPromo(e.target.value)}
@@ -1440,12 +1461,26 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         {lang === 'ar' ? 'لراكب محدد' : 'Rider-specific'}
                       </p>
                     )}
+                    {code.usageLimit !== undefined && code.usageLimit !== null && (
+                      <p className="text-[8px] text-amber-600">
+                        {lang === 'ar' ? `استخدامات: ${code.usageCount || 0}/${code.usageLimit}` : `Uses: ${code.usageCount || 0}/${code.usageLimit}`}
+                      </p>
+                    )}
                   </div>
-                  <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold ${
-                    code.used ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
-                  }`}>
-                    {code.used ? (lang === 'ar' ? 'مستخدم' : 'Used') : (lang === 'ar' ? 'متاح' : 'Available')}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold ${
+                      code.used ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
+                    }`}>
+                      {code.used ? (lang === 'ar' ? 'مستخدم' : 'Used') : (lang === 'ar' ? 'متاح' : 'Available')}
+                    </span>
+                    <button
+                      onClick={() => handleDeletePromoCode(code.id)}
+                      className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-all cursor-pointer"
+                      title={lang === 'ar' ? 'حذف الكود' : 'Delete code'}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))
             )}
@@ -3203,6 +3238,20 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   </div>
 
                   <div className="space-y-1">
+                    <label className="text-[9px] font-bold text-slate-600">{lang === 'ar' ? 'المنطقة المستهدفة (اختياري)' : 'Target Region (optional)'}</label>
+                    <select
+                      value={adForm.regionId}
+                      onChange={(e) => setAdForm({ ...adForm, regionId: e.target.value })}
+                      className="w-full text-[10px] bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700 focus:outline-none focus:border-teal-500"
+                    >
+                      <option value="">{lang === 'ar' ? 'كل المناطق' : 'All regions'}</option>
+                      {regions.map(r => (
+                        <option key={r.id} value={r.id}>{lang === 'ar' ? r.nameAr : r.nameEn}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
                     <label className="text-[9px] font-bold text-slate-600">{lang === 'ar' ? 'أولوية الظهور (1 - 5)' : 'Priority (1 - 5)'}</label>
                     <select
                       value={adForm.priority}
@@ -3256,36 +3305,38 @@ export const AdminView: React.FC<AdminViewProps> = ({
                          return;
                        }
                       setAdError('');
-                      const saved = await saveAd({
-                        id: editingAdId || undefined,
-                        storeName: adForm.storeName.trim(),
-                        offerText: adForm.offerText.trim(),
-                        imageUrl: adForm.imageUrl.trim(),
-                        phoneNumber: adForm.phoneNumber.trim(),
-                        whatsapp: adForm.whatsapp.trim() || undefined,
-                        placement: adForm.placement,
-                        priority: adForm.priority,
-                        isActive: adForm.isActive,
-                        startDate: adForm.startDate || undefined,
-                        endDate: adForm.endDate || undefined,
-                        adFee: adForm.adFee || 0,
-                        dailyImpressionLimit: adForm.dailyImpressionLimit || 0,
-                      });
-                      if (saved) {
-                        setAdForm({
-                          storeName: '',
-                          offerText: '',
-                          imageUrl: '',
-                          phoneNumber: '',
-                          whatsapp: '',
-                          placement: 'all',
-                          priority: 1,
-                          isActive: true,
-                          startDate: '',
-                          endDate: '',
-                          adFee: 0,
-                          dailyImpressionLimit: 0,
-                        });
+                       const saved = await saveAd({
+                         id: editingAdId || undefined,
+                         storeName: adForm.storeName.trim(),
+                         offerText: adForm.offerText.trim(),
+                         imageUrl: adForm.imageUrl.trim(),
+                         phoneNumber: adForm.phoneNumber.trim(),
+                         whatsapp: adForm.whatsapp.trim() || undefined,
+                         placement: adForm.placement,
+                         priority: adForm.priority,
+                         isActive: adForm.isActive,
+                         startDate: adForm.startDate || undefined,
+                         endDate: adForm.endDate || undefined,
+                         adFee: adForm.adFee || 0,
+                         dailyImpressionLimit: adForm.dailyImpressionLimit || 0,
+                         regionId: adForm.regionId || undefined,
+                       });
+                       if (saved) {
+                          setAdForm({
+                            storeName: '',
+                            offerText: '',
+                            imageUrl: '',
+                            phoneNumber: '',
+                            whatsapp: '',
+                            placement: 'all',
+                            priority: 1,
+                            isActive: true,
+                            startDate: '',
+                            endDate: '',
+                            adFee: 0,
+                            dailyImpressionLimit: 0,
+                            regionId: '',
+                          });
                         setEditingAdId(null);
                         setAds(await fetchAds());
                       } else {
@@ -3301,20 +3352,21 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       type="button"
                       onClick={() => {
                         setEditingAdId(null);
-                        setAdForm({
-                          storeName: '',
-                          offerText: '',
-                          imageUrl: '',
-                          phoneNumber: '',
-                          whatsapp: '',
-                          placement: 'all',
-                          priority: 1,
-                          isActive: true,
-                          startDate: '',
-                          endDate: '',
-                          adFee: 0,
-                          dailyImpressionLimit: 0,
-                        });
+                         setAdForm({
+                           storeName: '',
+                           offerText: '',
+                           imageUrl: '',
+                           phoneNumber: '',
+                           whatsapp: '',
+                           placement: 'all',
+                           priority: 1,
+                           isActive: true,
+                           startDate: '',
+                           endDate: '',
+                           adFee: 0,
+                           dailyImpressionLimit: 0,
+                           regionId: '',
+                         });
                         setAdError('');
                       }}
                       className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-xl transition-all cursor-pointer"
@@ -3367,6 +3419,15 @@ export const AdminView: React.FC<AdminViewProps> = ({
                               <span className="bg-slate-100 px-1.5 py-0.5 rounded font-bold text-slate-600">
                                 {ad.placement === 'all' ? (lang === 'ar' ? 'كل الأماكن' : 'All') : ad.placement === 'home' ? (lang === 'ar' ? 'الرئيسية' : 'Home') : (lang === 'ar' ? 'الانتظار' : 'Wait')}
                               </span>
+                              {ad.regionId ? (
+                                <span className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 rounded font-bold">
+                                  📍 {regions.find(r => r.id === ad.regionId) ? (lang === 'ar' ? regions.find(r => r.id === ad.regionId)!.nameAr : regions.find(r => r.id === ad.regionId)!.nameEn) : ad.regionId}
+                                </span>
+                              ) : (
+                                <span className="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold">
+                                  🌍 {lang === 'ar' ? 'كل المناطق' : 'Global'}
+                                </span>
+                              )}
                               <span className="bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5" title="عدد مرات الظهور للعملاء">
                                 👁️ {ad.impressions || 0} {lang === 'ar' ? 'ظهور' : 'views'}
                               </span>
@@ -3411,6 +3472,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                   endDate: ad.endDate || '',
                                   adFee: ad.adFee || 0,
                                   dailyImpressionLimit: ad.dailyImpressionLimit || 0,
+                                  regionId: ad.regionId || '',
                                 });
                                 setAdError('');
                               }}

@@ -76,6 +76,12 @@ export const RiderView: React.FC<RiderViewProps> = ({
   
   const [showMathExplanation, setShowMathExplanation] = useState(false);
   const [chatText, setChatText] = useState('');
+
+  const getRegionFilteredAds = (): Ad[] => {
+    if (!ads || ads.length === 0) return [];
+    if (!selectedPickupRegion) return ads;
+    return ads.filter(ad => !ad.regionId || ad.regionId === selectedPickupRegion);
+  };
   
   // Rider Trip History (paginated + filtered)
   const [myTrips, setMyTrips] = useState<Trip[]>([]);
@@ -812,7 +818,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
                   </button>
                 </div>
                 <div className="pt-1">
-                  <AdBanner ads={ads || []} variant="waiting" lang={lang} lowDataMode={lowDataMode} />
+                  <AdBanner ads={getRegionFilteredAds()} variant="waiting" lang={lang} lowDataMode={lowDataMode} />
                 </div>
               </>
             )}
@@ -1108,7 +1114,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
         {(!activeTrip || activeTrip.riderId !== rider.id) && (
           <div className="space-y-4">
             {/* Store Banner Advertisement */}
-            <AdBanner ads={ads || []} variant="home" lang={lang} lowDataMode={lowDataMode} />
+            <AdBanner ads={getRegionFilteredAds()} variant="home" lang={lang} lowDataMode={lowDataMode} />
 
             {noAvailableDrivers && (
               <div className="bg-rose-50 border border-rose-200 rounded-2xl p-3 space-y-2 text-center animate-fade-in">
