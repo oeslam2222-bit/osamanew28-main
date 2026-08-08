@@ -1,4 +1,5 @@
-const VAPID_PUBLIC_KEY = import.meta.env.VITE_WEB_PUSH_VAPID_PUBLIC_KEY || '';
+const FALLBACK_VAPID_PUBLIC_KEY = 'BK9sPXpbo7aiQFmkupvZS_5Y8oMlFYqlnWDorLlgmbJRbSbqfgllFLDr3kQmkK9KbYWskORGLwMH5mSFb4UnvI0';
+const VAPID_PUBLIC_KEY = import.meta.env.VITE_WEB_PUSH_VAPID_PUBLIC_KEY || FALLBACK_VAPID_PUBLIC_KEY;
 
 export const isWebPushSupported = (): boolean => {
   return (
