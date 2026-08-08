@@ -2060,3 +2060,88 @@ export const sendNewTripNotification = async (params: {
     return { sent: 0, results: [] };
   }
 };
+
+// Push subscriptions helpers
+export const savePushSubscription = async (driverId: string, subscription: any, userAgent?: string): Promise<boolean> => {
+  try {
+    const { error } = await supabase.from('ezz_push_subscriptions').upsert(
+      {
+        driver_id: driverId,
+        endpoint: subscription.endpoint,
+        p256dh: subscription.keys?.p256dh || subscription.p256dh || '',
+        auth: subscription.keys?.auth || subscription.auth || '',
+        user_agent: userAgent || (typeof navigator !== 'undefined' ? navigator.userAgent : null),
+      },
+      { onConflict: 'endpoint' }
+    );
+    if (error) throw error;
+    return true;
+  } catch (err: any) {
+    console.warn('savePushSubscription failed:', err.message);
+    return false;
+  }
+};
+
+export const removePushSubscription = async (endpoint: string): Promise<boolean> => {
+  try {
+    const { error } = await supabase.from('ezz_push_subscriptions').delete().eq('endpoint', endpoint);
+    if (error) throw error;
+    return true;
+  } catch (err: any) {
+    console.warn('removePushSubscription failed:', err.message);
+    return false;
+  }
+};
+
+export const getDriverPushSubscriptions = async (driverId: string): Promise<any[]> => {
+  try {
+    const { data, error } = await supabase.from('ezz_push_subscriptions').select('*').eq('driver_id', driverId);
+    if (error) throw error;
+    return (data || []) as any[];
+  } catch (err: any) {
+    console.warn('getDriverPushSubscriptions failed:', err.message);
+    return [];
+  }
+};
+
+export const sendWebPushToDriver = async (driverId: string, payload: any): Promise<{ sent: number; results: any[] }> => {
+  try {
+    const subscriptions = await getDriverPushSubscriptions(driverId);
+    if (!subscriptions.length) return { sent: 0, results: [] };
+
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    const endpoint = `${baseUrl}/api/notify-driver`;
+
+    const results = await Promise.allSettled(
+      subscriptions.map((sub) =>
+        fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            subscription: {
+              endpoint: sub.endpoint,
+              keys: {
+                p256dh: sub.p256dh,
+                auth: sub.auth,
+              },
+            },
+            payload,
+          }),
+        }).then(async (response) => {
+          if (!response.ok) {
+            const text = await response.text();
+            throw new Error(`HTTP ${response.status}: ${text}`);
+          }
+          return response.json();
+        })
+      )
+    );
+
+    const settled = results.map((r) => (r.status === 'fulfilled' ? r.value : { status: 'rejected', reason: r.reason }));
+    return { sent: settled.filter((r) => r && r.success).length, results: settled };
+  } catch (err: any) {
+    console.warn('sendWebPushToDriver failed:', err.message);
+    return { sent: 0, results: [] };
+  }
+};
+

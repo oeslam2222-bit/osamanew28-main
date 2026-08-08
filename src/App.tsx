@@ -3,6 +3,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import NetworkStatusBar from './components/NetworkStatusBar';
 import InitializingOverlay from './components/InitializingOverlay';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
+import { useWebPush } from './hooks/useWebPush';
 import { Location, Driver, Trip, Rider, SystemStats, TripStatus, Region, Ad } from './types';
 import { RiderView } from './components/RiderView';
 import { DriverView } from './components/DriverView';
@@ -641,6 +642,8 @@ export default function App() {
   const [driverIsLoggedIn, setDriverIsLoggedIn] = useState<boolean>(() => {
     return localStorage.getItem('ezz_driver_logged_in') === 'true';
   });
+
+  const { sendPushToDriver } = useWebPush(driverIsLoggedIn ? selectedDriverId : undefined, supabaseConnected);
 
   // Admin login states (persisted locally)
   const [adminIsLoggedIn, setAdminIsLoggedIn] = useState<boolean>(() => {
@@ -2345,6 +2348,27 @@ export default function App() {
                 fare,
                 distance,
               }).catch(() => {});
+
+              offeredDriverIds.forEach((driverId) => {
+                const drv = eligibleDriversByType.find((d) => d.id === driverId);
+                sendPushToDriver(driverId, {
+                  tripId: newTrip.id,
+                  title: lang === 'ar' ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!',
+                  body: lang === 'ar'
+                    ? `من ${pLoc.nameAr} إلى ${dLoc.nameAr} | ${fare} ج.م`
+                    : `${pLoc.nameEn} → ${dLoc.nameEn} | ${fare} EGP`,
+                  url: '/?screen=DRIVER',
+                  tag: `ride-request-${newTrip.id}`,
+                  data: {
+                    tripId: newTrip.id,
+                    driverId,
+                    pickupLat: pLoc.lat,
+                    pickupLng: pLoc.lng,
+                    dropoffLat: dLoc.lat,
+                    dropoffLng: dLoc.lng,
+                  },
+                }).catch(() => {});
+              });
             }
           });
 
