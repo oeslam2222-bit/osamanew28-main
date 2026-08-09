@@ -18,6 +18,7 @@ DROP POLICY IF EXISTS "anon can delete drivers" ON ezz_drivers;
 DROP POLICY IF EXISTS "driver_update_own" ON ezz_drivers;
 DROP POLICY IF EXISTS "admin_full_drivers" ON ezz_drivers;
 DROP POLICY IF EXISTS "admin_read_admin" ON ezz_admin;
+DROP POLICY IF EXISTS "ezz_admin_rw_by_role" ON ezz_admin;
 
 -- Drivers: allow read/write when app.current_role is set to DRIVER or ADMIN
 CREATE POLICY "ezz_drivers_rw_by_role" ON ezz_drivers
