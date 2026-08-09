@@ -46,7 +46,8 @@ import {
   fetchAds,
   fetchActiveAdsForPlacement,
   sendNewTripNotification,
-  saveRiderPreferences
+  saveRiderPreferences,
+  fetchAllActiveTrips
 } from './supabaseService';
 import {
   requestNotificationPermission,
@@ -183,6 +184,7 @@ export default function App() {
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [tripsHistory, setTripsHistory] = useState<Trip[]>([]);
   const [ads, setAds] = useState<Ad[]>([]);
+  const [liveTrips, setLiveTrips] = useState<Trip[]>([]);
   const [stats, setStats] = useState<SystemStats>({
     commissionRate: 15,
     totalRevenue: 0,
@@ -1449,19 +1451,23 @@ export default function App() {
                 if (ldPending) return ldPending;
                 return rd;
               }
-              const ld = localDrivers.find((l) => l.id === rd.id);
-              if (ld) {
-                const isActiveTripDriver = currentTrip && currentTrip.driverId === rd.id && (currentTrip.status === 'ACCEPTED' || currentTrip.status === 'STARTED');
-                const isStale = rd.lastSeen ? (now - new Date(rd.lastSeen).getTime() > staleThreshold) : false;
-                return {
-                  ...rd,
-                  currentX: isActiveTripDriver ? ld.currentX : rd.currentX,
-                  currentY: isActiveTripDriver ? ld.currentY : rd.currentY,
-                  isOnline: isStale ? false : rd.isOnline,
-                  status: isStale ? 'AVAILABLE' : (rd.isOnline ? rd.status : 'OFFLINE'),
-                };
-              }
-              return rd;
+               const ld = localDrivers.find((l) => l.id === rd.id);
+               if (ld) {
+                 const isActiveTripDriver = currentTrip && currentTrip.driverId === rd.id && (currentTrip.status === 'ACCEPTED' || currentTrip.status === 'STARTED');
+                 const isStale = rd.lastSeen ? (now - new Date(rd.lastSeen).getTime() > staleThreshold) : false;
+                 const merged = {
+                   ...rd,
+                   currentX: isActiveTripDriver ? ld.currentX : rd.currentX,
+                   currentY: isActiveTripDriver ? ld.currentY : rd.currentY,
+                   isOnline: isStale ? false : rd.isOnline,
+                   status: isStale ? 'AVAILABLE' : (rd.isOnline ? rd.status : 'OFFLINE'),
+                 };
+                 if (ld.approvalStatus !== rd.approvalStatus) merged.approvalStatus = ld.approvalStatus;
+                 if (ld.totalCommissionPaid !== rd.totalCommissionPaid) merged.totalCommissionPaid = ld.totalCommissionPaid;
+                 if (JSON.stringify(ld.serviceAreas) !== JSON.stringify(rd.serviceAreas)) merged.serviceAreas = ld.serviceAreas;
+                 return merged;
+               }
+               return rd;
             });
           });
         }
@@ -1472,6 +1478,27 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [supabaseConnected, dataSaverMode]);
+
+  // 1e. Polling for live/active trips (admin dashboard)
+  useEffect(() => {
+    if (!supabaseConnected || !adminIsLoggedIn) return;
+
+    const pollInterval = 5000;
+
+    const interval = setInterval(async () => {
+      if (!isMountedRef.current) return;
+      try {
+        const trips = await fetchAllActiveTrips();
+        if (isMountedRef.current) {
+          setLiveTrips(trips);
+        }
+      } catch (err) {
+        console.warn('Live trips polling error:', err);
+      }
+    }, pollInterval);
+
+    return () => clearInterval(interval);
+  }, [supabaseConnected, adminIsLoggedIn]);
 
   // Heartbeat: update driver lastSeen every 10s so stale drivers can be detected quickly
   useEffect(() => {
@@ -1959,7 +1986,9 @@ export default function App() {
         d.totalEarnings !== last.totalEarnings ||
         d.totalCommissionPaid !== last.totalCommissionPaid ||
         d.totalTrips !== last.totalTrips ||
-        d.rating !== last.rating
+        d.rating !== last.rating ||
+        d.approvalStatus !== last.approvalStatus ||
+        JSON.stringify(d.serviceAreas || []) !== JSON.stringify(last.serviceAreas || [])
       );
     });
     if (changedDrivers.length === 0) return;
@@ -1974,6 +2003,8 @@ export default function App() {
         totalCommissionPaid: d.totalCommissionPaid,
         totalTrips: d.totalTrips,
         rating: d.rating,
+        approvalStatus: d.approvalStatus,
+        serviceAreas: d.serviceAreas,
       };
     });
   };
@@ -4779,6 +4810,8 @@ if (activeTrip) {
                         regions={regions}
                         riders={registeredRiders}
                         visitorCount={visitorCount}
+                        liveTrips={liveTrips}
+                        totalUsers={drivers.length + registeredRiders.length}
                         onUpdateCommissionRate={handleUpdateCommissionRate}
                         onUpdatePricingStats={handleUpdatePricingStats}
                         onSavePricingStats={handleSavePricingStats}

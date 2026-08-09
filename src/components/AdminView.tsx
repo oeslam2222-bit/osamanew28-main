@@ -14,6 +14,8 @@ interface AdminViewProps {
   regions: Region[];
   riders: Rider[];
   visitorCount: number;
+  liveTrips: Trip[];
+  totalUsers: number;
   onUpdateCommissionRate: (rate: number) => void;
   onUpdatePricingStats: (updated: Partial<SystemStats>) => void;
   onSavePricingStats: (stats: SystemStats) => void;
@@ -43,6 +45,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
   regions,
   riders,
   visitorCount,
+  liveTrips,
+  totalUsers,
   onUpdateCommissionRate,
   onUpdatePricingStats,
   onSavePricingStats,
@@ -244,9 +248,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   const completedCount = adminTrips.filter(t => t.status === 'COMPLETED').length;
   const cancelledCount = adminTrips.filter(t => t.status === 'CANCELLED').length;
-  const totalRides = completedCount + cancelledCount;
-  const successRate = totalRides > 0 ? Math.round((completedCount / totalRides) * 100) : 80;
-  const cancelRate = totalRides > 0 ? Math.round((cancelledCount / totalRides) * 100) : 20;
+  const totalRides = adminTrips.length;
+  const successRate = totalRides > 0 ? Math.round((completedCount / totalRides) * 100) : 0;
+  const cancelRate = totalRides > 0 ? Math.round((cancelledCount / totalRides) * 100) : 0;
   const onlineDrivers = drivers.filter(d => d.isOnline).length;
   const approvedDrivers = drivers.filter(d => d.approvalStatus === 'APPROVED').length;
   const offlineDrivers = drivers.filter(d => !d.isOnline).length;
@@ -259,8 +263,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [riderStatusFilter, setRiderStatusFilter] = useState<'all' | 'ACTIVE' | 'FROZEN' | 'BLOCKED' | 'REJECTED'>('all');
   const [riderPeriodFilter, setRiderPeriodFilter] = useState<'all' | 'week' | 'month' | '30days'>('all');
   const [selectedRiderForDetails, setSelectedRiderForDetails] = useState<Rider | null>(null);
-  const [riderDetailTrips, setRiderDetailTrips] = useState<Trip[]>([]);
-  const [isLoadingRiderTrips, setIsLoadingRiderTrips] = useState(false);
   const [promoDiscount, setPromoDiscount] = useState(5);
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
   const [selectedRiderForPromo, setSelectedRiderForPromo] = useState('');
@@ -271,9 +273,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCountryFilter, setSelectedCountryFilter] = useState<'all' | 'مصر' | 'المملكة العربية السعودية'>('all');
-  const [customImportText, setCustomImportText] = useState('');
-  const [importError, setImportError] = useState('');
-  const [importSuccess, setImportSuccess] = useState(false);
   const [selectedPreviewPhoto, setSelectedPreviewPhoto] = useState<{ src: string; title: string } | null>(null);
 
   // Regions management state
@@ -289,6 +288,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [adFilterPlacement, setAdFilterPlacement] = useState<'all' | 'home' | 'waiting'>('all');
   const [adSortBy, setAdSortBy] = useState<'newest' | 'views' | 'interactions' | 'revenue'>('newest');
   const [selectedAdId, setSelectedAdId] = useState<string | 'all'>('all');
+  const [adImageError, setAdImageError] = useState<Record<string, boolean>>({});
   const [adForm, setAdForm] = useState({
     storeName: '',
     offerText: '',
@@ -661,8 +661,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
     };
     onUpdateLocations([newLoc, ...locations]);
     setOsmResults(prev => prev.filter(r => r.display_name !== item.display_name));
-    setImportSuccess(true);
-    setTimeout(() => setImportSuccess(false), 3000);
   };
 
   // Filtered locations display (limit to 10 for render performance, with a counter)
@@ -675,91 +673,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
     if (selectedCountryFilter === 'all') return matchesSearch;
     return matchesSearch && loc.country === selectedCountryFilter;
   });
-
-  // Action: Import custom locations via copy-paste
-  const handleCustomImport = () => {
-    setImportError('');
-    setImportSuccess(false);
-
-    if (!customImportText.trim()) {
-      setImportError(lang === 'ar' ? 'الرجاء إدخال البيانات أولاً' : 'Please enter data first');
-      return;
-    }
-
-    try {
-      // Check if JSON format
-      if (customImportText.trim().startsWith('[')) {
-        const parsed = JSON.parse(customImportText);
-        if (Array.isArray(parsed)) {
-          const validated: Location[] = parsed.map((item, idx) => {
-            if (!item.nameAr || !item.lat || !item.lng) {
-              throw new Error(`Item at index ${idx} is missing nameAr, lat, or lng`);
-            }
-            return {
-              id: item.id || `custom_${Date.now()}_${idx}`,
-              nameAr: item.nameAr,
-              nameEn: item.nameEn || item.nameAr,
-              lat: Number(item.lat),
-              lng: Number(item.lng),
-              city: item.city || (lang === 'ar' ? 'مخصص' : 'Custom'),
-              country: item.country || (lang === 'ar' ? 'مصر' : 'Egypt'),
-              x: item.x || Math.round(30 + Math.random() * 40),
-              y: item.y || Math.round(30 + Math.random() * 40),
-            };
-          });
-
-          onUpdateLocations([...validated, ...locations]);
-          setImportSuccess(true);
-          setCustomImportText('');
-        } else {
-          setImportError(lang === 'ar' ? 'يجب أن يكون الملف مصفوفة من المواقع' : 'JSON must be an array of locations');
-        }
-      } else {
-        // Parse simple CSV/text lines format: NameAr,Lat,Lng,City,Country
-        const lines = customImportText.split('\n').filter(line => line.trim());
-        const validated: Location[] = [];
-
-        lines.forEach((line, idx) => {
-          const parts = line.split(',');
-          if (parts.length >= 3) {
-            const nameAr = parts[0].trim();
-            const lat = parseFloat(parts[1].trim());
-            const lng = parseFloat(parts[2].trim());
-            const city = parts[3] ? parts[3].trim() : (lang === 'ar' ? 'مدينة مخصصة' : 'Custom City');
-            const country = parts[4] ? parts[4].trim() : (lang === 'ar' ? 'مصر' : 'Egypt');
-
-            if (!isNaN(lat) && !isNaN(lng)) {
-              validated.push({
-                id: `csv_${Date.now()}_${idx}`,
-                nameAr,
-                nameEn: nameAr,
-                lat,
-                lng,
-                city,
-                country,
-                x: Math.round(30 + Math.random() * 40),
-                y: Math.round(30 + Math.random() * 40),
-              });
-            }
-          }
-        });
-
-        if (validated.length > 0) {
-          onUpdateLocations([...validated, ...locations]);
-          setImportSuccess(true);
-          setCustomImportText('');
-        } else {
-          setImportError(
-            lang === 'ar'
-              ? 'صيغة خاطئة! يرجى استخدام الصيغة: الاسم,خط العرض,خط الطول'
-              : 'Invalid format! Please use: Name,Latitude,Longitude'
-          );
-        }
-      }
-    } catch (e: any) {
-      setImportError(e.message || 'Error parsing locations');
-    }
-  };
 
   const handleClearAllLocations = () => {
     if (confirm(lang === 'ar' ? 'هل أنت متأكد من مسح جميع النقاط الحالية؟' : 'Are you sure you want to clear all locations?')) {
@@ -891,6 +804,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           setRegionNameError(lang === 'ar' ? 'يرجى كتابة اسم المنطقة بالعربية والإنجليزية' : 'Please enter region name in both languages');
                           return;
                         }
+                        const regionNameForToast = newRegionNameAr.trim();
                         const newRegion: Region = {
                           id: `region_${Date.now()}`,
                           nameAr: newRegionNameAr.trim(),
@@ -908,7 +822,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         setRegionNameError('');
                         triggerToast(
                           lang === 'ar' ? 'تمت الإضافة' : 'Added',
-                          lang === 'ar' ? `تمت إضافة منطقة "${newRegionNameAr}" بنجاح` : `Region "${newRegionNameAr}" added successfully`,
+                          lang === 'ar' ? `تمت إضافة منطقة "${regionNameForToast}" بنجاح` : `Region "${regionNameForToast}" added successfully`,
                           'success'
                         );
                       }}
@@ -974,6 +888,40 @@ export const AdminView: React.FC<AdminViewProps> = ({
         {/* TAB 1: OVERVIEW & LOCATIONS */}
         {activeTab === 'overview' && (
           <div className="space-y-4 animate-fade-in">
+            {/* Live Stats Card */}
+            <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white p-4 rounded-2xl shadow-md border border-slate-500/20 relative overflow-hidden">
+              <div className="absolute right-0 bottom-0 translate-x-4 translate-y-4 opacity-10">
+                <Globe className="w-36 h-36" />
+              </div>
+              <div className="flex justify-between items-start relative z-10">
+                <div>
+                  <span className="px-2 py-0.5 text-[8px] font-extrabold bg-emerald-500/30 text-emerald-200 rounded-full border border-emerald-500/30">
+                    {lang === 'ar' ? '📡 مباشر الآن' : '📡 Live Now'}
+                  </span>
+                  <p className="text-[10px] text-slate-300 font-bold mt-1.5">
+                    {lang === 'ar' ? 'رحلات نشطة وحالة السائقين' : 'Active trips & driver status'}
+                  </p>
+                  <div className="mt-2 flex gap-3">
+                    <div>
+                      <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'الرحلات اللايف' : 'Live Trips'}</p>
+                      <p className="text-sm font-black text-white">{liveTrips.length}</p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'سائقين أونلاين' : 'Online Drivers'}</p>
+                      <p className="text-sm font-black text-emerald-300">{drivers.filter(d => d.isOnline).length}</p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'إجمالي المستخدمين' : 'Total Users'}</p>
+                      <p className="text-sm font-black text-amber-300">{totalUsers}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-2.5 bg-white/10 rounded-xl">
+                  <BarChart2 className="w-5 h-5 text-emerald-400" />
+                </div>
+              </div>
+            </div>
+
             {/* General Settings Card */}
             <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
@@ -3054,7 +3002,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   <div className="bg-gradient-to-br from-slate-900 via-teal-950 to-slate-900 border-2 border-teal-500/30 text-white rounded-2xl p-4 shadow-xl space-y-3 animate-in fade-in duration-300">
                     <div className="flex items-center justify-between border-b border-white/10 pb-2">
                       <div className="flex items-center gap-3">
-                        <img src={selectedAdObj.imageUrl} alt={selectedAdObj.storeName} className="w-12 h-12 rounded-xl object-cover border border-white/20 bg-white/10" />
+                        {adImageError[selectedAdObj.id] ? (
+                          <div className="w-12 h-12 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-white font-black text-lg">
+                            {selectedAdObj.storeName.charAt(0)}
+                          </div>
+                        ) : (
+                          <img src={selectedAdObj.imageUrl} alt={selectedAdObj.storeName} className="w-12 h-12 rounded-xl object-cover border border-white/20 bg-white/10" onError={() => setAdImageError(prev => ({ ...prev, [selectedAdObj.id]: true }))} />
+                        )}
                         <div>
                           <div className="flex items-center gap-2">
                             <h3 className="text-sm font-black text-white">{selectedAdObj.storeName}</h3>
@@ -3184,7 +3138,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     </div>
                     {adForm.imageUrl && (
                       <div className="flex items-center gap-2 mt-2 pt-1 border-t border-slate-200">
-                        <img src={adForm.imageUrl} alt="preview" className="w-10 h-10 object-cover rounded-lg bg-white border border-slate-200" />
+                        {adImageError['form_preview'] ? (
+                          <div className="w-10 h-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 font-black text-xs">
+                            !
+                          </div>
+                        ) : (
+                          <img src={adForm.imageUrl} alt="preview" className="w-10 h-10 object-cover rounded-lg bg-white border border-slate-200" onError={() => setAdImageError(prev => ({ ...prev, form_preview: true }))} />
+                        )}
                         <span className="text-[8px] text-slate-500">{lang === 'ar' ? 'معاينة الصورة المضغوطة' : 'Compressed image preview'}</span>
                       </div>
                     )}
@@ -3401,7 +3361,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         }`}
                       >
                         <div className="flex items-center gap-3">
-                          <img src={ad.imageUrl} alt={ad.storeName} className="w-14 h-14 rounded-xl object-cover bg-slate-100 shrink-0 border border-slate-100 shadow-2xs" />
+                          {adImageError[ad.id] ? (
+                            <div className="w-14 h-14 rounded-xl bg-slate-100 border border-slate-100 shrink-0 flex items-center justify-center text-slate-400 font-black text-lg">
+                              {ad.storeName.charAt(0)}
+                            </div>
+                          ) : (
+                            <img src={ad.imageUrl} alt={ad.storeName} className="w-14 h-14 rounded-xl object-cover bg-slate-100 shrink-0 border border-slate-100 shadow-2xs" onError={() => setAdImageError(prev => ({ ...prev, [ad.id]: true }))} />
+                          )}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 justify-end">
                               <h4 className="text-xs font-black text-slate-900 truncate">{ad.storeName}</h4>

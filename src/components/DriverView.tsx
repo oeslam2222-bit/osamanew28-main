@@ -266,12 +266,12 @@ export const DriverView: React.FC<DriverViewProps> = ({
     (activeTrip.driverId === currentDriver.id || activeTrip.offeredDriverIds?.includes(currentDriver.id)) &&
     activeTrip.status === 'SEARCHING';
 
-  React.useEffect(() => {
-    console.log('[DriverView] activeTrip:', activeTrip?.id || 'null', 'status:', activeTrip?.status || 'null',
-      'currentDriverId:', currentDriver?.id || 'null',
-      'offeredDriverIds:', activeTrip?.offeredDriverIds,
-      'isEligibleForRequest:', isEligibleForRequest);
-  }, [activeTrip?.id, activeTrip?.status, activeTrip?.offeredDriverIds, currentDriver?.id]);
+   useEffect(() => {
+     console.log('[DriverView] activeTrip:', activeTrip?.id || 'null', 'status:', activeTrip?.status || 'null',
+       'currentDriverId:', currentDriver?.id || 'null',
+       'offeredDriverIds:', activeTrip?.offeredDriverIds,
+       'isEligibleForRequest:', isEligibleForRequest);
+   }, [activeTrip?.id, activeTrip?.status, activeTrip?.offeredDriverIds, currentDriver?.id]);
 
   const activeTripChatMessages = activeTrip && Array.isArray(activeTrip.chatMessages)
     ? activeTrip.chatMessages.filter((msg) => msg && typeof msg.id === 'string')
@@ -424,8 +424,12 @@ export const DriverView: React.FC<DriverViewProps> = ({
         <div className="flex items-center justify-between gap-2">
           {/* Driver Avatar & Details */}
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 bg-white/20 rounded-full flex items-center justify-center text-sm font-black ring-1 ring-white/30 shrink-0">
-              <span className="select-none">{(currentDriver.name && currentDriver.name.charAt(0)) || 'س'}</span>
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-sm font-black ring-1 ring-white/30 shrink-0 overflow-hidden bg-white/20">
+              {currentDriver.personalPhoto ? (
+                <img src={currentDriver.personalPhoto} alt={currentDriver.name} className="w-full h-full object-cover" />
+              ) : (
+                <span className="select-none">{(currentDriver.name && currentDriver.name.charAt(0)) || 'س'}</span>
+              )}
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
@@ -610,6 +614,24 @@ export const DriverView: React.FC<DriverViewProps> = ({
               <span className="text-sm font-black text-slate-800">
                 {activeTrip.fare} {lang === 'ar' ? 'ج.م' : 'EGP'}
               </span>
+            </div>
+
+            {/* Driver identity block */}
+            <div className="bg-white border border-emerald-200/60 rounded-xl p-2.5 flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-100 shrink-0">
+                {currentDriver.personalPhoto ? (
+                  <img src={currentDriver.personalPhoto} alt={currentDriver.name} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-sm font-black text-slate-500">
+                    {(currentDriver.name && currentDriver.name.charAt(0)) || 'س'}
+                  </div>
+                )}
+              </div>
+              <div className="text-right flex-1 min-w-0">
+                <p className="text-[10px] text-slate-400">{lang === 'ar' ? 'السائق الحالي' : 'Current Driver'}</p>
+                <p className="text-xs font-black text-slate-800 truncate">{currentDriver.name}</p>
+                <p className="text-[9px] text-slate-500 truncate">{currentDriver.carModel} • {currentDriver.carPlate}</p>
+              </div>
             </div>
 
             {/* Generic eligibility notice (no GPS distance) */}

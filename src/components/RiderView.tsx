@@ -621,8 +621,6 @@ export const RiderView: React.FC<RiderViewProps> = ({
         lng: fav.lng,
         city: lang === 'ar' ? 'العياط' : 'El-Ayyat',
         country: 'مصر',
-        x: Math.round(20 + Math.random() * 60),
-        y: Math.round(20 + Math.random() * 60),
       };
       if (onUpdateLocations) {
         onUpdateLocations([newLoc, ...locations]);
@@ -662,8 +660,8 @@ export const RiderView: React.FC<RiderViewProps> = ({
             {rider.name[0]}
           </div>
           <div>
-            <h4 className="text-xs font-semibold text-slate-800">{lang === 'ar' ? rider.name : 'Ezz El-Din'}</h4>
-            <p className="text-[10px] text-slate-400">{lang === 'ar' ? rider.phone : rider.phone}</p>
+            <h4 className="text-xs font-semibold text-slate-800">{rider.name}</h4>
+            <p className="text-[10px] text-slate-400">{rider.phone}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -941,32 +939,39 @@ export const RiderView: React.FC<RiderViewProps> = ({
 
             {/* Driver Details if Assigned */}
             {activeTrip.driverId && (
-              <div className="bg-white border border-slate-100 p-3 rounded-xl flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-10 h-10 rounded-full bg-slate-900 text-amber-400 flex items-center justify-center font-bold shadow">
-                    <Car className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-800">{activeTrip.driverName}</h4>
-                    <p className="text-[9px] text-slate-500 flex flex-wrap items-center gap-1.5 mt-0.5">
-                      <span className="bg-amber-100 text-amber-800 text-[8px] font-extrabold px-1.5 py-0.5 rounded">
-                        {(() => {
-                          const driverType = drivers.find((d) => d.id === activeTrip.driverId)?.vehicleType;
-                          if (driverType === 'CAR') return lang === 'ar' ? 'سيارة 🚖' : 'Car 🚖';
-                          if (driverType === 'MOTORCYCLE') return lang === 'ar' ? 'موتوسيكل 🏍️' : 'Motorcycle 🏍️';
-                          if (driverType === 'TOKTOK') return lang === 'ar' ? 'توكتوك 🛺' : 'TukTuk 🛺';
-                          return lang === 'ar' ? 'تروسيكل 🚲' : 'Tricycle 🚲';
-                        })()}
-                      </span>
-                      <span className="font-bold text-slate-700">
-                        {drivers.find((d) => d.id === activeTrip.driverId)?.vehicleName}
-                      </span>
-                      <span>|</span>
-                      <span className="font-mono text-[9px] font-bold bg-slate-100 px-1 py-0.2 rounded text-slate-700">
-                        {drivers.find((d) => d.id === activeTrip.driverId)?.carPlate}
-                      </span>
-                    </p>
-                  </div>
+              <div className="bg-white border border-slate-100 p-3 rounded-xl flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-100 shrink-0">
+                  {(() => {
+                    const drv = drivers.find(d => d.id === activeTrip.driverId);
+                    return drv?.personalPhoto ? (
+                      <img src={drv.personalPhoto} alt={drv.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-base font-black text-slate-500">
+                        {(drv?.name && drv.name.charAt(0)) || 'س'}
+                      </div>
+                    );
+                  })()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-xs font-bold text-slate-800 truncate">{activeTrip.driverName}</h4>
+                  <p className="text-[9px] text-slate-500 flex flex-wrap items-center gap-1.5 mt-0.5">
+                    <span className="bg-amber-100 text-amber-800 text-[8px] font-extrabold px-1.5 py-0.5 rounded">
+                      {(() => {
+                        const driverType = drivers.find((d) => d.id === activeTrip.driverId)?.vehicleType;
+                        if (driverType === 'CAR') return lang === 'ar' ? 'سيارة 🚖' : 'Car 🚖';
+                        if (driverType === 'MOTORCYCLE') return lang === 'ar' ? 'موتوسيكل 🏍️' : 'Motorcycle 🏍️';
+                        if (driverType === 'TOKTOK') return lang === 'ar' ? 'توكتوك 🛺' : 'TukTuk 🛺';
+                        return lang === 'ar' ? 'تروسيكل 🚲' : 'Tricycle 🚲';
+                      })()}
+                    </span>
+                    <span className="font-bold text-slate-700">
+                      {drivers.find((d) => d.id === activeTrip.driverId)?.vehicleName}
+                    </span>
+                    <span>|</span>
+                    <span className="font-mono text-[9px] font-bold bg-slate-100 px-1 py-0.2 rounded text-slate-700">
+                      {drivers.find((d) => d.id === activeTrip.driverId)?.carPlate}
+                    </span>
+                  </p>
                 </div>
                 <div className="text-right">
                   <div className="flex items-center gap-0.5 text-amber-500 justify-end">

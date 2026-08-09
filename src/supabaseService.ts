@@ -1080,6 +1080,22 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
   }
 };
 
+// Fetch all active trips (for admin dashboard live tracking)
+export const fetchAllActiveTrips = async (): Promise<Trip[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('ezz_active_trip')
+      .select('*')
+      .in('status', ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'])
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(mapTripFromDB);
+  } catch (err: any) {
+    console.warn('Could not fetch all active trips from Supabase:', err.message);
+    return [];
+  }
+};
+
 // Save Active Trip
 export const saveActiveTrip = async (trip: Trip | null, clearTripId?: string): Promise<boolean> => {
   try {
