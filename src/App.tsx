@@ -3175,17 +3175,29 @@ export default function App() {
   };
 
   const handleSettleDriverCommissions = async (driverId: string) => {
-    setDrivers((prev) => {
-      const target = prev.find((d) => d.id === driverId);
-      if (!target) return prev;
-      const cleared = { ...target, totalCommissionPaid: 0 };
-      if (supabaseConnected) {
-        saveDriver(cleared).catch((err) => {
-          console.warn('[handleSettleDriverCommissions] Failed to save cleared driver:', err);
-        });
+    const driver = drivers.find((d) => d.id === driverId);
+    if (!driver) return;
+    const cleared = { ...driver, totalCommissionPaid: 0 };
+    if (supabaseConnected) {
+      const saved = await saveDriver(cleared);
+      if (saved) {
+        setDrivers((prev) => prev.map((d) => (d.id === driverId ? cleared : d)));
+        lastSyncedDriversRef.current[driverId] = {
+          currentX: cleared.currentX,
+          currentY: cleared.currentY,
+          isOnline: cleared.isOnline,
+          status: cleared.status,
+          totalEarnings: cleared.totalEarnings,
+          totalCommissionPaid: 0,
+          totalTrips: cleared.totalTrips,
+          rating: cleared.rating,
+          approvalStatus: cleared.approvalStatus,
+          serviceAreas: cleared.serviceAreas,
+        };
       }
-      return prev.map((d) => (d.id === driverId ? cleared : d));
-    });
+    } else {
+      setDrivers((prev) => prev.map((d) => (d.id === driverId ? cleared : d)));
+    }
   };
 
   // Handler: Update Regions (admin areas management)
@@ -3194,102 +3206,155 @@ export default function App() {
   };
 
   // Handler: Update Driver Service Areas
-  const handleUpdateServiceAreas = (driverId: string, areas: string[]) => {
-    setDrivers((prev) =>
-      prev.map((d) =>
-        d.id === driverId ? { ...d, serviceAreas: areas } : d
-      )
-    );
+  const handleUpdateServiceAreas = async (driverId: string, areas: string[]) => {
     const driver = drivers.find((d) => d.id === driverId);
-    if (driver && supabaseConnected) {
-      saveDriver({ ...driver, serviceAreas: areas });
+    if (!driver) return;
+    const updated = { ...driver, serviceAreas: areas };
+    if (supabaseConnected) {
+      const saved = await saveDriver(updated);
+      if (saved) {
+        setDrivers((prev) => prev.map((d) => (d.id === driverId ? updated : d)));
+        lastSyncedDriversRef.current[driverId] = {
+          currentX: updated.currentX,
+          currentY: updated.currentY,
+          isOnline: updated.isOnline,
+          status: updated.status,
+          totalEarnings: updated.totalEarnings,
+          totalCommissionPaid: updated.totalCommissionPaid,
+          totalTrips: updated.totalTrips,
+          rating: updated.rating,
+          approvalStatus: updated.approvalStatus,
+          serviceAreas: updated.serviceAreas,
+        };
+      }
+    } else {
+      setDrivers((prev) => prev.map((d) => (d.id === driverId ? updated : d)));
     }
   };
 
   // Account verification workflows called by Administrator
   const handleApproveDriver = async (driverId: string) => {
     const driver = drivers.find(d => d.id === driverId);
-    console.log('Approve driver clicked:', driverId, driver?.approvalStatus, 'supabaseConnected:', supabaseConnected);
-    setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
-    if (driver && supabaseConnected) {
-      const updated = { ...driver, approvalStatus: 'APPROVED' as const };
-      console.log('Saving approved driver to Supabase:', updated.id, updated.approvalStatus);
-      try {
-        const saved = await saveDriver(updated);
-        console.log('saveDriver result:', saved);
-        if (!saved) {
-          triggerToast(
-            lang === 'ar' ? 'خطأ في الحفظ' : 'Save error',
-            lang === 'ar' ? 'فشل حفظ التغيير في قاعدة البيانات' : 'Failed to save changes to database',
-            'warning'
-          );
-        } else {
-          triggerToast(
-            lang === 'ar' ? 'تم القبول بنجاح' : 'Approved successfully',
-            lang === 'ar' ? 'تم تفعيل السائق بنجاح' : 'Driver activated successfully',
-            'success'
-          );
-        }
-      } catch (e) {
-        console.error('Error saving driver approval:', e);
-        triggerToast(
-          lang === 'ar' ? 'خطأ' : 'Error',
-          lang === 'ar' ? 'حدث خطأ أثناء حفظ الموافقة' : 'Error occurred while saving approval',
-          'warning'
-        );
+    if (!driver) return;
+    if (!supabaseConnected) {
+      setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
+      triggerToast(lang === 'ar' ? 'غير متصل' : 'Offline', lang === 'ar' ? 'السجل محفوظ محلياً فقط' : 'Saved locally only', 'warning');
+      return;
+    }
+    const updated = { ...driver, approvalStatus: 'APPROVED' as const };
+    try {
+      const saved = await saveDriver(updated);
+      if (saved) {
+        setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
+        lastSyncedDriversRef.current[driverId] = {
+          approvalStatus: 'APPROVED',
+          currentX: updated.currentX,
+          currentY: updated.currentY,
+          isOnline: updated.isOnline,
+          status: updated.status,
+          totalEarnings: updated.totalEarnings,
+          totalCommissionPaid: updated.totalCommissionPaid,
+          totalTrips: updated.totalTrips,
+          rating: updated.rating,
+          serviceAreas: updated.serviceAreas,
+        };
+        triggerToast(lang === 'ar' ? 'تم القبول بنجاح' : 'Approved successfully', lang === 'ar' ? 'تم تفعيل السائق بنجاح' : 'Driver activated successfully', 'success');
+      } else {
+        triggerToast(lang === 'ar' ? 'خطأ في الحفظ' : 'Save error', lang === 'ar' ? 'فشل حفظ التغيير في قاعدة البيانات' : 'Failed to save changes to database', 'warning');
       }
-    } else if (!supabaseConnected) {
-      console.warn('Supabase not connected - approval saved locally only');
-      triggerToast(
-        lang === 'ar' ? 'غير متصل' : 'Offline',
-        lang === 'ar' ? 'السجل محفوظ محلياً فقط' : 'Saved locally only',
-        'warning'
-      );
+    } catch (e) {
+      console.error('Error saving driver approval:', e);
+      triggerToast(lang === 'ar' ? 'خطأ' : 'Error', lang === 'ar' ? 'حدث خطأ أثناء حفظ الموافقة' : 'Error occurred while saving approval', 'warning');
     }
   };
 
   const handleRejectDriver = async (driverId: string) => {
     const driver = drivers.find(d => d.id === driverId);
-    setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'REJECTED' } : d));
-    if (driver && supabaseConnected) {
-      try {
-        const saved = await saveDriver({ ...driver, approvalStatus: 'REJECTED' as const });
-        if (!saved) {
-          triggerToast(lang === 'ar' ? 'خطأ في الحفظ' : 'Save error', lang === 'ar' ? 'فشل حفظ الرفض' : 'Failed to save rejection', 'warning');
-        }
-      } catch (e) {
-        console.error('Error rejecting driver:', e);
+    if (!driver) return;
+    if (!supabaseConnected) {
+      setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'REJECTED' } : d));
+      return;
+    }
+    try {
+      const updated = { ...driver, approvalStatus: 'REJECTED' as const };
+      const saved = await saveDriver(updated);
+      if (saved) {
+        setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'REJECTED' } : d));
+        lastSyncedDriversRef.current[driverId] = {
+          approvalStatus: 'REJECTED',
+          currentX: updated.currentX,
+          currentY: updated.currentY,
+          isOnline: updated.isOnline,
+          status: updated.status,
+          totalEarnings: updated.totalEarnings,
+          totalCommissionPaid: updated.totalCommissionPaid,
+          totalTrips: updated.totalTrips,
+          rating: updated.rating,
+          serviceAreas: updated.serviceAreas,
+        };
       }
+    } catch (e) {
+      console.error('Error rejecting driver:', e);
     }
   };
 
   const handleFreezeDriver = async (driverId: string) => {
     const driver = drivers.find(d => d.id === driverId);
-    setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'FROZEN', isOnline: false } : d));
-    if (driver && supabaseConnected) {
-      try {
-        const saved = await saveDriver({ ...driver, approvalStatus: 'FROZEN' as const, isOnline: false });
-        if (!saved) {
-          triggerToast(lang === 'ar' ? 'خطأ في الحفظ' : 'Save error', lang === 'ar' ? 'فشل حفظ التجميد' : 'Failed to save freeze', 'warning');
-        }
-      } catch (e) {
-        console.error('Error freezing driver:', e);
+    if (!driver) return;
+    if (!supabaseConnected) {
+      setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'FROZEN', isOnline: false } : d));
+      return;
+    }
+    try {
+      const updated = { ...driver, approvalStatus: 'FROZEN' as const, isOnline: false };
+      const saved = await saveDriver(updated);
+      if (saved) {
+        setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'FROZEN', isOnline: false } : d));
+        lastSyncedDriversRef.current[driverId] = {
+          approvalStatus: 'FROZEN',
+          isOnline: false,
+          currentX: updated.currentX,
+          currentY: updated.currentY,
+          status: updated.status,
+          totalEarnings: updated.totalEarnings,
+          totalCommissionPaid: updated.totalCommissionPaid,
+          totalTrips: updated.totalTrips,
+          rating: updated.rating,
+          serviceAreas: updated.serviceAreas,
+        };
       }
+    } catch (e) {
+      console.error('Error freezing driver:', e);
     }
   };
 
   const handleUnfreezeDriver = async (driverId: string) => {
     const driver = drivers.find(d => d.id === driverId);
-    setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
-    if (driver && supabaseConnected) {
-      try {
-        const saved = await saveDriver({ ...driver, approvalStatus: 'APPROVED' as const });
-        if (!saved) {
-          triggerToast(lang === 'ar' ? 'خطأ في الحفظ' : 'Save error', lang === 'ar' ? 'فشل حفظ إعادة التفعيل' : 'Failed to save unfreeze', 'warning');
-        }
-      } catch (e) {
-        console.error('Error unfreezing driver:', e);
+    if (!driver) return;
+    if (!supabaseConnected) {
+      setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
+      return;
+    }
+    try {
+      const updated = { ...driver, approvalStatus: 'APPROVED' as const };
+      const saved = await saveDriver(updated);
+      if (saved) {
+        setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
+        lastSyncedDriversRef.current[driverId] = {
+          approvalStatus: 'APPROVED',
+          currentX: updated.currentX,
+          currentY: updated.currentY,
+          isOnline: updated.isOnline,
+          status: updated.status,
+          totalEarnings: updated.totalEarnings,
+          totalCommissionPaid: updated.totalCommissionPaid,
+          totalTrips: updated.totalTrips,
+          rating: updated.rating,
+          serviceAreas: updated.serviceAreas,
+        };
       }
+    } catch (e) {
+      console.error('Error unfreezing driver:', e);
     }
   };
 
