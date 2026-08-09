@@ -84,7 +84,7 @@ export const useRouteCache = (lang: 'ar' | 'en') => {
 
   const getRealRoute = useCallback(async (pickup: Location, dropoff: Location): Promise<RouteResult | null> => {
     const cacheKey = `${pickup.lat.toFixed(4)}_${pickup.lng.toFixed(4)}_${dropoff.lat.toFixed(4)}_${dropoff.lng.toFixed(4)}`;
-    const cached = routeCache[cacheKey] || getCachedRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng);
+    const cached = routeCache[cacheKey] || getCachedRoute([pickup.lat, pickup.lng, dropoff.lat, dropoff.lng]);
     if (cached && cached.distance > 0) return cached;
 
     const coordStr = `${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}`;
@@ -117,7 +117,7 @@ export const useRouteCache = (lang: 'ar' | 'en') => {
           const parsed = parseRouteResponse(data);
           if (parsed) {
             const result: RouteResult = parsed;
-            setCachedRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng, result);
+            setCachedRoute([pickup.lat, pickup.lng, dropoff.lat, dropoff.lng], result);
             lastRouteCacheUseRef.current = Date.now();
             setRouteCacheInternal(prev => ({ ...prev, [cacheKey]: result }));
             console.log(`[route] ${provider.name} OK: ${result.distance} km, ${result.geometry?.length ?? 0} pts, ${result.steps?.length || 0} steps`);
@@ -140,7 +140,7 @@ export const useRouteCache = (lang: 'ar' | 'en') => {
     dropoff: Location
   ): Promise<RouteResult | null> => {
     const cacheKey = `nav_${driverLat.toFixed(4)}_${driverLng.toFixed(4)}_${pickup.lat.toFixed(4)}_${pickup.lng.toFixed(4)}_${dropoff.lat.toFixed(4)}_${dropoff.lng.toFixed(4)}`;
-    const cached = routeCache[cacheKey] || getCachedRoute(driverLat, driverLng, pickup.lat, pickup.lng);
+    const cached = routeCache[cacheKey] || getCachedRoute([driverLat, driverLng, pickup.lat, pickup.lng]);
     if (cached && cached.distance > 0) return cached;
 
     const coordStr = `${driverLng},${driverLat};${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}`;
