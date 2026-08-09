@@ -1020,6 +1020,36 @@ export const deleteDriverInDB = async (driverId: string): Promise<boolean> => {
   }
 };
 
+// Admin: update driver approval status via SECURITY DEFINER RPC
+export const adminSetDriverApproval = async (driverId: string, approvalStatus: string): Promise<boolean> => {
+  try {
+    const { error } = await supabase.rpc('admin_set_driver_approval', {
+      p_driver_id: driverId,
+      p_approval_status: approvalStatus,
+    });
+    if (error) throw error;
+    return true;
+  } catch (err: any) {
+    console.warn('Could not update driver approval via RPC:', err.message);
+    return false;
+  }
+};
+
+// Admin: update driver fields via SECURITY DEFINER RPC
+export const adminUpdateDriverFields = async (driverId: string, data: Record<string, any>): Promise<boolean> => {
+  try {
+    const { error } = await supabase.rpc('admin_update_driver', {
+      p_driver_id: driverId,
+      p_data: data,
+    });
+    if (error) throw error;
+    return true;
+  } catch (err: any) {
+    console.warn('Could not update driver fields via RPC:', err.message);
+    return false;
+  }
+};
+
 // Fetch Registered Riders
 export const fetchRiders = async (): Promise<Rider[] | null> => {
   try {

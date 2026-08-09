@@ -48,7 +48,9 @@ import {
   fetchActiveAdsForPlacement,
   sendNewTripNotification,
   saveRiderPreferences,
-  fetchAllActiveTrips
+  fetchAllActiveTrips,
+  adminSetDriverApproval,
+  adminUpdateDriverFields
 } from './supabaseService';
 import {
   requestNotificationPermission,
@@ -3258,23 +3260,22 @@ export default function App() {
       triggerToast(lang === 'ar' ? 'غير متصل' : 'Offline', lang === 'ar' ? 'السجل محفوظ محلياً فقط' : 'Saved locally only', 'warning');
       return;
     }
-    const updated = { ...driver, approvalStatus: 'APPROVED' as const };
     try {
-      const saved = await saveDriver(updated);
-      console.log('[handleApproveDriver] saveDriver result:', saved);
+      const saved = await adminSetDriverApproval(driverId, 'APPROVED');
+      console.log('[handleApproveDriver] adminSetDriverApproval result:', saved);
       if (saved) {
         setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
         lastSyncedDriversRef.current[driverId] = {
           approvalStatus: 'APPROVED',
-          currentX: updated.currentX,
-          currentY: updated.currentY,
-          isOnline: updated.isOnline,
-          status: updated.status,
-          totalEarnings: updated.totalEarnings,
-          totalCommissionPaid: updated.totalCommissionPaid,
-          totalTrips: updated.totalTrips,
-          rating: updated.rating,
-          serviceAreas: updated.serviceAreas,
+          currentX: driver.currentX,
+          currentY: driver.currentY,
+          isOnline: driver.isOnline,
+          status: driver.status,
+          totalEarnings: driver.totalEarnings,
+          totalCommissionPaid: driver.totalCommissionPaid,
+          totalTrips: driver.totalTrips,
+          rating: driver.rating,
+          serviceAreas: driver.serviceAreas,
         };
         triggerToast(lang === 'ar' ? 'تم القبول بنجاح' : 'Approved successfully', lang === 'ar' ? 'تم تفعيل السائق بنجاح' : 'Driver activated successfully', 'success');
       } else {
@@ -3294,21 +3295,20 @@ export default function App() {
       return;
     }
     try {
-      const updated = { ...driver, approvalStatus: 'REJECTED' as const };
-      const saved = await saveDriver(updated);
+      const saved = await adminSetDriverApproval(driverId, 'REJECTED');
       if (saved) {
         setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'REJECTED' } : d));
         lastSyncedDriversRef.current[driverId] = {
           approvalStatus: 'REJECTED',
-          currentX: updated.currentX,
-          currentY: updated.currentY,
-          isOnline: updated.isOnline,
-          status: updated.status,
-          totalEarnings: updated.totalEarnings,
-          totalCommissionPaid: updated.totalCommissionPaid,
-          totalTrips: updated.totalTrips,
-          rating: updated.rating,
-          serviceAreas: updated.serviceAreas,
+          currentX: driver.currentX,
+          currentY: driver.currentY,
+          isOnline: driver.isOnline,
+          status: driver.status,
+          totalEarnings: driver.totalEarnings,
+          totalCommissionPaid: driver.totalCommissionPaid,
+          totalTrips: driver.totalTrips,
+          rating: driver.rating,
+          serviceAreas: driver.serviceAreas,
         };
       }
     } catch (e) {
@@ -3324,21 +3324,23 @@ export default function App() {
       return;
     }
     try {
-      const updated = { ...driver, approvalStatus: 'FROZEN' as const, isOnline: false };
-      const saved = await saveDriver(updated);
+      const saved = await adminUpdateDriverFields(driverId, {
+        approval_status: 'FROZEN',
+        is_online: false,
+      });
       if (saved) {
         setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'FROZEN', isOnline: false } : d));
         lastSyncedDriversRef.current[driverId] = {
           approvalStatus: 'FROZEN',
           isOnline: false,
-          currentX: updated.currentX,
-          currentY: updated.currentY,
-          status: updated.status,
-          totalEarnings: updated.totalEarnings,
-          totalCommissionPaid: updated.totalCommissionPaid,
-          totalTrips: updated.totalTrips,
-          rating: updated.rating,
-          serviceAreas: updated.serviceAreas,
+          currentX: driver.currentX,
+          currentY: driver.currentY,
+          status: driver.status,
+          totalEarnings: driver.totalEarnings,
+          totalCommissionPaid: driver.totalCommissionPaid,
+          totalTrips: driver.totalTrips,
+          rating: driver.rating,
+          serviceAreas: driver.serviceAreas,
         };
       }
     } catch (e) {
@@ -3354,21 +3356,20 @@ export default function App() {
       return;
     }
     try {
-      const updated = { ...driver, approvalStatus: 'APPROVED' as const };
-      const saved = await saveDriver(updated);
+      const saved = await adminSetDriverApproval(driverId, 'APPROVED');
       if (saved) {
         setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
         lastSyncedDriversRef.current[driverId] = {
           approvalStatus: 'APPROVED',
-          currentX: updated.currentX,
-          currentY: updated.currentY,
-          isOnline: updated.isOnline,
-          status: updated.status,
-          totalEarnings: updated.totalEarnings,
-          totalCommissionPaid: updated.totalCommissionPaid,
-          totalTrips: updated.totalTrips,
-          rating: updated.rating,
-          serviceAreas: updated.serviceAreas,
+          currentX: driver.currentX,
+          currentY: driver.currentY,
+          isOnline: driver.isOnline,
+          status: driver.status,
+          totalEarnings: driver.totalEarnings,
+          totalCommissionPaid: driver.totalCommissionPaid,
+          totalTrips: driver.totalTrips,
+          rating: driver.rating,
+          serviceAreas: driver.serviceAreas,
         };
       }
     } catch (e) {
