@@ -1745,21 +1745,21 @@ export const AdminView: React.FC<AdminViewProps> = ({
                              </div>
                            </div>
 
-                           {/* Ledger stats */}
-                           <div className="grid grid-cols-3 gap-2 bg-slate-50 p-2 rounded-lg text-center text-[10px]">
-                             <div>
-                               <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'الرحلات' : 'Rides'}</p>
-                               <p className="font-bold text-slate-700 mt-0.5">{driverPeriodStats.trips}</p>
-                             </div>
-                             <div>
-                               <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'أرباح السائق' : 'Driver Net'}</p>
-                               <p className="font-bold text-slate-700 mt-0.5">{Math.round(driverPeriodStats.earnings)} ج.م</p>
-                             </div>
-                             <div>
-                               <p className="text-[8px] text-rose-500">{lang === 'ar' ? 'عمولة التطبيق' : 'Due Ezz'}</p>
-                               <p className="font-bold text-rose-600 mt-0.5">{Math.round(driverPeriodStats.commission)} ج.م</p>
-                             </div>
-                           </div>
+                            {/* Ledger stats */}
+                            <div className="grid grid-cols-3 gap-2 bg-slate-50 p-2 rounded-lg text-center text-[10px]">
+                              <div>
+                                <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'الرحلات' : 'Rides'}</p>
+                                <p className="font-bold text-slate-700 mt-0.5">{driverPeriodStats.trips}</p>
+                              </div>
+                              <div>
+                                <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'أرباح السائق' : 'Driver Net'}</p>
+                                <p className="font-bold text-slate-700 mt-0.5">{Math.round(driverPeriodStats.earnings)} ج.م</p>
+                              </div>
+                              <div>
+                                <p className="text-[8px] text-rose-500">{lang === 'ar' ? 'عمولة التطبيق' : 'Due Ezz'}</p>
+                                <p className="font-bold text-rose-600 mt-0.5">{Math.round(drv.totalCommissionPaid || 0)} ج.م</p>
+                              </div>
+                            </div>
 
                           {/* Service Areas Assignment */}
                           {onUpdateDriverServiceAreas && regions.length > 0 && (
