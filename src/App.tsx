@@ -41,6 +41,7 @@ import {
   saveSession,
   loadSession,
   clearSession,
+  setAppRole,
   markPromoCodeAsUsed,
   fetchRegions,
   fetchAds,
@@ -1155,12 +1156,14 @@ export default function App() {
             if (r) {
               setRider({ ...r, isLoggedIn: true });
               restoreRiderPickupRegion(r);
+              if (supabaseConnected) setAppRole('RIDER');
             }
           } else if (session.role === 'DRIVER') {
             const d = dbDrivers?.find(x => x.id === session.userId);
             if (d) {
               setSelectedDriverId(d.id);
               setDriverIsLoggedIn(true);
+              if (supabaseConnected) setAppRole('DRIVER');
               const driverTrip = await fetchActiveTrip(d.id, 'driver');
               if (driverTrip && driverTrip !== 'NO_TABLE') {
                 setActiveTripWithTracking(driverTrip);
@@ -1168,6 +1171,7 @@ export default function App() {
             }
           } else if (session.role === 'ADMIN') {
             setAdminIsLoggedIn(true);
+            if (supabaseConnected) setAppRole('ADMIN');
           }
 
           const userRole = session.role.toLowerCase() as 'rider' | 'driver';
@@ -3473,7 +3477,8 @@ export default function App() {
       setRider({ ...found, isLoggedIn: true });
       restoreRiderPickupRegion(found);
       if (supabaseConnected) {
-        await clearSession('DRIVER');
+        await setAppRole('RIDER');
+        await clearSession('RIDER');
         await clearSession('ADMIN');
         await saveSession('RIDER', found.id);
       }
@@ -3703,6 +3708,9 @@ export default function App() {
       }
       setSelectedDriverId(newId);
       setDriverIsLoggedIn(true);
+      if (supabaseConnected) {
+        await setAppRole('DRIVER');
+      }
       setCurrentScreen('DRIVER_DASHBOARD');
     };
     } finally {
@@ -4801,6 +4809,9 @@ if (activeTrip) {
                                   if (admin) {
                                     setAdminIsLoggedIn(true);
                                     setAdminUserId(admin.id);
+                                    if (supabaseConnected) {
+                                      await setAppRole('ADMIN');
+                                    }
                                     localStorage.setItem('ezz_admin_phone', adminPhone.trim());
                                     localStorage.setItem('ezz_admin_password', adminPassword.trim());
                                     if (supabaseConnected) {
@@ -4899,7 +4910,10 @@ if (activeTrip) {
                           onLogout={() => {
                             setAdminIsLoggedIn(false);
                             setAdminUserId('');
-                            if (supabaseConnected) clearSession('ADMIN');
+                            if (supabaseConnected) {
+                              clearSession('ADMIN');
+                              setAppRole('ANON');
+                            }
                           }}
                          onTriggerToast={triggerToast}
                       />
