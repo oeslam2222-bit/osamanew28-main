@@ -68,9 +68,9 @@ export const getBackgroundPollingInterval = (
 };
 
 // Local Storage Cache for Navigation Routes (OSRM requests)
-export const getCachedRoute = (coords: number[], prefix = ''): any | null => {
+export const getCachedRoute = (pickupLat: number, pickupLng: number, dropoffLat: number, dropoffLng: number): any | null => {
   try {
-    const key = `${prefix}${coords.map(c => c.toFixed(4)).join('_')}`;
+    const key = `${pickupLat.toFixed(3)}_${pickupLng.toFixed(3)}_${dropoffLat.toFixed(3)}_${dropoffLng.toFixed(3)}`;
     const raw = localStorage.getItem(ROUTE_CACHE_KEY);
     if (!raw) return null;
     const cache = JSON.parse(raw);
@@ -84,9 +84,9 @@ export const getCachedRoute = (coords: number[], prefix = ''): any | null => {
   return null;
 };
 
-export const setCachedRoute = (coords: number[], data: any, prefix = ''): void => {
+export const setCachedRoute = (pickupLat: number, pickupLng: number, dropoffLat: number, dropoffLng: number, data: any): void => {
   try {
-    const key = `${prefix}${coords.map(c => c.toFixed(4)).join('_')}`;
+    const key = `${pickupLat.toFixed(3)}_${pickupLng.toFixed(3)}_${dropoffLat.toFixed(3)}_${dropoffLng.toFixed(3)}`;
     const raw = localStorage.getItem(ROUTE_CACHE_KEY);
     const cache = raw ? JSON.parse(raw) : {};
     

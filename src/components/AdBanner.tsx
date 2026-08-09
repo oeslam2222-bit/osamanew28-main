@@ -36,7 +36,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({ ads, variant, lang, onClose,
 
   const ad = activeAds.length > 0 ? activeAds[lowDataMode ? 0 : index % activeAds.length] : null;
 
-  useEffect(() => {
+  React.useEffect(() => {
     setImageError(false);
   }, [ad?.id]);
 

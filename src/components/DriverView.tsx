@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Driver, Trip, Location, SystemStats, Region } from '../types';
 import { ToggleLeft, ToggleRight, MapPin, Navigation, DollarSign, Wallet, Check, AlertTriangle, Users, Star, MessageSquare, Bell, ShieldAlert, Loader2, ChevronRight, ChevronLeft, Plus, X } from 'lucide-react';
-import { fetchTripsHistoryPaginated, getDeviceId } from '../supabaseService';
+import { fetchTripsHistoryPaginated } from '../supabaseService';
 
 interface DriverViewProps {
   drivers: Driver[];
@@ -215,7 +215,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
       let result = await fetchTripsHistoryPaginated({
         userId: currentDriver.id,
         role: 'driver',
-        deviceId: getDeviceId(),
         dateFrom: myTripDateFrom || undefined,
         dateTo: myTripDateTo || undefined,
         page,
@@ -266,16 +265,12 @@ export const DriverView: React.FC<DriverViewProps> = ({
     (activeTrip.driverId === currentDriver.id || activeTrip.offeredDriverIds?.includes(currentDriver.id)) &&
     activeTrip.status === 'SEARCHING';
 
-   useEffect(() => {
-     console.log('[DriverView] activeTrip:', activeTrip?.id || 'null', 'status:', activeTrip?.status || 'null',
-       'currentDriverId:', currentDriver?.id || 'null',
-       'offeredDriverIds:', activeTrip?.offeredDriverIds,
-       'isEligibleForRequest:', isEligibleForRequest);
-   }, [activeTrip?.id, activeTrip?.status, activeTrip?.offeredDriverIds, currentDriver?.id]);
-
-  const activeTripChatMessages = activeTrip && Array.isArray(activeTrip.chatMessages)
-    ? activeTrip.chatMessages.filter((msg) => msg && typeof msg.id === 'string')
-    : [];
+  React.useEffect(() => {
+    console.log('[DriverView] activeTrip:', activeTrip?.id || 'null', 'status:', activeTrip?.status || 'null',
+      'currentDriverId:', currentDriver?.id || 'null',
+      'offeredDriverIds:', activeTrip?.offeredDriverIds,
+      'isEligibleForRequest:', isEligibleForRequest);
+  }, [activeTrip?.id, activeTrip?.status, activeTrip?.offeredDriverIds, currentDriver?.id]);
 
    const isCurrentlyDriving = !!currentDriver && !!activeTrip && activeTrip.driverId === currentDriver.id;
    const isTripActive = !!currentDriver && !!activeTrip && (isCurrentlyDriving || isEligibleForRequest);
@@ -424,12 +419,8 @@ export const DriverView: React.FC<DriverViewProps> = ({
         <div className="flex items-center justify-between gap-2">
           {/* Driver Avatar & Details */}
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-sm font-black ring-1 ring-white/30 shrink-0 overflow-hidden bg-white/20">
-              {currentDriver.personalPhoto ? (
-                <img src={currentDriver.personalPhoto} alt={currentDriver.name} className="w-full h-full object-cover" />
-              ) : (
-                <span className="select-none">{(currentDriver.name && currentDriver.name.charAt(0)) || 'س'}</span>
-              )}
+            <div className="w-9 h-9 sm:w-10 sm:h-10 bg-white/20 rounded-full flex items-center justify-center text-sm font-black ring-1 ring-white/30 shrink-0">
+              <span className="select-none">{(currentDriver.name && currentDriver.name.charAt(0)) || 'س'}</span>
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
@@ -616,24 +607,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
               </span>
             </div>
 
-            {/* Driver identity block */}
-            <div className="bg-white border border-emerald-200/60 rounded-xl p-2.5 flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-100 shrink-0">
-                {currentDriver.personalPhoto ? (
-                  <img src={currentDriver.personalPhoto} alt={currentDriver.name} className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-sm font-black text-slate-500">
-                    {(currentDriver.name && currentDriver.name.charAt(0)) || 'س'}
-                  </div>
-                )}
-              </div>
-              <div className="text-right flex-1 min-w-0">
-                <p className="text-[10px] text-slate-400">{lang === 'ar' ? 'السائق الحالي' : 'Current Driver'}</p>
-                <p className="text-xs font-black text-slate-800 truncate">{currentDriver.name}</p>
-                <p className="text-[9px] text-slate-500 truncate">{currentDriver.carModel} • {currentDriver.carPlate}</p>
-              </div>
-            </div>
-
             {/* Generic eligibility notice (no GPS distance) */}
             <div className="bg-white border border-emerald-200/60 rounded-xl p-2.5 text-center">
               <p className="text-[10px] font-bold text-slate-600">
@@ -786,8 +759,8 @@ export const DriverView: React.FC<DriverViewProps> = ({
               </div>
 
               <div className="bg-slate-50 rounded-xl p-2 max-h-[120px] overflow-y-auto space-y-1.5 border border-slate-100 flex flex-col">
-                {activeTripChatMessages.length > 0 ? (
-                  [...activeTripChatMessages]
+                {activeTrip.chatMessages && activeTrip.chatMessages.length > 0 ? (
+                  [...activeTrip.chatMessages]
                     .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
                     .map((msg) => (
                     <div

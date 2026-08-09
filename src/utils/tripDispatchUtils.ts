@@ -21,7 +21,9 @@ export const getEligibleDrivers = (
           areaLower.includes(regionNameLower) ||
           areaLower.includes(regionId) ||
           areaLower === 'all regions' ||
-          areaLower === 'جميع المناطق'
+          areaLower === 'جميع المناطق' ||
+          areaLower.includes('beni suef') ||
+          areaLower.includes('بني سويف')
         );
       });
       if (!regionMatch) return false;
@@ -42,22 +44,18 @@ export const filterDriversByRegion = (drivers: any[], region: Region | null) => 
         areaLower.includes(regionNameLower) ||
         areaLower.includes(regionId) ||
         areaLower === 'all regions' ||
-        areaLower === 'جميع المناطق'
+        areaLower === 'جميع المناطق' ||
+        areaLower.includes('beni suef') ||
+        areaLower.includes('بني سويف')
       );
     });
   });
 };
 
 export const mergeChatMessages = (localMessages: any[], remoteMessages: any[]) => {
-  const normalizedLocalMessages = Array.isArray(localMessages)
-    ? localMessages.filter((m: any) => m && typeof m.id === 'string')
-    : [];
-  const normalizedRemoteMessages = Array.isArray(remoteMessages)
-    ? remoteMessages.filter((m: any) => m && typeof m.id === 'string')
-    : [];
-  const localMsgIds = new Set(normalizedLocalMessages.map((m) => m.id));
-  const merged = [...normalizedLocalMessages];
-  for (const m of normalizedRemoteMessages) {
+  const localMsgIds = new Set(localMessages.map(m => m.id));
+  const merged = [...localMessages];
+  for (const m of remoteMessages) {
     if (!localMsgIds.has(m.id)) {
       merged.push(m);
     }

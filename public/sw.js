@@ -1,90 +1,179 @@
-const CACHE_NAME = 'ezz-ride-v1';
-const STATIC_ASSETS = [
+// Ezz Ride Hailing PWA Service Worker (v2)
+const CACHE_NAME = 'ezz-ride-v2';
+const ASSETS = [
   '/',
-  '/index.html',
+  '/index.html'
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(ASSETS).catch((err) => console.log("Cache error during SW install:", err));
+    })
   );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
-    )
-  );
-  self.clients.claim();
-});
-
-self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET') return;
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const networkFetch = fetch(event.request).then((response) => {
-        if (response && response.status === 200) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      }).catch(() => cached);
-      return cached || networkFetch;
-    })
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(
+        keys.map((key) => {
+          if (key !== CACHE_NAME) {
+            return caches.delete(key);
+          }
+        })
+      );
+      await self.clients.claim();
+      const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      allClients.forEach((client) => {
+        client.postMessage({ type: 'SW_ACTIVATED', online: navigator.onLine });
+      });
+    })()
   );
 });
 
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-  event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
-      if (clients.length > 0) {
-        return clients[0].focus();
-      }
-      return self.clients.openWindow('/');
-    })
-  );
-});
-
-self.addEventListener('push', (event) => {
-  let payload = { title: 'Ezz Ride', body: 'You have a new notification' };
-  if (event.data) {
-    try {
-      payload = event.data.json();
-    } catch {
-      payload.body = event.data.text();
-    }
-  }
-  const options = {
-    body: payload.body,
-    icon: '/favicon.ico',
-    badge: '/favicon.ico',
-    tag: 'ezz-ride-notification',
+// Background online/offline detection: notify when connectivity changes
+function showOfflineNotification() {
+  self.registration.showNotification('📡 أنت غير متصل بالإنترنت', {
+    body: 'لا يمكنك إرسال طلبات الرحلات أو استلام التحديثات حالياً.',
+    icon: 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>',
+    badge: 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>',
+    tag: 'ezz-offline-alert',
+    renotify: true,
     requireInteraction: true,
-    data: payload.data || {},
-  };
-  event.waitUntil(self.registration.showNotification(payload.title, options));
+    silent: false,
+    sound: 'default',
+    vibrate: [200, 100, 200],
+    data: { url: '/' }
+  });
+}
+
+function showOnlineNotification() {
+  self.registration.showNotification('✅ تم استعادة الاتصال', {
+    body: 'أنت متصل الآن. يمكنك استئناف استخدام التطبيق.',
+    icon: 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✅</text></svg>',
+    badge: 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✅</text></svg>',
+    tag: 'ezz-online-alert',
+    renotify: true,
+    requireInteraction: true,
+    silent: false,
+    sound: 'default',
+    vibrate: [200, 100, 200],
+    data: { url: '/' }
+  });
+}
+
+let lastKnownOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+self.addEventListener('online', () => {
+  if (lastKnownOnline) return;
+  lastKnownOnline = true;
+  showOnlineNotification();
 });
 
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
+self.addEventListener('offline', () => {
+  if (!lastKnownOnline) return;
+  lastKnownOnline = false;
+  showOfflineNotification();
+});
 
-  if (event.data && event.data.type === 'SHOW_BACKGROUND_NOTIFICATION') {
-    const { title, body, icon, tag, vibrate } = event.data;
-    const options: any = {
-      body,
-      icon: icon || '/favicon.ico',
-      badge: icon || '/favicon.ico',
-      tag: tag || title,
+// Handle background notification requests sent from client application via postMessage
+self.addEventListener('message', (event) => {
+  if (event.data && (event.data.type === 'SHOW_BACKGROUND_NOTIFICATION' || event.data.type === 'DRIVER_TRIP_ALERT')) {
+    const { title, body, icon, tag, data, vibrate } = event.data;
+    const iconDataUrl = icon || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚖</text></svg>';
+    
+    const options = {
+      body: body || 'طلب مشوار جديد متاح للكابتن حالاً!',
+      icon: iconDataUrl,
+      badge: iconDataUrl,
+      tag: tag || 'ezz-driver-alert',
+      renotify: true,
       requireInteraction: true,
+      silent: false,
+      sound: 'default',
       vibrate: vibrate || [300, 100, 300, 100, 400],
+      data: data || { url: '/' },
+      actions: [
+        { action: 'open_app', title: 'عرض المشوار 🚖' },
+        { action: 'dismiss', title: 'إغلاق ✖' }
+      ]
     };
+
     event.waitUntil(
-      self.registration.showNotification(title, options)
+      self.registration.showNotification(title || 'تنبيه كابتن عز 🚖', options)
     );
   }
+
+  if (event.data && event.data.type === 'FORCE_ONLINE_CHECK') {
+    event.waitUntil(
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+        clientList.forEach((client) => {
+          client.postMessage({ type: 'ONLINE_CHECK_RESULT', online: navigator.onLine });
+        });
+      })
+    );
+  }
+});
+
+// Listen to incoming Web Push API events (FCM)
+self.addEventListener('push', (event) => {
+  let data = { title: 'تطبيق عز 🚖', body: 'تحديث جديد لرحلتك حالاً!' };
+  
+  if (event.data) {
+    try {
+      const parsed = event.data.json();
+      // FCM wraps message in .data property, direct push may use root
+      data = parsed.data || parsed;
+    } catch (e) {
+      data = { title: 'تطبيق عز 🚖', body: event.data.text() };
+    }
+  }
+
+  const iconDataUrl = 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚖</text></svg>';
+
+  const options = {
+    body: data.body || data.message || 'تحديث جديد',
+    icon: iconDataUrl,
+    badge: iconDataUrl,
+    tag: data.tag || data.rideId || 'ezz-push-alert',
+    renotify: true,
+    requireInteraction: true,
+    silent: false,
+    sound: 'default',
+    vibrate: data.vibrate || [300, 100, 300, 100, 400],
+    data: {
+      dateOfArrival: Date.now(),
+      url: data.url || '/',
+      rideId: data.rideId || null,
+    },
+    actions: data.actions || [
+      { action: 'open_app', title: 'عرض المشوار 🚖' },
+      { action: 'dismiss', title: 'إغلاق ✖' }
+    ]
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'تطبيق عز 🚖', options)
+  );
+});
+
+// Handle notification click to focus application window
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  if (event.action === 'dismiss') return;
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow('/');
+      }
+    })
+  );
 });

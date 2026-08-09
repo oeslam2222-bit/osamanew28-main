@@ -14,8 +14,6 @@ export const useDriverTracking = (
 ) => {
   const lastNavDriverLatRef = useRef<number | null>(null);
   const lastNavDriverLngRef = useRef<number | null>(null);
-  const driversRef = useRef(drivers);
-  driversRef.current = drivers;
 
   const currentDriverIsOnline = drivers.find(d => d.id === selectedDriverId)?.isOnline ?? false;
 
@@ -72,7 +70,7 @@ export const useDriverTracking = (
     if (!driverIsLoggedIn || !selectedDriverId || !supabaseConnected) return;
 
     const resetDriverToAvailable = async () => {
-      let driver = driversRef.current.find(d => d.id === selectedDriverId);
+      let driver = drivers.find(d => d.id === selectedDriverId);
 
       if (!driver) {
         try {
@@ -98,7 +96,7 @@ export const useDriverTracking = (
     };
 
     resetDriverToAvailable();
-  }, [driverIsLoggedIn, selectedDriverId, supabaseConnected, setDrivers, lang, triggerToast]);
+  }, [driverIsLoggedIn, selectedDriverId, supabaseConnected, drivers]);
 
   return {
     lastNavDriverLatRef,
