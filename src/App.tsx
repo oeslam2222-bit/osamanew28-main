@@ -917,7 +917,7 @@ export default function App() {
   // and re-opens instantly without waiting for Supabase.
   useEffect(() => {
     try {
-      if (drivers.length > 0) localStorage.setItem('ezz_drivers_cache', JSON.stringify(drivers));
+      localStorage.setItem('ezz_drivers_cache', JSON.stringify(drivers));
     } catch {}
   }, [drivers]);
   useEffect(() => {
@@ -3197,6 +3197,19 @@ export default function App() {
           approvalStatus: cleared.approvalStatus,
           serviceAreas: cleared.serviceAreas,
         };
+        const refreshed = await fetchDrivers();
+        if (refreshed && refreshed.length > 0) {
+          const remoteCleared = refreshed.find((rd) => rd.id === driverId);
+          if (remoteCleared && remoteCleared.totalCommissionPaid !== 0) {
+            const resaved = await saveDriver({ ...remoteCleared, totalCommissionPaid: 0 });
+            console.log('[handleSettleDriverCommissions] re-save after remote check:', resaved);
+            if (resaved) {
+              setDrivers((prev) => prev.map((d) => (d.id === driverId ? { ...remoteCleared, totalCommissionPaid: 0 } : d)));
+            }
+          } else if (remoteCleared) {
+            setDrivers((prev) => prev.map((d) => (d.id === driverId ? remoteCleared : d)));
+          }
+        }
       }
     } else {
       setDrivers((prev) => prev.map((d) => (d.id === driverId ? cleared : d)));

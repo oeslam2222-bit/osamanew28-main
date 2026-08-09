@@ -1003,6 +1003,14 @@ export const saveDriver = async (driver: Driver): Promise<boolean> => {
 // Delete Driver
 export const deleteDriverInDB = async (driverId: string): Promise<boolean> => {
   try {
+    try {
+      const { error: roleErr } = await supabase.rpc('set_app_role', { role: 'ADMIN' });
+      if (roleErr) {
+        console.warn('[deleteDriverInDB] Warning: set_app_role failed or not found:', roleErr);
+      }
+    } catch (roleErr) {
+      console.warn('[deleteDriverInDB] Warning: set_app_role threw exception:', roleErr);
+    }
     const { error } = await supabase.from('ezz_drivers').delete().eq('id', driverId);
     if (error) throw error;
     return true;
@@ -1436,6 +1444,14 @@ export const clearTripsHistoryInDB = async (adminUserId?: string, deviceId?: str
 // Clear ALL Riders from Supabase
 export const clearAllRidersInDB = async (): Promise<boolean> => {
   try {
+    try {
+      const { error: roleErr } = await supabase.rpc('set_app_role', { role: 'ADMIN' });
+      if (roleErr) {
+        console.warn('[clearAllRidersInDB] Warning: set_app_role failed or not found:', roleErr);
+      }
+    } catch (roleErr) {
+      console.warn('[clearAllRidersInDB] Warning: set_app_role threw exception:', roleErr);
+    }
     const { error } = await supabase.from('ezz_riders').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     if (error) throw error;
     return true;
@@ -1448,6 +1464,14 @@ export const clearAllRidersInDB = async (): Promise<boolean> => {
 // Clear ALL Drivers from Supabase
 export const clearAllDriversInDB = async (): Promise<boolean> => {
   try {
+    try {
+      const { error: roleErr } = await supabase.rpc('set_app_role', { role: 'ADMIN' });
+      if (roleErr) {
+        console.warn('[clearAllDriversInDB] Warning: set_app_role failed or not found:', roleErr);
+      }
+    } catch (roleErr) {
+      console.warn('[clearAllDriversInDB] Warning: set_app_role threw exception:', roleErr);
+    }
     const { error } = await supabase.from('ezz_drivers').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     if (error) throw error;
     return true;
