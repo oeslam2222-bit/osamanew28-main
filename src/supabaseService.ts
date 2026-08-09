@@ -21,21 +21,24 @@ let isSupabaseHealthy = true;
 
 export const checkSupabaseConnection = async (): Promise<boolean> => {
   try {
-    const { error } = await supabase.from('ezz_stats').select('id').limit(1);
-    if (error && error.code === 'PGRST116') {
-      // Table exists but is empty
+    const result = await withTimeout(
+      () => supabase.from('ezz_stats').select('id').limit(1),
+      10000,
+      'checkSupabaseConnection'
+    );
+    if (result.error && result.error.code === 'PGRST116') {
       isSupabaseHealthy = true;
       return true;
     }
-    if (error) {
-      console.warn('Supabase Connection check failed, falling back to LocalStorage:', error.message);
+    if (result.error) {
+      console.warn('Supabase Connection check failed, falling back to LocalStorage:', result.error.message);
       isSupabaseHealthy = false;
       return false;
     }
     isSupabaseHealthy = true;
     return true;
-  } catch (err) {
-    console.warn('Supabase not fully configured or unreachable:', err);
+  } catch (err: any) {
+    console.warn('Supabase not fully configured or unreachable:', err.message);
     isSupabaseHealthy = false;
     return false;
   }

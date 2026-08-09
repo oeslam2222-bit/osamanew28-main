@@ -1029,7 +1029,7 @@ export default function App() {
    // 1. Initial Load from Supabase on mount
     useEffect(() => {
     requestNotificationPermission();
-    setIsInitializing(true);
+    setIsInitializing(false);
 
     const initSupabase = async () => {
       const timeoutMs = 20000;
