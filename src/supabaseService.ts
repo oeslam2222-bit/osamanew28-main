@@ -5,6 +5,33 @@ import { verifyPassword, isSecureHash, hashPassword, generateUUID } from './util
 
 const PAGE_SIZE = PAGINATION_PAGE_SIZE;
 
+const RETRYABLE_CODES = new Set(['PGRST301', 'PGRST302', 'PGRST303', '57P01', '57P02', '57P03', 'XX000']);
+
+async function withRetry<T>(
+  fn: () => any,
+  retries = 2,
+  baseDelay = 600
+): Promise<{ data: T | null; error: any }> {
+  let lastError: any;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const result = await fn();
+      if (!result.error) return result;
+      const code = result.error.code || '';
+      const msg = result.error.message || '';
+      const isRetryable = RETRYABLE_CODES.has(code) || /timed out|connection pool|acquiring connection|cancel/i.test(msg);
+      if (!isRetryable || attempt === retries) return result;
+      lastError = result.error;
+    } catch (err: any) {
+      if (attempt === retries) return { data: null, error: err };
+      lastError = err;
+    }
+    const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 300;
+    await new Promise(r => setTimeout(r, delay));
+  }
+  return { data: null, error: lastError };
+}
+
 // Helper to determine if we can connect to Supabase
 let isSupabaseHealthy = true;
 
@@ -938,10 +965,11 @@ export const mapTripToDB = (trip: Trip) => ({
 // Fetch Drivers
 export const fetchDrivers = async (): Promise<Driver[] | null> => {
   try {
-    // Include `service_areas` in the select so remote fetch preserves driver coverage areas
-    const { data, error } = await supabase.from('ezz_drivers').select('id,name,phone,password,car_model,car_plate,vehicle_type,vehicle_name,national_id,driver_license,personal_photo,national_id_image,driver_license_image,vehicle_license_image,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,agreed_to_terms,service_areas,last_seen,auto_accept,auto_show_map,fcm_token');
-    if (error) throw error;
-    return data.map(mapDriverFromDB);
+    const result = await withRetry<Driver[]>(() =>
+      supabase.from('ezz_drivers').select('id,name,phone,password,car_model,car_plate,vehicle_type,vehicle_name,national_id,driver_license,personal_photo,national_id_image,driver_license_image,vehicle_license_image,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,agreed_to_terms,service_areas,last_seen,auto_accept,auto_show_map,fcm_token')
+    );
+    if (result.error) throw result.error;
+    return (result.data || []).map(mapDriverFromDB);
   } catch (err: any) {
     console.warn('Could not fetch drivers from Supabase, using local:', err.message);
     return null;
@@ -1015,9 +1043,11 @@ export const deleteDriverInDB = async (driverId: string): Promise<boolean> => {
 // Fetch Registered Riders
 export const fetchRiders = async (): Promise<Rider[] | null> => {
   try {
-    const { data, error } = await supabase.from('ezz_riders').select('id,name,phone,password,rating,total_trips,approval_status,preferences');
-    if (error) throw error;
-    return data.map(mapRiderFromDB);
+    const result = await withRetry<Rider[]>(() =>
+      supabase.from('ezz_riders').select('id,name,phone,password,rating,total_trips,approval_status,preferences')
+    );
+    if (result.error) throw result.error;
+    return (result.data || []).map(mapRiderFromDB);
   } catch (err: any) {
     console.warn('Could not fetch riders from Supabase:', err.message);
     return null;
@@ -1035,8 +1065,10 @@ export const saveRider = async (rider: Rider): Promise<boolean> => {
     } else {
       delete riderData.password;
     }
-    const { error } = await supabase.from('ezz_riders').upsert(riderData);
-    if (error) throw error;
+    const result = await withRetry<boolean>(() =>
+      supabase.from('ezz_riders').upsert(riderData)
+    );
+    if (result.error) throw result.error;
     return true;
   } catch (err: any) {
     console.warn('Could not save rider to Supabase:', err.message);
@@ -1073,7 +1105,8 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
     // admin gets all
 
     const isDriverQuery = userId && userRole === 'driver';
-    const { data, error } = await query.limit(isDriverQuery ? 5 : 1);
+    const result = await withRetry<any[]>(() => query.limit(isDriverQuery ? 5 : 1));
+    const { data, error } = result;
     if (error) {
       if (error.code === 'PGRST116') {
         console.log('[fetchActiveTrip] No active trip in DB (empty table)');
@@ -1460,10 +1493,12 @@ export const clearAllDriversInDB = async (): Promise<boolean> => {
 // Fetch Stats
 export const fetchStats = async (): Promise<SystemStats | null> => {
   try {
-    const { data, error } = await supabase.from('ezz_stats').select('*').eq('id', 'singleton');
-    if (error) throw error;
-    if (!data || data.length === 0) return null;
-    const row = data[0];
+    const result = await withRetry<any[]>(() =>
+      supabase.from('ezz_stats').select('*').eq('id', 'singleton')
+    );
+    if (result.error) throw result.error;
+    if (!result.data || result.data.length === 0) return null;
+    const row = result.data[0];
   return {
     commissionRate: row.commission_rate || 15,
     totalRevenue: row.total_revenue || 0,
@@ -1727,8 +1762,10 @@ export const fetchLocations = async (): Promise<Location[] | null> => {
 // Save Location
 export const saveLocationInDB = async (loc: Location): Promise<boolean> => {
   try {
-    const { error } = await supabase.from('ezz_locations').upsert(mapLocationToDB(loc));
-    if (error) throw error;
+    const result = await withRetry<boolean>(() =>
+      supabase.from('ezz_locations').upsert(mapLocationToDB(loc))
+    );
+    if (result.error) throw result.error;
     return true;
   } catch (err: any) {
     console.warn('Could not save location to Supabase:', err.message);
