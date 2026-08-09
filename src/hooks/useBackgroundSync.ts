@@ -41,7 +41,7 @@ export const useBackgroundSync = (
   useEffect(() => {
     if (!supabaseConnected) return;
 
-    const pollInterval = 3000;
+    const pollInterval = 8000;
 
     const interval = setInterval(async () => {
       if (!isMountedRef.current) return;
@@ -78,7 +78,7 @@ export const useBackgroundSync = (
   useEffect(() => {
     if (!supabaseConnected) return;
 
-    let syncInterval = 30000;
+    let syncInterval = 45000;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const scheduleSync = async () => {
@@ -93,7 +93,7 @@ export const useBackgroundSync = (
           setStats(() => remoteStats);
         }
         if (locations.length > 0) {
-          locations.forEach(l => saveLocationInDB(l));
+          await Promise.allSettled(locations.map(l => saveLocationInDB(l)));
         }
       } catch {
         // ignore
