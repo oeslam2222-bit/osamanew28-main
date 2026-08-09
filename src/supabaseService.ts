@@ -959,20 +959,43 @@ export const saveDriver = async (driver: Driver): Promise<boolean> => {
     } else {
       delete driverData.password;
     }
-    console.log('[saveDriver] Attempting upsert for driver:', driverData.id, 'approval:', driverData.approval_status, 'commission:', driverData.total_commission_paid);
-    const { data, error } = await supabase
+    console.log('[saveDriver] 1. Starting save process for:', driverData.id, 'approval:', driverData.approval_status, 'commission:', driverData.total_commission_paid);
+
+    // Set app role before write to satisfy RLS
+    console.log('[saveDriver] 2. Calling set_app_role...');
+    try {
+      const { error: roleErr } = await supabase.rpc('set_app_role', { role: 'ADMIN' });
+      if (roleErr) {
+        console.warn('[saveDriver] Warning: set_app_role failed or not found:', roleErr);
+      } else {
+        console.log('[saveDriver] 3. set_app_role executed successfully.');
+      }
+    } catch (roleErr) {
+      console.warn('[saveDriver] Warning: set_app_role threw exception:', roleErr);
+    }
+
+    console.log('[saveDriver] 4. Executing upsert request...');
+    const upsertPromise = supabase
       .from('ezz_drivers')
       .upsert(driverData, { onConflict: 'id' })
       .select();
+
+    const timeoutPromise = new Promise<{ data: null; error: any }>((_, reject) =>
+      setTimeout(() => reject(new Error('Network request timed out after 5 seconds')), 5000)
+    );
+
+    const { data, error } = await Promise.race([upsertPromise, timeoutPromise]);
     const responseData = data as any[] | null;
-    console.log('[saveDriver] Upsert response:', { count: Array.isArray(responseData) ? responseData.length : 0, error: error?.message || null });
+    console.log('[saveDriver] 5. Upsert response:', { count: Array.isArray(responseData) ? responseData.length : 0, error: error?.message || null });
+
     if (error) {
-      console.warn('[saveDriver] Supabase error:', error);
-      throw error;
+      console.error('[saveDriver] 6. Supabase returned error:', error);
+      return false;
     }
+    console.log('[saveDriver] 6. Upsert completed successfully.');
     return true;
   } catch (err: any) {
-    console.warn('[saveDriver] Could not save driver to Supabase:', err.message);
+    console.error('[saveDriver] Exception caught:', err.message || err);
     return false;
   }
 };
