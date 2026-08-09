@@ -1462,9 +1462,6 @@ export default function App() {
                    isOnline: isStale ? false : rd.isOnline,
                    status: isStale ? 'AVAILABLE' : (rd.isOnline ? rd.status : 'OFFLINE'),
                  };
-                 if (ld.approvalStatus !== rd.approvalStatus) merged.approvalStatus = ld.approvalStatus;
-                 if (ld.totalCommissionPaid !== rd.totalCommissionPaid) merged.totalCommissionPaid = ld.totalCommissionPaid;
-                 if (JSON.stringify(ld.serviceAreas) !== JSON.stringify(rd.serviceAreas)) merged.serviceAreas = ld.serviceAreas;
                  return merged;
                }
                return rd;
@@ -3176,10 +3173,12 @@ export default function App() {
 
   const handleSettleDriverCommissions = async (driverId: string) => {
     const driver = drivers.find((d) => d.id === driverId);
+    console.log('[handleSettleDriverCommissions] driverId:', driverId, 'found:', !!driver, 'supabaseConnected:', supabaseConnected, 'currentCommission:', driver?.totalCommissionPaid);
     if (!driver) return;
     const cleared = { ...driver, totalCommissionPaid: 0 };
     if (supabaseConnected) {
       const saved = await saveDriver(cleared);
+      console.log('[handleSettleDriverCommissions] saveDriver result:', saved);
       if (saved) {
         setDrivers((prev) => prev.map((d) => (d.id === driverId ? cleared : d)));
         lastSyncedDriversRef.current[driverId] = {
@@ -3235,6 +3234,7 @@ export default function App() {
   // Account verification workflows called by Administrator
   const handleApproveDriver = async (driverId: string) => {
     const driver = drivers.find(d => d.id === driverId);
+    console.log('[handleApproveDriver] driverId:', driverId, 'found:', !!driver, 'supabaseConnected:', supabaseConnected, 'currentApproval:', driver?.approvalStatus);
     if (!driver) return;
     if (!supabaseConnected) {
       setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
@@ -3244,6 +3244,7 @@ export default function App() {
     const updated = { ...driver, approvalStatus: 'APPROVED' as const };
     try {
       const saved = await saveDriver(updated);
+      console.log('[handleApproveDriver] saveDriver result:', saved);
       if (saved) {
         setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
         lastSyncedDriversRef.current[driverId] = {
@@ -3263,7 +3264,7 @@ export default function App() {
         triggerToast(lang === 'ar' ? 'خطأ في الحفظ' : 'Save error', lang === 'ar' ? 'فشل حفظ التغيير في قاعدة البيانات' : 'Failed to save changes to database', 'warning');
       }
     } catch (e) {
-      console.error('Error saving driver approval:', e);
+      console.error('[handleApproveDriver] Error:', e);
       triggerToast(lang === 'ar' ? 'خطأ' : 'Error', lang === 'ar' ? 'حدث خطأ أثناء حفظ الموافقة' : 'Error occurred while saving approval', 'warning');
     }
   };

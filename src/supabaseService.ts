@@ -959,11 +959,17 @@ export const saveDriver = async (driver: Driver): Promise<boolean> => {
     } else {
       delete driverData.password;
     }
-    const { error } = await supabase.from('ezz_drivers').upsert(driverData);
-    if (error) throw error;
+    console.log('[saveDriver] Attempting upsert for driver:', driverData.id, 'approval:', driverData.approval_status, 'commission:', driverData.total_commission_paid);
+    const { data, error } = await supabase.from('ezz_drivers').upsert(driverData);
+    const responseData = data as any[] | null;
+    console.log('[saveDriver] Upsert response:', { count: Array.isArray(responseData) ? responseData.length : 0, error: error?.message || null });
+    if (error) {
+      console.warn('[saveDriver] Supabase error:', error);
+      throw error;
+    }
     return true;
   } catch (err: any) {
-    console.warn('Could not save driver to Supabase:', err.message);
+    console.warn('[saveDriver] Could not save driver to Supabase:', err.message);
     return false;
   }
 };
