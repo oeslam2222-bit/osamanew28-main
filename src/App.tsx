@@ -3240,10 +3240,8 @@ export default function App() {
     const driver = drivers.find(d => d.id === driverId);
     console.log('[handleApproveDriver] driverId:', driverId, 'found:', !!driver, 'supabaseConnected:', supabaseConnected, 'currentApproval:', driver?.approvalStatus);
     if (!driver) return;
-    pendingDriverToggleRef.current = driverId;
     if (!supabaseConnected) {
       setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
-      pendingDriverToggleRef.current = null;
       triggerToast(lang === 'ar' ? 'غير متصل' : 'Offline', lang === 'ar' ? 'السجل محفوظ محلياً فقط' : 'Saved locally only', 'warning');
       return;
     }
@@ -3272,18 +3270,14 @@ export default function App() {
     } catch (e) {
       console.error('[handleApproveDriver] Error:', e);
       triggerToast(lang === 'ar' ? 'خطأ' : 'Error', lang === 'ar' ? 'حدث خطأ أثناء حفظ الموافقة' : 'Error occurred while saving approval', 'warning');
-    } finally {
-      pendingDriverToggleRef.current = null;
     }
   };
 
   const handleRejectDriver = async (driverId: string) => {
     const driver = drivers.find(d => d.id === driverId);
     if (!driver) return;
-    pendingDriverToggleRef.current = driverId;
     if (!supabaseConnected) {
       setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'REJECTED' } : d));
-      pendingDriverToggleRef.current = null;
       return;
     }
     try {
@@ -3306,18 +3300,14 @@ export default function App() {
       }
     } catch (e) {
       console.error('Error rejecting driver:', e);
-    } finally {
-      pendingDriverToggleRef.current = null;
     }
   };
 
   const handleFreezeDriver = async (driverId: string) => {
     const driver = drivers.find(d => d.id === driverId);
     if (!driver) return;
-    pendingDriverToggleRef.current = driverId;
     if (!supabaseConnected) {
       setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'FROZEN', isOnline: false } : d));
-      pendingDriverToggleRef.current = null;
       return;
     }
     try {
@@ -3340,18 +3330,14 @@ export default function App() {
       }
     } catch (e) {
       console.error('Error freezing driver:', e);
-    } finally {
-      pendingDriverToggleRef.current = null;
     }
   };
 
   const handleUnfreezeDriver = async (driverId: string) => {
     const driver = drivers.find(d => d.id === driverId);
     if (!driver) return;
-    pendingDriverToggleRef.current = driverId;
     if (!supabaseConnected) {
       setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
-      pendingDriverToggleRef.current = null;
       return;
     }
     try {
@@ -3374,8 +3360,6 @@ export default function App() {
       }
     } catch (e) {
       console.error('Error unfreezing driver:', e);
-    } finally {
-      pendingDriverToggleRef.current = null;
     }
   };
 
