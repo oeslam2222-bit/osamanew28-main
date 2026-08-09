@@ -2,7 +2,7 @@ import React, { useState, useEffect, lazy, Suspense, Dispatch, SetStateAction } 
 import { Location, Driver, Trip, Rider, Region, Ad } from '../types';
 import { MapPin, ArrowRightLeft, Navigation, Phone, Star, DollarSign, Loader2, Sparkles, AlertCircle, Car, HelpCircle, MessageSquare, Search, Check, X, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { calculateHaversineDistance, estimateDrivingDistance, calculateDynamicFare, getVehiclePricing, calculateVehicleFare, calculateFullTripFare } from '../utils/haversine';
-import { fetchTripsHistoryPaginated, saveRiderPreferences, validatePromoCode } from '../supabaseService';
+import { fetchTripsHistoryPaginated, saveRiderPreferences, validatePromoCode, getDeviceId } from '../supabaseService';
 import { RiderPreferences } from '../types';
 import { AdBanner } from './AdBanner';
 
@@ -26,7 +26,7 @@ interface RiderViewProps {
   setSelectedPickupRegion: (regionId: string) => void;
   setSelectedPickup: (id: string) => void;
   setSelectedDropoff: (id: string) => void;
-  onRequestRide: (requestedVehicleType: 'CAR' | 'MOTORCYCLE' | 'TOKTOK' | 'TRICYCLE', pickupLandmark?: string, promoCode?: string, promoCodeId?: string) => void;
+  onRequestRide: (requestedVehicleType: 'CAR' | 'MOTORCYCLE' | 'TOKTOK' | 'TRICYCLE', pickupLandmark?: string, promoCode?: string, promoCodeId?: string, promoDiscount?: number) => void;
   onCancelRide: () => void;
   onTripCompleted: () => void;
   onConfirmArrival?: () => void;
@@ -76,6 +76,12 @@ export const RiderView: React.FC<RiderViewProps> = ({
   
   const [showMathExplanation, setShowMathExplanation] = useState(false);
   const [chatText, setChatText] = useState('');
+
+  const getRegionFilteredAds = (): Ad[] => {
+    if (!ads || ads.length === 0) return [];
+    if (!selectedPickupRegion) return ads;
+    return ads.filter(ad => !ad.regionId || ad.regionId === selectedPickupRegion);
+  };
   
   // Rider Trip History (paginated + filtered)
   const [myTrips, setMyTrips] = useState<Trip[]>([]);
@@ -148,9 +154,16 @@ export const RiderView: React.FC<RiderViewProps> = ({
   const [placeSearchLoading, setPlaceSearchLoading] = useState(false);
   const [geoError, setGeoError] = useState('');
   const [showMap, setShowMap] = useState(() => {
-    const hasActiveTrip = !!activeTrip && activeTrip.status !== 'COMPLETED' && activeTrip.status !== 'CANCELLED';
+    const hasActiveTrip = !!activeTrip && !!activeTrip.status && activeTrip.status !== 'COMPLETED' && activeTrip.status !== 'CANCELLED';
     return hasActiveTrip;
   });
+
+  useEffect(() => {
+    if (!activeTrip) {
+      setShowMap(false);
+    }
+  }, [activeTrip]);
+
   const placeSearchCacheRef = React.useRef<Record<string, { display_name: string; lat: number; lng: number; city: string }[]>>({});
   const placeSearchLastRef = React.useRef<{ q: string; t: number } | null>(null);
   const placeSearchDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -162,16 +175,43 @@ export const RiderView: React.FC<RiderViewProps> = ({
   const buildPlaceName = (data: any): { name: string; city: string } => {
     const address = data?.address || {};
     const parts = (data?.display_name || '').split(',').map((s: string) => s.trim()).filter(Boolean);
-    const road = address.road || address.pedestrian || address.footway || address.highway || '';
+    const road = address.road || address.pedestrian || address.footway || address.highway || address.street || address.lane || address.way || '';
     const houseNumber = address.house_number || '';
+    const building = address.building || '';
     const neighbourhood =
       address.neighbourhood || address.suburb || address.hamlet || address.village || address.quarter || '';
     const town = address.town || address.city || address.county || address.municipality || '';
     const state = address.state || address.governorate || '';
+    const amenity = address.amenity || '';
+    const shop = address.shop || '';
+    const tourism = address.tourism || '';
+    const railway = address.railway || '';
+    const busStop = address.bus_stop || '';
+    const placeOfWorship = address.place_of_worship || '';
+    const healthcare = address.healthcare || '';
 
-    // Closest recognizable point first
+    // Prefer a named POI / landmark when available (top-level name from Nominatim)
+    const poiName = data?.name || '';
+
+    // Closest recognizable point first: POI name > specific landmark > street > area
     let name = (lang === 'ar' ? 'موقعي الحالي' : 'My Location');
-    if (road && houseNumber) {
+    if (poiName) {
+      name = poiName;
+    } else if (amenity) {
+      name = amenity;
+    } else if (shop) {
+      name = shop;
+    } else if (placeOfWorship) {
+      name = placeOfWorship;
+    } else if (healthcare) {
+      name = healthcare;
+    } else if (railway) {
+      name = railway;
+    } else if (busStop) {
+      name = busStop;
+    } else if (building) {
+      name = building;
+    } else if (road && houseNumber) {
       name = `${houseNumber} ${road}`;
     } else if (road) {
       name = road;
@@ -291,12 +331,38 @@ export const RiderView: React.FC<RiderViewProps> = ({
   const applyPlaceResult = (item: { display_name: string; lat: number; lng: number; city: string }) => {
     const parts = item.display_name.split(',').map((s: string) => s.trim()).filter(Boolean);
     const address = (item as any).address || {};
-    const road = address.road || address.pedestrian || address.footway || address.highway || '';
-    const neighbourhood = address.neighbourhood || address.suburb || address.village || address.city || '';
+    const road = address.road || address.pedestrian || address.footway || address.highway || address.street || address.lane || address.way || '';
     const houseNumber = address.house_number || '';
+    const building = address.building || '';
+    const neighbourhood = address.neighbourhood || address.suburb || address.village || address.city || '';
+    const amenity = address.amenity || '';
+    const shop = address.shop || '';
+    const tourism = address.tourism || '';
+    const railway = address.railway || '';
+    const busStop = address.bus_stop || '';
+    const placeOfWorship = address.place_of_worship || '';
+    const healthcare = address.healthcare || '';
+
+    const poiName = (item as any).name || '';
 
     let name = '';
-    if (road && houseNumber) {
+    if (poiName) {
+      name = poiName;
+    } else if (amenity) {
+      name = amenity;
+    } else if (shop) {
+      name = shop;
+    } else if (placeOfWorship) {
+      name = placeOfWorship;
+    } else if (healthcare) {
+      name = healthcare;
+    } else if (railway) {
+      name = railway;
+    } else if (busStop) {
+      name = busStop;
+    } else if (building) {
+      name = building;
+    } else if (road && houseNumber) {
       name = `${houseNumber} ${road}`;
     } else if (road) {
       name = road;
@@ -332,6 +398,10 @@ export const RiderView: React.FC<RiderViewProps> = ({
 
   const pickupLoc = locations.find((l) => l.id === selectedPickup);
   const dropoffLoc = locations.find((l) => l.id === selectedDropoff);
+
+  const activeTripChatMessages = activeTrip && Array.isArray(activeTrip.chatMessages)
+    ? activeTrip.chatMessages.filter((msg) => msg && typeof msg.id === 'string')
+    : [];
 
   // Prefetch real road distance and route when both pickup and dropoff are selected
   useEffect(() => {
@@ -386,6 +456,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
       const result = await fetchTripsHistoryPaginated({
         userId: rider.id,
         role: 'rider',
+        deviceId: getDeviceId(),
         dateFrom: myTripDateFrom || undefined,
         dateTo: myTripDateTo || undefined,
         page,
@@ -550,8 +621,6 @@ export const RiderView: React.FC<RiderViewProps> = ({
         lng: fav.lng,
         city: lang === 'ar' ? 'العياط' : 'El-Ayyat',
         country: 'مصر',
-        x: Math.round(20 + Math.random() * 60),
-        y: Math.round(20 + Math.random() * 60),
       };
       if (onUpdateLocations) {
         onUpdateLocations([newLoc, ...locations]);
@@ -591,8 +660,8 @@ export const RiderView: React.FC<RiderViewProps> = ({
             {rider.name[0]}
           </div>
           <div>
-            <h4 className="text-xs font-semibold text-slate-800">{lang === 'ar' ? rider.name : 'Ezz El-Din'}</h4>
-            <p className="text-[10px] text-slate-400">{lang === 'ar' ? rider.phone : rider.phone}</p>
+            <h4 className="text-xs font-semibold text-slate-800">{rider.name}</h4>
+            <p className="text-[10px] text-slate-400">{rider.phone}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -747,7 +816,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
                   </button>
                 </div>
                 <div className="pt-1">
-                  <AdBanner ads={ads || []} variant="waiting" lang={lang} lowDataMode={lowDataMode} />
+                  <AdBanner ads={getRegionFilteredAds()} variant="waiting" lang={lang} lowDataMode={lowDataMode} />
                 </div>
               </>
             )}
@@ -870,32 +939,39 @@ export const RiderView: React.FC<RiderViewProps> = ({
 
             {/* Driver Details if Assigned */}
             {activeTrip.driverId && (
-              <div className="bg-white border border-slate-100 p-3 rounded-xl flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-10 h-10 rounded-full bg-slate-900 text-amber-400 flex items-center justify-center font-bold shadow">
-                    <Car className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-800">{activeTrip.driverName}</h4>
-                    <p className="text-[9px] text-slate-500 flex flex-wrap items-center gap-1.5 mt-0.5">
-                      <span className="bg-amber-100 text-amber-800 text-[8px] font-extrabold px-1.5 py-0.5 rounded">
-                        {(() => {
-                          const driverType = drivers.find((d) => d.id === activeTrip.driverId)?.vehicleType;
-                          if (driverType === 'CAR') return lang === 'ar' ? 'سيارة 🚖' : 'Car 🚖';
-                          if (driverType === 'MOTORCYCLE') return lang === 'ar' ? 'موتوسيكل 🏍️' : 'Motorcycle 🏍️';
-                          if (driverType === 'TOKTOK') return lang === 'ar' ? 'توكتوك 🛺' : 'TukTuk 🛺';
-                          return lang === 'ar' ? 'تروسيكل 🚲' : 'Tricycle 🚲';
-                        })()}
-                      </span>
-                      <span className="font-bold text-slate-700">
-                        {drivers.find((d) => d.id === activeTrip.driverId)?.vehicleName}
-                      </span>
-                      <span>|</span>
-                      <span className="font-mono text-[9px] font-bold bg-slate-100 px-1 py-0.2 rounded text-slate-700">
-                        {drivers.find((d) => d.id === activeTrip.driverId)?.carPlate}
-                      </span>
-                    </p>
-                  </div>
+              <div className="bg-white border border-slate-100 p-3 rounded-xl flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-100 shrink-0">
+                  {(() => {
+                    const drv = drivers.find(d => d.id === activeTrip.driverId);
+                    return drv?.personalPhoto ? (
+                      <img src={drv.personalPhoto} alt={drv.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-base font-black text-slate-500">
+                        {(drv?.name && drv.name.charAt(0)) || 'س'}
+                      </div>
+                    );
+                  })()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-xs font-bold text-slate-800 truncate">{activeTrip.driverName}</h4>
+                  <p className="text-[9px] text-slate-500 flex flex-wrap items-center gap-1.5 mt-0.5">
+                    <span className="bg-amber-100 text-amber-800 text-[8px] font-extrabold px-1.5 py-0.5 rounded">
+                      {(() => {
+                        const driverType = drivers.find((d) => d.id === activeTrip.driverId)?.vehicleType;
+                        if (driverType === 'CAR') return lang === 'ar' ? 'سيارة 🚖' : 'Car 🚖';
+                        if (driverType === 'MOTORCYCLE') return lang === 'ar' ? 'موتوسيكل 🏍️' : 'Motorcycle 🏍️';
+                        if (driverType === 'TOKTOK') return lang === 'ar' ? 'توكتوك 🛺' : 'TukTuk 🛺';
+                        return lang === 'ar' ? 'تروسيكل 🚲' : 'Tricycle 🚲';
+                      })()}
+                    </span>
+                    <span className="font-bold text-slate-700">
+                      {drivers.find((d) => d.id === activeTrip.driverId)?.vehicleName}
+                    </span>
+                    <span>|</span>
+                    <span className="font-mono text-[9px] font-bold bg-slate-100 px-1 py-0.2 rounded text-slate-700">
+                      {drivers.find((d) => d.id === activeTrip.driverId)?.carPlate}
+                    </span>
+                  </p>
                 </div>
                 <div className="text-right">
                   <div className="flex items-center gap-0.5 text-amber-500 justify-end">
@@ -924,8 +1000,8 @@ export const RiderView: React.FC<RiderViewProps> = ({
                 </div>
 
                 <div className="bg-slate-50 rounded-xl p-2 max-h-[120px] overflow-y-auto space-y-1.5 border border-slate-100 flex flex-col pointer-events-auto">
-                  {activeTrip.chatMessages && activeTrip.chatMessages.length > 0 ? (
-                    [...activeTrip.chatMessages]
+                  {activeTripChatMessages.length > 0 ? (
+                    [...activeTripChatMessages]
                       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
                       .map((msg) => (
                       <div
@@ -1043,7 +1119,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
         {(!activeTrip || activeTrip.riderId !== rider.id) && (
           <div className="space-y-4">
             {/* Store Banner Advertisement */}
-            <AdBanner ads={ads || []} variant="home" lang={lang} lowDataMode={lowDataMode} />
+            <AdBanner ads={getRegionFilteredAds()} variant="home" lang={lang} lowDataMode={lowDataMode} />
 
             {noAvailableDrivers && (
               <div className="bg-rose-50 border border-rose-200 rounded-2xl p-3 space-y-2 text-center animate-fade-in">
@@ -1573,7 +1649,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
               type="button"
               disabled={!selectedPickup || !selectedDropoff || !selectedPickupRegion || availableDrivers.length === 0}
                 onClick={() => {
-                  onRequestRide(requestedVehicleType, pickupLandmark, appliedPromo?.code, appliedPromo?.promoCodeId);
+                  onRequestRide(requestedVehicleType, pickupLandmark, appliedPromo?.code, appliedPromo?.promoCodeId, appliedPromo?.discount);
                   setPickupLandmark('');
                 }}
               className="w-full py-3 bg-slate-900 hover:bg-black disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-xs rounded-xl shadow-md disabled:shadow-none hover:scale-[1.01] transition-all cursor-pointer"
@@ -1708,7 +1784,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
                           type="button"
                           onClick={() => {
                             setConfirmStep('SENDING');
-                            onRequestRide(confirmVehicleType, confirmPickupLandmark || undefined, appliedPromo?.code, appliedPromo?.promoCodeId);
+                            onRequestRide(confirmVehicleType, confirmPickupLandmark || undefined, appliedPromo?.code, appliedPromo?.promoCodeId, appliedPromo?.discount);
                             setPickupLandmark('');
                             setShowConfirmModal(false);
                           }}

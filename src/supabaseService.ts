@@ -208,7 +208,9 @@ CREATE TABLE IF NOT EXISTS ezz_promo_codes (
   is_active BOOLEAN DEFAULT TRUE,
   used_at TEXT,
   created_at TEXT DEFAULT NOW()::TEXT,
-  expires_at TEXT
+  expires_at TEXT,
+  usage_limit INTEGER,
+  usage_count INTEGER DEFAULT 0
 );
 
 ALTER PUBLICATION supabase_realtime ADD TABLE ezz_promo_codes;
@@ -230,6 +232,7 @@ CREATE POLICY "Allow anon delete promo_codes" ON ezz_promo_codes FOR DELETE USIN
 CREATE INDEX IF NOT EXISTS idx_promo_code ON ezz_promo_codes(code);
 CREATE INDEX IF NOT EXISTS idx_promo_rider ON ezz_promo_codes(rider_id);
 CREATE INDEX IF NOT EXISTS idx_promo_used ON ezz_promo_codes(used);
+CREATE INDEX IF NOT EXISTS idx_promo_usage ON ezz_promo_codes(usage_limit, usage_count);
 
 -- ============================================================
 -- 6. جدول إحصائيات النظام
@@ -340,8 +343,11 @@ CREATE TABLE IF NOT EXISTS ads (
   ad_fee DOUBLE PRECISION DEFAULT 0,
   daily_impression_limit INTEGER DEFAULT 0,
   impressions INTEGER DEFAULT 0,
+  region_id TEXT,
   created_at TEXT DEFAULT NOW()::TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_ads_region ON ads(region_id);
 
 -- دوال زيادة عدادات الإعلانات (تستخدمها الواجهة عند الضغط/المشاهدة)
 CREATE OR REPLACE FUNCTION increment_ad_click(ad_id TEXT)
@@ -476,19 +482,175 @@ CREATE POLICY "anon_write_active_trip" ON ezz_active_trip FOR ALL TO anon USING 
 -- تفعيل Realtime على جدول الرحلة النشطة (مطلوب لوصول الطلب للسائق فوراً)
 ALTER PUBLICATION supabase_realtime ADD TABLE ezz_active_trip;
 
--- Trips History: الإدمن يقرأ الكل، Rider/Sdriver يقرأ سجلهم فقط
+-- Trips History: منع القراءة المباشرة، واستخدام RPC functions فقط للعزل
 DROP POLICY IF EXISTS "Allow public read trips_history" ON ezz_trips_history;
-CREATE POLICY "rider_read_own_trips" ON ezz_trips_history FOR SELECT TO anon USING (
-  rider_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'RIDER')
-);
-CREATE POLICY "driver_read_own_trips" ON ezz_trips_history FOR SELECT TO anon USING (
-  driver_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'DRIVER')
-);
-CREATE POLICY "admin_read_all_trips" ON ezz_trips_history FOR SELECT TO anon USING (
-  EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
-);
+DROP POLICY IF EXISTS "rider_read_own_trips" ON ezz_trips_history;
+DROP POLICY IF EXISTS "driver_read_own_trips" ON ezz_trips_history;
+DROP POLICY IF EXISTS "admin_read_all_trips" ON ezz_trips_history;
 DROP POLICY IF EXISTS "Allow public write trips_history" ON ezz_trips_history;
-CREATE POLICY "anon_write_trips_history" ON ezz_trips_history FOR ALL TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "anon_write_trips_history" ON ezz_trips_history;
+
+CREATE POLICY "deny_anon_read_trips" ON ezz_trips_history
+  FOR SELECT TO anon
+  USING (false);
+
+CREATE POLICY "anon_write_trips" ON ezz_trips_history
+  FOR INSERT, UPDATE TO anon
+  USING (true)
+  WITH CHECK (true);
+
+CREATE POLICY "admin_delete_trips" ON ezz_trips_history
+  FOR DELETE TO anon
+  USING (
+    EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+  );
+
+-- RPC: Get paginated trips for current user (rider or driver)
+CREATE OR REPLACE FUNCTION get_my_trips(
+  p_user_id TEXT,
+  p_role TEXT,
+  p_page INTEGER DEFAULT 0,
+  p_limit INTEGER DEFAULT 10,
+  p_date_from TEXT DEFAULT NULL,
+  p_date_to TEXT DEFAULT NULL,
+  p_status_filter TEXT DEFAULT 'all',
+  p_search TEXT DEFAULT NULL
+)
+RETURNS SETOF ezz_trips_history
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  SELECT * FROM ezz_trips_history
+  WHERE 
+    (p_role = 'rider' AND rider_id = p_user_id)
+    OR (p_role = 'driver' AND driver_id = p_user_id)
+  AND (p_date_from IS NULL OR created_at >= p_date_from)
+  AND (p_date_to IS NULL OR created_at <= p_date_to)
+  AND (
+    p_status_filter = 'all' 
+    OR (p_status_filter = 'ACTIVE' AND status IN ('ACCEPTED', 'ARRIVED', 'STARTED'))
+    OR status = p_status_filter
+  )
+  AND (
+    p_search IS NULL OR p_search = '' OR
+    LOWER(rider_name) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(driver_name, '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+  )
+  ORDER BY created_at DESC
+  LIMIT p_limit OFFSET (p_page * p_limit);
+$$;
+
+-- RPC: Count trips for current user (rider or driver)
+CREATE OR REPLACE FUNCTION count_my_trips(
+  p_user_id TEXT,
+  p_role TEXT,
+  p_date_from TEXT DEFAULT NULL,
+  p_date_to TEXT DEFAULT NULL,
+  p_status_filter TEXT DEFAULT 'all',
+  p_search TEXT DEFAULT NULL
+)
+RETURNS BIGINT
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  SELECT COUNT(*) FROM ezz_trips_history
+  WHERE 
+    (p_role = 'rider' AND rider_id = p_user_id)
+    OR (p_role = 'driver' AND driver_id = p_user_id)
+  AND (p_date_from IS NULL OR created_at >= p_date_from)
+  AND (p_date_to IS NULL OR created_at <= p_date_to)
+  AND (
+    p_status_filter = 'all' 
+    OR (p_status_filter = 'ACTIVE' AND status IN ('ACCEPTED', 'ARRIVED', 'STARTED'))
+    OR status = p_status_filter
+  )
+  AND (
+    p_search IS NULL OR p_search = '' OR
+    LOWER(rider_name) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(driver_name, '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+  );
+$$;
+
+-- RPC: Get paginated trips for admin (all trips with filtering)
+CREATE OR REPLACE FUNCTION get_admin_trips(
+  p_page INTEGER DEFAULT 0,
+  p_limit INTEGER DEFAULT 20,
+  p_date_from TEXT DEFAULT NULL,
+  p_date_to TEXT DEFAULT NULL,
+  p_status_filter TEXT DEFAULT 'all',
+  p_search TEXT DEFAULT NULL
+)
+RETURNS SETOF ezz_trips_history
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  SELECT * FROM ezz_trips_history
+  WHERE (p_date_from IS NULL OR created_at >= p_date_from)
+  AND (p_date_to IS NULL OR created_at <= p_date_to)
+  AND (
+    p_status_filter = 'all' 
+    OR (p_status_filter = 'ACTIVE' AND status IN ('ACCEPTED', 'ARRIVED', 'STARTED'))
+    OR status = p_status_filter
+  )
+  AND (
+    p_search IS NULL OR p_search = '' OR
+    LOWER(rider_name) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(driver_name, '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+  )
+  ORDER BY created_at DESC
+  LIMIT p_limit OFFSET (p_page * p_limit);
+$$;
+
+-- RPC: Count all trips for admin
+CREATE OR REPLACE FUNCTION count_admin_trips(
+  p_date_from TEXT DEFAULT NULL,
+  p_date_to TEXT DEFAULT NULL,
+  p_status_filter TEXT DEFAULT 'all',
+  p_search TEXT DEFAULT NULL
+)
+RETURNS BIGINT
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  SELECT COUNT(*) FROM ezz_trips_history
+  WHERE (p_date_from IS NULL OR created_at >= p_date_from)
+  AND (p_date_to IS NULL OR created_at <= p_date_to)
+  AND (
+    p_status_filter = 'all' 
+    OR (p_status_filter = 'ACTIVE' AND status IN ('ACCEPTED', 'ARRIVED', 'STARTED'))
+    OR status = p_status_filter
+  )
+  AND (
+    p_search IS NULL OR p_search = '' OR
+    LOWER(rider_name) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(driver_name, '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(pickup->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+    OR LOWER(COALESCE(dropoff->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+  );
+$$;
+
+-- RPC: Admin clear all trips
+CREATE OR REPLACE FUNCTION admin_clear_all_trips()
+RETURNS VOID
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  DELETE FROM ezz_trips_history;
+$$;
 
 -- Stats: القراءة للجميع، التعديل للإدمن فقط
 DROP POLICY IF EXISTS "Allow public read stats" ON ezz_stats;
@@ -701,7 +863,7 @@ export const mapRegionToDB = (region: Region) => ({
 // --- TRIP TRANSFORMS ---
 export const mapTripFromDB = (row: any): Trip => ({
   id: row.id,
-  riderId: row.rider_id || '',
+  riderId: row.rider_id || undefined,
   riderName: row.rider_name || '',
   riderPhone: row.rider_phone || '',
   driverId: row.driver_id || undefined,
@@ -717,7 +879,9 @@ export const mapTripFromDB = (row: any): Trip => ({
   requestedVehicleType: row.requested_vehicle_type || undefined,
   createdAt: row.created_at || '',
   completedAt: row.completed_at || undefined,
-  chatMessages: row.chat_messages || [],
+  chatMessages: Array.isArray(row.chat_messages)
+    ? row.chat_messages.filter((msg: any) => msg && typeof msg.id === 'string')
+    : [],
   riderRatingToDriver: row.rider_rating_to_driver || undefined,
   riderFeedbackTags: row.rider_feedback_tags || [],
   riderFeedbackComment: row.rider_feedback_comment || undefined,
@@ -725,7 +889,9 @@ export const mapTripFromDB = (row: any): Trip => ({
   driverFeedbackTags: row.driver_feedback_tags || [],
   driverFeedbackComment: row.driver_feedback_comment || undefined,
   routeGeometry: row.route_geometry || undefined,
-  offeredDriverIds: row.offered_driver_ids || undefined,
+  offeredDriverIds: Array.isArray(row.offered_driver_ids)
+    ? row.offered_driver_ids.filter((id: any) => typeof id === 'string')
+    : undefined,
   currentOfferedDriverId: row.current_offered_driver_id || undefined,
   dispatchTimer: row.dispatch_timer ?? undefined,
   dispatchTimerMax: row.dispatch_timer_max ?? undefined,
@@ -751,7 +917,7 @@ export const mapTripToDB = (trip: Trip) => ({
   requested_vehicle_type: trip.requestedVehicleType || null,
   created_at: trip.createdAt,
   completed_at: trip.completedAt || null,
-  chat_messages: trip.chatMessages || [],
+  chat_messages: trip.chatMessages?.filter((msg) => msg && typeof msg.id === 'string') || [],
   rider_rating_to_driver: trip.riderRatingToDriver || null,
   rider_feedback_tags: trip.riderFeedbackTags || [],
   rider_feedback_comment: trip.riderFeedbackComment || null,
@@ -785,17 +951,51 @@ export const fetchDrivers = async (): Promise<Driver[] | null> => {
 // Save Driver
 export const saveDriver = async (driver: Driver): Promise<boolean> => {
   try {
-    const passwordToStore = isSecureHash(driver.password)
-      ? driver.password
-      : await hashPassword(driver.password || generateUUID());
-    const { error } = await supabase.from('ezz_drivers').upsert({
-      ...mapDriverToDB(driver),
-      password: passwordToStore,
-    });
-    if (error) throw error;
+    const driverData = { ...mapDriverToDB(driver) };
+    if (driver.password && isSecureHash(driver.password)) {
+      driverData.password = driver.password;
+    } else if (driver.password && !isSecureHash(driver.password)) {
+      driverData.password = await hashPassword(driver.password);
+    } else {
+      delete driverData.password;
+    }
+    console.log('[saveDriver] 1. Starting save process for:', driverData.id, 'approval:', driverData.approval_status, 'commission:', driverData.total_commission_paid);
+
+    // Set app role before write to satisfy RLS
+    console.log('[saveDriver] 2. Calling set_app_role...');
+    try {
+      const { error: roleErr } = await supabase.rpc('set_app_role', { role: 'ADMIN' });
+      if (roleErr) {
+        console.warn('[saveDriver] Warning: set_app_role failed or not found:', roleErr);
+      } else {
+        console.log('[saveDriver] 3. set_app_role executed successfully.');
+      }
+    } catch (roleErr) {
+      console.warn('[saveDriver] Warning: set_app_role threw exception:', roleErr);
+    }
+
+    console.log('[saveDriver] 4. Executing upsert request...');
+    const upsertPromise = supabase
+      .from('ezz_drivers')
+      .upsert(driverData, { onConflict: 'id' })
+      .select();
+
+    const timeoutPromise = new Promise<{ data: null; error: any }>((_, reject) =>
+      setTimeout(() => reject(new Error('Network request timed out after 5 seconds')), 5000)
+    );
+
+    const { data, error } = await Promise.race([upsertPromise, timeoutPromise]);
+    const responseData = data as any[] | null;
+    console.log('[saveDriver] 5. Upsert response:', { count: Array.isArray(responseData) ? responseData.length : 0, error: error?.message || null });
+
+    if (error) {
+      console.error('[saveDriver] 6. Supabase returned error:', error);
+      return false;
+    }
+    console.log('[saveDriver] 6. Upsert completed successfully.');
     return true;
   } catch (err: any) {
-    console.warn('Could not save driver to Supabase:', err.message);
+    console.error('[saveDriver] Exception caught:', err.message || err);
     return false;
   }
 };
@@ -827,13 +1027,15 @@ export const fetchRiders = async (): Promise<Rider[] | null> => {
 // Save Rider
 export const saveRider = async (rider: Rider): Promise<boolean> => {
   try {
-    const passwordToStore = isSecureHash(rider.password)
-      ? rider.password
-      : await hashPassword(rider.password || generateUUID());
-    const { error } = await supabase.from('ezz_riders').upsert({
-      ...mapRiderToDB(rider),
-      password: passwordToStore,
-    });
+    const riderData = { ...mapRiderToDB(rider) };
+    if (rider.password && isSecureHash(rider.password)) {
+      riderData.password = rider.password;
+    } else if (rider.password && !isSecureHash(rider.password)) {
+      riderData.password = await hashPassword(rider.password);
+    } else {
+      delete riderData.password;
+    }
+    const { error } = await supabase.from('ezz_riders').upsert(riderData);
     if (error) throw error;
     return true;
   } catch (err: any) {
@@ -870,7 +1072,8 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
     }
     // admin gets all
 
-    const { data, error } = await query.limit(1);
+    const isDriverQuery = userId && userRole === 'driver';
+    const { data, error } = await query.limit(isDriverQuery ? 5 : 1);
     if (error) {
       if (error.code === 'PGRST116') {
         console.log('[fetchActiveTrip] No active trip in DB (empty table)');
@@ -906,6 +1109,22 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
   } catch (err: any) {
     console.warn('Could not fetch active trip from Supabase:', err.message);
     return 'NO_TABLE';
+  }
+};
+
+// Fetch all active trips (for admin dashboard live tracking)
+export const fetchAllActiveTrips = async (): Promise<Trip[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('ezz_active_trip')
+      .select('*')
+      .in('status', ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'])
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(mapTripFromDB);
+  } catch (err: any) {
+    console.warn('Could not fetch all active trips from Supabase:', err.message);
+    return [];
   }
 };
 
@@ -946,7 +1165,13 @@ export const saveActiveTrip = async (trip: Trip | null, clearTripId?: string): P
             merged.push(m);
           }
         }
-        trip.chatMessages = merged;
+        const tripToSave = { ...trip, chatMessages: merged };
+        const { error: insertError } = await supabase
+          .from('ezz_active_trip')
+          .upsert(mapTripToDB(tripToSave), { onConflict: 'id' });
+        if (insertError) throw insertError;
+        console.log('[saveActiveTrip] Trip saved successfully, chatMessages count after merge:', tripToSave.chatMessages?.length || 0);
+        return true;
       }
     }
 
@@ -1007,23 +1232,22 @@ export const subscribeToActiveTrips = (
 };
 
 // Fetch Trips History
-export const fetchTripsHistory = async ({ userId, role }: { userId?: string; role?: 'rider' | 'driver' } = {}): Promise<Trip[] | null> => {
+export const fetchTripsHistory = async ({ userId, role, deviceId }: { userId?: string; role?: 'rider' | 'driver'; deviceId?: string } = {}): Promise<Trip[] | null> => {
   try {
-    let query = supabase
-      .from('ezz_trips_history')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(50);
-
-    if (role === 'rider' && userId) {
-      query = query.eq('rider_id', userId);
-    } else if (role === 'driver' && userId) {
-      query = query.eq('driver_id', userId);
-    }
-
-    const { data, error } = await query;
+    if (!userId || !role) return null;
+    const { data, error } = await supabase.rpc('get_my_trips', {
+      p_user_id: userId,
+      p_role: role,
+      p_device_id: deviceId || null,
+      p_page: 0,
+      p_limit: 50,
+      p_date_from: null,
+      p_date_to: null,
+      p_status_filter: 'all',
+      p_search: null,
+    });
     if (error) throw error;
-    return data.map(mapTripFromDB);
+    return (data || []).map(mapTripFromDB);
   } catch (err: any) {
     console.warn('Could not fetch trips history from Supabase:', err.message);
     return null;
@@ -1031,9 +1255,19 @@ export const fetchTripsHistory = async ({ userId, role }: { userId?: string; rol
 };
 
 // Add to Trips History
-export const saveTripToHistory = async (trip: Trip): Promise<boolean> => {
+export const saveTripToHistory = async (
+  trip: Trip,
+  userId?: string,
+  role?: 'rider' | 'driver' | 'admin',
+  deviceId?: string
+): Promise<boolean> => {
   try {
-    const { error } = await supabase.from('ezz_trips_history').upsert(mapTripToDB(trip));
+    const { error } = await supabase.rpc('save_trip_to_history', {
+      p_user_id: userId || '',
+      p_role: role || 'rider',
+      p_device_id: deviceId || '',
+      p_trip: mapTripToDB(trip),
+    });
     if (error) throw error;
     return true;
   } catch (err: any) {
@@ -1045,33 +1279,29 @@ export const saveTripToHistory = async (trip: Trip): Promise<boolean> => {
 export const fetchTripsHistoryCount = async ({
   userId,
   role,
+  deviceId,
   dateFrom,
   dateTo,
 }: {
   userId?: string;
   role?: 'rider' | 'driver';
+  deviceId?: string;
   dateFrom?: string;
   dateTo?: string;
 }): Promise<number> => {
   try {
-    let query = supabase.from('ezz_trips_history').select('*', { count: 'exact', head: true });
-
-    if (role === 'rider' && userId) {
-      query = query.eq('rider_id', userId);
-    } else if (role === 'driver' && userId) {
-      query = query.eq('driver_id', userId);
-    }
-
-    if (dateFrom) {
-      query = query.gte('created_at', dateFrom);
-    }
-    if (dateTo) {
-      query = query.lte('created_at', dateTo);
-    }
-
-    const { count, error } = await query;
+    if (!userId || !role) return 0;
+    const { data, error } = await supabase.rpc('count_my_trips', {
+      p_user_id: userId,
+      p_role: role,
+      p_device_id: deviceId || null,
+      p_date_from: dateFrom || null,
+      p_date_to: dateTo || null,
+      p_status_filter: 'all',
+      p_search: null,
+    });
     if (error) throw error;
-    return count || 0;
+    return Number(data) || 0;
   } catch (err: any) {
     console.warn('Could not count trips history from Supabase:', err.message);
     return 0;
@@ -1081,6 +1311,7 @@ export const fetchTripsHistoryCount = async ({
 export const fetchTripsHistoryPaginated = async ({
   userId,
   role,
+  deviceId,
   dateFrom,
   dateTo,
   statusFilter,
@@ -1090,6 +1321,7 @@ export const fetchTripsHistoryPaginated = async ({
 }: {
   userId?: string;
   role?: 'rider' | 'driver';
+  deviceId?: string;
   dateFrom?: string;
   dateTo?: string;
   statusFilter?: string;
@@ -1098,52 +1330,23 @@ export const fetchTripsHistoryPaginated = async ({
   limit?: number;
 }): Promise<{ trips: Trip[]; hasMore: boolean }> => {
   try {
-    let query = supabase.from('ezz_trips_history').select('*');
-
-    if (role === 'rider' && userId) {
-      query = query.eq('rider_id', userId);
-    } else if (role === 'driver' && userId) {
-      query = query.eq('driver_id', userId);
+    if (!userId || !role) {
+      return { trips: [], hasMore: false };
     }
-
-    if (dateFrom) {
-      query = query.gte('created_at', dateFrom);
-    }
-    if (dateTo) {
-      query = query.lte('created_at', dateTo);
-    }
-
-    if (statusFilter && statusFilter !== 'all') {
-      if (statusFilter === 'ACTIVE') {
-        query = query.in('status', ['ACCEPTED', 'ARRIVED', 'STARTED']);
-      } else {
-        query = query.eq('status', statusFilter);
-      }
-    }
-
-    const from = page * limit;
-    const to = from + limit - 1;
-
-    query = query.order('created_at', { ascending: false }).range(from, to);
-
-    const { data, error } = await query;
+    const { data, error } = await supabase.rpc('get_my_trips', {
+      p_user_id: userId,
+      p_role: role,
+      p_device_id: deviceId || null,
+      p_page: page,
+      p_limit: limit,
+      p_date_from: dateFrom || null,
+      p_date_to: dateTo || null,
+      p_status_filter: statusFilter || 'all',
+      p_search: searchQuery || null,
+    });
     if (error) throw error;
 
-    let trips = (data || []).map(mapTripFromDB);
-
-    if (searchQuery && searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      trips = trips.filter(
-        (trip) =>
-          trip.riderName.toLowerCase().includes(q) ||
-          (trip.driverName && trip.driverName.toLowerCase().includes(q)) ||
-          trip.pickup.nameAr.toLowerCase().includes(q) ||
-          trip.pickup.nameEn.toLowerCase().includes(q) ||
-          trip.dropoff.nameAr.toLowerCase().includes(q) ||
-          trip.dropoff.nameEn.toLowerCase().includes(q)
-      );
-    }
-
+    const trips = (data || []).map(mapTripFromDB);
     return { trips, hasMore: trips.length === limit };
   } catch (err: any) {
     console.warn('Could not fetch paginated trips history from Supabase:', err.message);
@@ -1154,6 +1357,7 @@ export const fetchTripsHistoryPaginated = async ({
 export const fetchTripsHistoryFilteredPaginated = async ({
   userId,
   role,
+  deviceId,
   dateFrom,
   dateTo,
   statusFilter,
@@ -1162,7 +1366,8 @@ export const fetchTripsHistoryFilteredPaginated = async ({
   limit = PAGE_SIZE,
 }: {
   userId?: string;
-  role?: 'rider' | 'driver';
+  role?: 'rider' | 'driver' | 'admin';
+  deviceId?: string;
   dateFrom?: string;
   dateTo?: string;
   statusFilter?: string;
@@ -1171,52 +1376,20 @@ export const fetchTripsHistoryFilteredPaginated = async ({
   limit?: number;
 }): Promise<{ trips: Trip[]; hasMore: boolean }> => {
   try {
-    let query = supabase.from('ezz_trips_history').select('*');
-
-    if (role === 'rider' && userId) {
-      query = query.eq('rider_id', userId);
-    } else if (role === 'driver' && userId) {
-      query = query.eq('driver_id', userId);
-    }
-
-    if (dateFrom) {
-      query = query.gte('created_at', dateFrom);
-    }
-    if (dateTo) {
-      query = query.lte('created_at', dateTo);
-    }
-
-    if (statusFilter && statusFilter !== 'all') {
-      if (statusFilter === 'ACTIVE') {
-        query = query.in('status', ['ACCEPTED', 'ARRIVED', 'STARTED']);
-      } else {
-        query = query.eq('status', statusFilter);
-      }
-    }
-
-    const from = page * limit;
-    const to = from + limit - 1;
-
-    query = query.order('created_at', { ascending: false }).range(from, to);
-
-    const { data, error } = await query;
+    const adminId = role === 'admin' ? userId : undefined;
+    const { data, error } = await supabase.rpc('get_admin_trips', {
+      p_admin_user_id: adminId || userId || '',
+      p_device_id: deviceId || null,
+      p_page: page,
+      p_limit: limit,
+      p_date_from: dateFrom || null,
+      p_date_to: dateTo || null,
+      p_status_filter: statusFilter || 'all',
+      p_search: searchQuery || null,
+    });
     if (error) throw error;
 
-    let trips = (data || []).map(mapTripFromDB);
-
-    if (searchQuery && searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      trips = trips.filter(
-        (trip) =>
-          trip.riderName.toLowerCase().includes(q) ||
-          (trip.driverName && trip.driverName.toLowerCase().includes(q)) ||
-          trip.pickup.nameAr.toLowerCase().includes(q) ||
-          trip.pickup.nameEn.toLowerCase().includes(q) ||
-          trip.dropoff.nameAr.toLowerCase().includes(q) ||
-          trip.dropoff.nameEn.toLowerCase().includes(q)
-      );
-    }
-
+    const trips = (data || []).map(mapTripFromDB);
     return { trips, hasMore: trips.length === limit };
   } catch (err: any) {
     console.warn('Could not fetch filtered paginated trips history from Supabase:', err.message);
@@ -1224,10 +1397,34 @@ export const fetchTripsHistoryFilteredPaginated = async ({
   }
 };
 
-// Clear Trips History
-export const clearTripsHistoryInDB = async (): Promise<boolean> => {
+// Fetch all trips (admin/backup usage)
+export const fetchAllTrips = async (limit: number = 1000, adminUserId?: string, deviceId?: string): Promise<Trip[]> => {
   try {
-    const { error } = await supabase.from('ezz_trips_history').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    const { data, error } = await supabase.rpc('get_admin_trips', {
+      p_admin_user_id: adminUserId || '',
+      p_device_id: deviceId || null,
+      p_page: 0,
+      p_limit: limit,
+      p_date_from: null,
+      p_date_to: null,
+      p_status_filter: 'all',
+      p_search: null,
+    });
+    if (error) throw error;
+    return (data || []).map(mapTripFromDB);
+  } catch (err: any) {
+    console.warn('Could not fetch all trips from Supabase:', err.message);
+    return [];
+  }
+};
+
+// Clear Trips History (admin only - uses secure RPC)
+export const clearTripsHistoryInDB = async (adminUserId?: string, deviceId?: string): Promise<boolean> => {
+  try {
+    const { error } = await supabase.rpc('admin_clear_all_trips', {
+      p_admin_user_id: adminUserId || '',
+      p_device_id: deviceId || null,
+    });
     if (error) throw error;
     return true;
   } catch (err: any) {
@@ -1385,24 +1582,33 @@ const mapPromoCodeFromDB = (row: any): PromoCode => ({
   usedAt: row.used_at || undefined,
   createdAt: row.created_at,
   expiresAt: row.expires_at || undefined,
+  usageLimit: row.usage_limit ?? undefined,
+  usageCount: row.usage_count || 0,
 });
 
-export const generatePromoCode = async (discountAmount: number, riderId?: string, expiresAt?: string): Promise<PromoCode | null> => {
+export const generatePromoCode = async (discountAmount: number, riderId?: string, expiresAt?: string, usageLimit?: number | null): Promise<PromoCode | null> => {
   try {
     const code = `EZZ${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     const id = `promo_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
+    const insertData: any = {
+      id,
+      code,
+      discount_amount: discountAmount,
+      rider_id: riderId || null,
+      expires_at: expiresAt || null,
+      used: false,
+      usage_count: 0,
+      created_at: new Date().toISOString(),
+    };
+
+    if (usageLimit !== undefined && usageLimit !== null && usageLimit > 0) {
+      insertData.usage_limit = usageLimit;
+    }
+
     const { data, error } = await supabase
       .from('ezz_promo_codes')
-      .insert({
-        id,
-        code,
-        discount_amount: discountAmount,
-        rider_id: riderId || null,
-        expires_at: expiresAt || null,
-        used: false,
-        created_at: new Date().toISOString(),
-      })
+      .insert(insertData)
       .select()
       .single();
 
@@ -1429,6 +1635,10 @@ export const validatePromoCode = async (code: string, riderId?: string): Promise
       return null;
     }
 
+    if (data.usage_limit !== null && data.usage_limit !== undefined && (data.usage_count || 0) >= data.usage_limit) {
+      return null;
+    }
+
     if (data.rider_id && data.rider_id !== riderId) {
       return null;
     }
@@ -1442,10 +1652,22 @@ export const validatePromoCode = async (code: string, riderId?: string): Promise
 
 export const markPromoCodeAsUsed = async (promoCodeId: string, tripId: string): Promise<boolean> => {
   try {
+    const { data: existing, error: fetchError } = await supabase
+      .from('ezz_promo_codes')
+      .select('usage_limit, usage_count, used')
+      .eq('id', promoCodeId)
+      .single();
+
+    if (fetchError || !existing || existing.used) return false;
+
+    const newCount = (existing.usage_count || 0) + 1;
+    const shouldMarkUsed = existing.usage_limit !== null && existing.usage_limit !== undefined && newCount >= existing.usage_limit;
+
     const { error } = await supabase
       .from('ezz_promo_codes')
       .update({
-        used: true,
+        usage_count: newCount,
+        used: shouldMarkUsed,
         trip_id: tripId,
         used_at: new Date().toISOString(),
       })
@@ -1456,6 +1678,21 @@ export const markPromoCodeAsUsed = async (promoCodeId: string, tripId: string): 
     return true;
   } catch (err) {
     console.warn('Could not mark promo code as used:', err);
+    return false;
+  }
+};
+
+export const deletePromoCode = async (promoCodeId: string): Promise<boolean> => {
+  try {
+    const { error } = await supabase
+      .from('ezz_promo_codes')
+      .delete()
+      .eq('id', promoCodeId);
+
+    if (error) throw error;
+    return true;
+  } catch (err: any) {
+    console.warn('Could not delete promo code:', err.message);
     return false;
   }
 };
@@ -1584,9 +1821,8 @@ export const logAuditToDB = async (entry: AuditLogEntry): Promise<boolean> => {
 
 // --- SESSIONS (keep user logged in across reloads & support multi-account tabs) ---
 
-const getDeviceId = (): string => {
+export const getDeviceId = (): string => {
   try {
-    // Priority to tab-isolated device ID so multiple tabs can run different accounts concurrently
     let deviceId = sessionStorage.getItem('ezz_tab_device_id');
     if (!deviceId) {
       const sharedDeviceId = localStorage.getItem('ezz_device_id');
@@ -1611,14 +1847,6 @@ export const saveSession = async (role: 'RIDER' | 'DRIVER' | 'ADMIN', userId: st
       sessionStorage.setItem('ezz_tab_device_id', deviceId);
       localStorage.setItem('ezz_device_id', deviceId);
     } catch {}
-
-  // Allow at most one active session per (role, user_id).
-  const { error: deleteError } = await supabase
-    .from('ezz_sessions')
-    .delete()
-    .eq('role', role)
-    .eq('user_id', userId);
-  if (deleteError) throw deleteError;
 
   const id = `session_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
   const { error } = await supabase.from('ezz_sessions').insert({
@@ -1667,6 +1895,14 @@ export const clearSession = async (role: 'RIDER' | 'DRIVER' | 'ADMIN'): Promise<
   } catch (err: any) {
     console.warn('Could not clear session from Supabase:', err.message);
     return false;
+  }
+};
+
+export const setAppRole = async (role: 'RIDER' | 'DRIVER' | 'ADMIN' | 'ANON'): Promise<void> => {
+  try {
+    await supabase.rpc('set_app_role', { role });
+  } catch (err: any) {
+    console.warn('Could not set app role:', err.message);
   }
 };
 
@@ -1729,6 +1965,7 @@ const mapAdRow = (row: any): Ad => ({
   adFee: row.ad_fee ?? row.adFee ?? 0,
   dailyImpressionLimit: row.daily_impression_limit ?? row.dailyImpressionLimit ?? 0,
   impressions: row.impressions ?? 0,
+  regionId: row.region_id ?? undefined,
   createdAt: row.created_at ?? new Date().toISOString(),
 });
 
@@ -1746,6 +1983,7 @@ const adToRow = (ad: Partial<Ad>) => ({
   ad_fee: ad.adFee ?? 0,
   daily_impression_limit: ad.dailyImpressionLimit ?? 0,
   whatsapp_clicks: ad.whatsappClicks ?? 0,
+  region_id: ad.regionId ?? null,
 });
 
 export const fetchAds = async (): Promise<Ad[]> => {
@@ -1878,3 +2116,88 @@ export const sendNewTripNotification = async (params: {
     return { sent: 0, results: [] };
   }
 };
+
+// Push subscriptions helpers
+export const savePushSubscription = async (driverId: string, subscription: any, userAgent?: string): Promise<boolean> => {
+  try {
+    const { error } = await supabase.from('ezz_push_subscriptions').upsert(
+      {
+        driver_id: driverId,
+        endpoint: subscription.endpoint,
+        p256dh: subscription.keys?.p256dh || subscription.p256dh || '',
+        auth: subscription.keys?.auth || subscription.auth || '',
+        user_agent: userAgent || (typeof navigator !== 'undefined' ? navigator.userAgent : null),
+      },
+      { onConflict: 'endpoint' }
+    );
+    if (error) throw error;
+    return true;
+  } catch (err: any) {
+    console.warn('savePushSubscription failed:', err.message);
+    return false;
+  }
+};
+
+export const removePushSubscription = async (endpoint: string): Promise<boolean> => {
+  try {
+    const { error } = await supabase.from('ezz_push_subscriptions').delete().eq('endpoint', endpoint);
+    if (error) throw error;
+    return true;
+  } catch (err: any) {
+    console.warn('removePushSubscription failed:', err.message);
+    return false;
+  }
+};
+
+export const getDriverPushSubscriptions = async (driverId: string): Promise<any[]> => {
+  try {
+    const { data, error } = await supabase.from('ezz_push_subscriptions').select('*').eq('driver_id', driverId);
+    if (error) throw error;
+    return (data || []) as any[];
+  } catch (err: any) {
+    console.warn('getDriverPushSubscriptions failed:', err.message);
+    return [];
+  }
+};
+
+export const sendWebPushToDriver = async (driverId: string, payload: any): Promise<{ sent: number; results: any[] }> => {
+  try {
+    const subscriptions = await getDriverPushSubscriptions(driverId);
+    if (!subscriptions.length) return { sent: 0, results: [] };
+
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    const endpoint = `${baseUrl}/api/notify-driver`;
+
+    const results = await Promise.allSettled(
+      subscriptions.map((sub) =>
+        fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            subscription: {
+              endpoint: sub.endpoint,
+              keys: {
+                p256dh: sub.p256dh,
+                auth: sub.auth,
+              },
+            },
+            payload,
+          }),
+        }).then(async (response) => {
+          if (!response.ok) {
+            const text = await response.text();
+            throw new Error(`HTTP ${response.status}: ${text}`);
+          }
+          return response.json();
+        })
+      )
+    );
+
+    const settled = results.map((r) => (r.status === 'fulfilled' ? r.value : { status: 'rejected', reason: r.reason }));
+    return { sent: settled.filter((r) => r && r.success).length, results: settled };
+  } catch (err: any) {
+    console.warn('sendWebPushToDriver failed:', err.message);
+    return { sent: 0, results: [] };
+  }
+};
+

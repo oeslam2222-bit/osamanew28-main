@@ -7,13 +7,15 @@ import {
   fetchDrivers,
   fetchRiders,
   fetchLocations,
-  fetchTripsHistory,
+  fetchAllTrips,
   fetchStats,
   saveDriver,
   saveRider,
   saveLocationInDB,
   saveTripToHistory,
   saveStats,
+  loadSession,
+  getDeviceId,
 } from '../supabaseService';
 
 export interface BackupData {
@@ -28,11 +30,13 @@ export interface BackupData {
 
 export const exportBackup = async (): Promise<BackupData | null> => {
   try {
+    const session = await loadSession();
+    const adminUserId = session?.role === 'ADMIN' ? session.userId : undefined;
     const [drivers, riders, locations, tripsHistory, stats] = await Promise.all([
       fetchDrivers(),
       fetchRiders(),
       fetchLocations(),
-      fetchTripsHistory(),
+      fetchAllTrips(1000, adminUserId, getDeviceId()),
       fetchStats(),
     ]);
 
@@ -88,7 +92,9 @@ export const importBackup = async (file: File): Promise<boolean> => {
           backup.locations.forEach(l => writes.push(saveLocationInDB(l)));
         }
         if (backup.tripsHistory) {
-          backup.tripsHistory.forEach(t => writes.push(saveTripToHistory(t)));
+          const session = await loadSession();
+          const adminUserId = session?.role === 'ADMIN' ? session.userId : '';
+          backup.tripsHistory.forEach(t => writes.push(saveTripToHistory(t, adminUserId, 'admin', getDeviceId())));
         }
         if (backup.stats) {
           writes.push(saveStats(backup.stats));
