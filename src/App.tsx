@@ -991,15 +991,15 @@ export default function App() {
         if (!isHealthy) return; // DB unreachable – keep the session
 
         if (rider.isLoggedIn) {
-          await clearSession('RIDER');
+          await clearSession('RIDER', rider.id);
           setRider(prev => ({ ...prev, isLoggedIn: false }));
           setCurrentScreen('HOME');
         } else if (driverIsLoggedIn) {
-          await clearSession('DRIVER');
+          await clearSession('DRIVER', selectedDriverId);
           setDriverIsLoggedIn(false);
           setCurrentScreen('HOME');
         } else if (adminIsLoggedIn) {
-          await clearSession('ADMIN');
+          await clearSession('ADMIN', adminUserId);
           setAdminIsLoggedIn(false);
           setCurrentScreen('HOME');
         }
@@ -1026,18 +1026,21 @@ export default function App() {
 
   // --- ONLINE DIRECT SUPABASE SYNC SYSTEM ---
 
-  // 1. Initial Load from Supabase on mount
-   useEffect(() => {
+   // 1. Initial Load from Supabase on mount
+    useEffect(() => {
     requestNotificationPermission();
     setIsInitializing(true);
 
     const initSupabase = async () => {
+      const timeoutMs = 20000;
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Initialization timeout: connection is too slow')), timeoutMs)
+      );
+
       try {
-        const isConnected = await checkSupabaseConnection();
+        const isConnected = await Promise.race([checkSupabaseConnection(), timeoutPromise]);
         if (!isConnected) {
           setSupabaseConnected(false);
-          // Offline: restore rider/driver/activeTrip from the local cache
-          // so the user stays on their dashboard and can resume any ride.
           try {
             const cachedRider = localStorage.getItem('ezz_rider_session');
             if (cachedRider) {
@@ -1049,7 +1052,6 @@ export default function App() {
             }
           } catch {}
           try {
-            // Restore drivers list so the selected driver exists offline.
             const cachedDrivers = localStorage.getItem('ezz_drivers_cache');
             if (cachedDrivers) {
               const parsedDrivers = JSON.parse(cachedDrivers);
@@ -1057,7 +1059,6 @@ export default function App() {
                 setDrivers(parsedDrivers);
               }
             }
-            // Restore locations/regions so the rider can keep booking offline.
             const cachedLocations = localStorage.getItem('ezz_locations_cache');
             if (cachedLocations) {
               const parsed = JSON.parse(cachedLocations);
@@ -1097,18 +1098,21 @@ export default function App() {
           session,
           dbStats,
           dbActiveTrip,
-        ] = await Promise.all([
-          fetchLocations(),
-          fetchDrivers(),
-          fetchRiders(),
-          fetchRegions(),
-          fetchAds(),
-          loadSession(),
-          fetchStats(),
-          fetchActiveTrip(
-            driverIsLoggedIn ? selectedDriverId : (rider.id || undefined),
-            driverIsLoggedIn ? 'driver' : (rider.id ? 'rider' : undefined)
-          ),
+        ] = await Promise.race([
+          Promise.all([
+            fetchLocations(),
+            fetchDrivers(),
+            fetchRiders(),
+            fetchRegions(),
+            fetchAds(),
+            loadSession(),
+            fetchStats(),
+            fetchActiveTrip(
+              driverIsLoggedIn ? selectedDriverId : (rider.id || undefined),
+              driverIsLoggedIn ? 'driver' : (rider.id ? 'rider' : undefined)
+            ),
+          ]),
+          timeoutPromise,
         ]);
 
         if (dbLocations && dbLocations.length > 0) {
@@ -3492,7 +3496,7 @@ export default function App() {
       restoreRiderPickupRegion(found);
       if (supabaseConnected) {
         await setAppRole('RIDER');
-        await clearSession('RIDER');
+        await clearSession('RIDER', found.id);
         await clearSession('ADMIN');
         await saveSession('RIDER', found.id);
       }
@@ -3614,6 +3618,7 @@ export default function App() {
       if (supabaseConnected) {
         await clearSession('RIDER');
         await clearSession('ADMIN');
+        await clearSession('DRIVER', found.id);
         await saveSession('DRIVER', found.id);
         
         // Auto-set driver as online in Supabase so riders can see them
@@ -4317,14 +4322,14 @@ onRequestRide={handleRequestRide}
                        onDisableLowData={disableLowData}
                        noAvailableDrivers={noAvailableDrivers}
                        onOpenGuide={openGuideModal}
-                          onLogout={() => {
-                             setRider(prev => ({ ...prev, isLoggedIn: false }));
-                             setActiveTripWithTracking(null);
-                             setSelectedPickup('1');
-                             setSelectedDropoff('2');
-                             clearSession('RIDER');
-                             setCurrentScreen('HOME');
-                           }}
+                        onLogout={() => {
+                           setRider(prev => ({ ...prev, isLoggedIn: false }));
+                           setActiveTripWithTracking(null);
+                           setSelectedPickup('1');
+                           setSelectedDropoff('2');
+                           clearSession('RIDER', rider.id);
+                           setCurrentScreen('HOME');
+                         }}
                        />
                   </ErrorBoundary>
                   )}
@@ -4771,10 +4776,10 @@ if (activeTrip) {
                               setActiveTripWithTracking(null);
                               setNoAvailableDrivers(false);
                             }
-                            setDriverIsLoggedIn(false);
-                            clearSession('DRIVER');
-                            setCurrentScreen('DRIVER_DASHBOARD');
-                         }}
+                             setDriverIsLoggedIn(false);
+                             clearSession('DRIVER', selectedDriverId);
+                             setCurrentScreen('DRIVER_DASHBOARD');
+                          }}
                     />
                   </ErrorBoundary>
                   )}
@@ -4831,6 +4836,7 @@ if (activeTrip) {
                                     if (supabaseConnected) {
                                       await clearSession('RIDER');
                                       await clearSession('DRIVER');
+                                      await clearSession('ADMIN', admin.id);
                                       await saveSession('ADMIN', admin.id);
                                     }
                                     auditLogger.log('admin_login', admin.id, 'admin', 'Login successful', true);
@@ -4921,14 +4927,15 @@ if (activeTrip) {
                          onDeleteRider={handleDeleteRider}
                          onClearAllFakeData={handleClearAllFakeData}
                         lang={lang}
-                          onLogout={() => {
-                            setAdminIsLoggedIn(false);
-                            setAdminUserId('');
-                            if (supabaseConnected) {
-                              clearSession('ADMIN');
-                              setAppRole('ANON');
-                            }
-                          }}
+                           onLogout={() => {
+                             const currentAdminId = adminUserId;
+                             setAdminIsLoggedIn(false);
+                             setAdminUserId('');
+                             if (supabaseConnected) {
+                               clearSession('ADMIN', currentAdminId);
+                               setAppRole('ANON');
+                             }
+                           }}
                          onTriggerToast={triggerToast}
                       />
                         </ErrorBoundary>

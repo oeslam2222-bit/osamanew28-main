@@ -5,6 +5,17 @@ import { verifyPassword, isSecureHash, hashPassword, generateUUID } from './util
 
 const PAGE_SIZE = PAGINATION_PAGE_SIZE;
 
+const withTimeout = async <T>(
+  fn: () => T,
+  ms: number,
+  label = 'Supabase request'
+): Promise<T> => {
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+  );
+  return Promise.race([Promise.resolve(fn()), timeoutPromise] as [Promise<T>, Promise<never>]);
+};
+
 // Helper to determine if we can connect to Supabase
 let isSupabaseHealthy = true;
 
@@ -938,10 +949,13 @@ export const mapTripToDB = (trip: Trip) => ({
 // Fetch Drivers
 export const fetchDrivers = async (): Promise<Driver[] | null> => {
   try {
-    // Include `service_areas` in the select so remote fetch preserves driver coverage areas
-    const { data, error } = await supabase.from('ezz_drivers').select('id,name,phone,password,car_model,car_plate,vehicle_type,vehicle_name,national_id,driver_license,personal_photo,national_id_image,driver_license_image,vehicle_license_image,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,agreed_to_terms,service_areas,last_seen,auto_accept,auto_show_map,fcm_token');
-    if (error) throw error;
-    return data.map(mapDriverFromDB);
+    const result = await withTimeout(
+      () => supabase.from('ezz_drivers').select('id,name,phone,password,car_model,car_plate,vehicle_type,vehicle_name,national_id,driver_license,personal_photo,national_id_image,driver_license_image,vehicle_license_image,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,agreed_to_terms,service_areas,last_seen,auto_accept,auto_show_map,fcm_token'),
+      15000,
+      'fetchDrivers'
+    );
+    if (result.error) throw result.error;
+    return (result.data || []).map(mapDriverFromDB);
   } catch (err: any) {
     console.warn('Could not fetch drivers from Supabase, using local:', err.message);
     return null;
@@ -1053,9 +1067,13 @@ export const adminUpdateDriverFields = async (driverId: string, data: Record<str
 // Fetch Registered Riders
 export const fetchRiders = async (): Promise<Rider[] | null> => {
   try {
-    const { data, error } = await supabase.from('ezz_riders').select('id,name,phone,password,rating,total_trips,approval_status,preferences');
-    if (error) throw error;
-    return data.map(mapRiderFromDB);
+    const result = await withTimeout(
+      () => supabase.from('ezz_riders').select('id,name,phone,password,rating,total_trips,approval_status,preferences'),
+      15000,
+      'fetchRiders'
+    );
+    if (result.error) throw result.error;
+    return (result.data || []).map(mapRiderFromDB);
   } catch (err: any) {
     console.warn('Could not fetch riders from Supabase:', err.message);
     return null;
@@ -1102,32 +1120,30 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
     if (userId && userRole === 'rider') {
       query = query.eq('rider_id', userId).in('status', ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED']);
     } else if (userId && userRole === 'driver') {
-      // Fetch trips where this driver is assigned, current offered, OR in the offered list.
-      // PostgREST .or() can't check JSONB containment, so we fetch by driver_id/current_offered
-      // and also fetch recent SEARCHING trips to check offeredDriverIds client-side.
       query = query.or(`driver_id.eq.${userId},current_offered_driver_id.eq.${userId},status.eq.SEARCHING`);
       query = query.in('status', ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED']);
     }
-    // admin gets all
 
     const isDriverQuery = userId && userRole === 'driver';
-    const { data, error } = await query.limit(isDriverQuery ? 5 : 1);
-    if (error) {
-      if (error.code === 'PGRST116') {
+    const result = await withTimeout(
+      () => query.limit(isDriverQuery ? 5 : 1),
+      15000,
+      'fetchActiveTrip'
+    );
+    if (result.error) {
+      if (result.error.code === 'PGRST116') {
         console.log('[fetchActiveTrip] No active trip in DB (empty table)');
         return null;
       }
-      throw error;
+      throw result.error;
     }
-    if (!data || data.length === 0) {
+    if (!result.data || result.data.length === 0) {
       console.log('[fetchActiveTrip] No active trip in DB (empty result)');
       return null;
     }
 
-    // For drivers, filter SEARCHING trips to only those where this driver is in offeredDriverIds.
-    // The .or() query fetches all SEARCHING trips, so we narrow down client-side.
     if (userId && userRole === 'driver') {
-      const relevant = data.find((row: any) => {
+      const relevant = result.data.find((row: any) => {
         const trip = mapTripFromDB(row);
         if (trip.driverId === userId) return true;
         if (trip.currentOfferedDriverId === userId) return true;
@@ -1142,8 +1158,8 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
       return null;
     }
 
-    console.log('[fetchActiveTrip] Found active trip:', data[0].id, 'status:', data[0].status, 'for role:', userRole);
-    return mapTripFromDB(data[0]);
+    console.log('[fetchActiveTrip] Found active trip:', result.data[0].id, 'status:', result.data[0].status, 'for role:', userRole);
+    return mapTripFromDB(result.data[0]);
   } catch (err: any) {
     console.warn('Could not fetch active trip from Supabase:', err.message);
     return 'NO_TABLE';
@@ -1153,13 +1169,17 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
 // Fetch all active trips (for admin dashboard live tracking)
 export const fetchAllActiveTrips = async (): Promise<Trip[]> => {
   try {
-    const { data, error } = await supabase
-      .from('ezz_active_trip')
-      .select('*')
-      .in('status', ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'])
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    return (data || []).map(mapTripFromDB);
+    const result = await withTimeout(
+      () => supabase
+        .from('ezz_active_trip')
+        .select('*')
+        .in('status', ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'])
+        .order('created_at', { ascending: false }),
+      15000,
+      'fetchAllActiveTrips'
+    );
+    if (result.error) throw result.error;
+    return (result.data || []).map(mapTripFromDB);
   } catch (err: any) {
     console.warn('Could not fetch all active trips from Supabase:', err.message);
     return [];
@@ -1514,10 +1534,14 @@ export const clearAllDriversInDB = async (): Promise<boolean> => {
 // Fetch Stats
 export const fetchStats = async (): Promise<SystemStats | null> => {
   try {
-    const { data, error } = await supabase.from('ezz_stats').select('*').eq('id', 'singleton');
-    if (error) throw error;
-    if (!data || data.length === 0) return null;
-    const row = data[0];
+    const result = await withTimeout(
+      () => supabase.from('ezz_stats').select('*').eq('id', 'singleton'),
+      15000,
+      'fetchStats'
+    );
+    if (result.error) throw result.error;
+    if (!result.data || result.data.length === 0) return null;
+    const row = result.data[0];
   return {
     commissionRate: row.commission_rate || 15,
     totalRevenue: row.total_revenue || 0,
@@ -1769,9 +1793,13 @@ export const fetchPromoCodes = async (): Promise<PromoCode[]> => {
 // Fetch Locations
 export const fetchLocations = async (): Promise<Location[] | null> => {
   try {
-    const { data, error } = await supabase.from('ezz_locations').select('*');
-    if (error) throw error;
-    return data.map(mapLocationFromDB);
+    const result = await withTimeout(
+      () => supabase.from('ezz_locations').select('*'),
+      15000,
+      'fetchLocations'
+    );
+    if (result.error) throw result.error;
+    return (result.data || []).map(mapLocationFromDB);
   } catch (err: any) {
     console.warn('Could not fetch locations from Supabase:', err.message);
     return null;
@@ -1806,9 +1834,13 @@ export const deleteLocationInDB = async (id: string): Promise<boolean> => {
 
 export const fetchRegions = async (): Promise<Region[] | null> => {
   try {
-    const { data, error } = await supabase.from('ezz_regions').select('*').order('created_at', { ascending: true });
-    if (error) throw error;
-    return (data || []).map(mapRegionFromDB);
+    const result = await withTimeout(
+      () => supabase.from('ezz_regions').select('*').order('created_at', { ascending: true }),
+      15000,
+      'fetchRegions'
+    );
+    if (result.error) throw result.error;
+    return (result.data || []).map(mapRegionFromDB);
   } catch (err: any) {
     console.warn('Could not fetch regions from Supabase:', err.message);
     return null;
@@ -1902,17 +1934,29 @@ export const saveSession = async (role: 'RIDER' | 'DRIVER' | 'ADMIN', userId: st
       localStorage.setItem('ezz_device_id', deviceId);
     } catch {}
 
-  const id = `session_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-  const { error } = await supabase.from('ezz_sessions').insert({
-    id,
-    role,
-    user_id: userId,
-    device_id: deviceId,
-    updated_at: new Date().toISOString(),
-  });
-  if (error) throw error;
-  localStorage.setItem(`ezz_session_${role.toLowerCase()}`, JSON.stringify({ userId, deviceId, updatedAt: new Date().toISOString() }));
-  return true;
+    // Clear all existing sessions for this user+role before saving a new one.
+    // This enforces single-session policy: only one active session per user at a time.
+    try {
+      await withTimeout(
+        () => supabase.from('ezz_sessions').delete().eq('role', role).eq('user_id', userId),
+        8000,
+        'saveSession-clear-old'
+      );
+    } catch (clearErr) {
+      console.warn('[saveSession] Could not clear old sessions:', clearErr);
+    }
+
+    const id = `session_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const { error } = await supabase.from('ezz_sessions').insert({
+      id,
+      role,
+      user_id: userId,
+      device_id: deviceId,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) throw error;
+    localStorage.setItem(`ezz_session_${role.toLowerCase()}`, JSON.stringify({ userId, deviceId, updatedAt: new Date().toISOString() }));
+    return true;
   } catch (err: any) {
     console.warn('Could not save session to Supabase:', err.message);
     return false;
@@ -1922,29 +1966,38 @@ export const saveSession = async (role: 'RIDER' | 'DRIVER' | 'ADMIN', userId: st
 export const loadSession = async (): Promise<{ role: 'RIDER' | 'DRIVER' | 'ADMIN'; userId: string } | null> => {
   try {
     const deviceId = getDeviceId();
-    const { data, error } = await supabase
-      .from('ezz_sessions')
-      .select('role,user_id,updated_at')
-      .eq('device_id', deviceId)
-      .order('updated_at', { ascending: false })
-      .limit(1);
-    if (error) throw error;
-    if (!data || data.length === 0) return null;
-    return { role: data[0].role as any, userId: data[0].user_id };
+    const result = await withTimeout(
+      () => supabase
+        .from('ezz_sessions')
+        .select('role,user_id,updated_at')
+        .eq('device_id', deviceId)
+        .order('updated_at', { ascending: false })
+        .limit(1),
+      15000,
+      'loadSession'
+    );
+    if (result.error) throw result.error;
+    if (!result.data || result.data.length === 0) return null;
+    return { role: result.data[0].role as any, userId: result.data[0].user_id };
   } catch (err: any) {
     console.warn('Could not load session from Supabase:', err.message);
     return null;
   }
 };
 
-export const clearSession = async (role: 'RIDER' | 'DRIVER' | 'ADMIN'): Promise<boolean> => {
+export const clearSession = async (role: 'RIDER' | 'DRIVER' | 'ADMIN', userId?: string): Promise<boolean> => {
   try {
-    const deviceId = getDeviceId();
     try {
       sessionStorage.removeItem('ezz_tab_device_id');
     } catch {}
-    const { error } = await supabase.from('ezz_sessions').delete().eq('role', role).eq('device_id', deviceId);
-    if (error) throw error;
+    if (userId) {
+      const { error } = await supabase.from('ezz_sessions').delete().eq('role', role).eq('user_id', userId);
+      if (error) throw error;
+    } else {
+      const deviceId = getDeviceId();
+      const { error } = await supabase.from('ezz_sessions').delete().eq('role', role).eq('device_id', deviceId);
+      if (error) throw error;
+    }
     return true;
   } catch (err: any) {
     console.warn('Could not clear session from Supabase:', err.message);
@@ -2042,17 +2095,21 @@ const adToRow = (ad: Partial<Ad>) => ({
 
 export const fetchAds = async (): Promise<Ad[]> => {
   try {
-    const { data, error } = await supabase
-      .from('ads')
-      .select('*')
-      .order('is_active', { ascending: false })
-      .order('priority', { ascending: false })
-      .order('created_at', { ascending: false });
-    if (!error && data && data.length > 0) {
-      return data.map(mapAdRow);
+    const result = await withTimeout(
+      () => supabase
+        .from('ads')
+        .select('*')
+        .order('is_active', { ascending: false })
+        .order('priority', { ascending: false })
+        .order('created_at', { ascending: false }),
+      15000,
+      'fetchAds'
+    );
+    if (!result.error && result.data && result.data.length > 0) {
+      return result.data.map(mapAdRow);
     }
-    if (error) {
-      console.warn('fetchAds error:', error.message);
+    if (result.error) {
+      console.warn('fetchAds error:', result.error.message);
     }
   } catch (err: any) {
     console.warn('Could not fetch ads from Supabase:', err.message);
