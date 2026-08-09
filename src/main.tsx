@@ -26,6 +26,12 @@ createRoot(document.getElementById('root')!).render(
 );
 
 if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').then((registration) => {
+    console.log('[SW] Registered:', registration.scope);
+  }).catch((error) => {
+    console.warn('[SW] Registration failed:', error);
+  });
+
   navigator.serviceWorker.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'ONLINE_CHECK_RESULT') {
       console.log('[SW] Online status from service worker:', event.data.online);

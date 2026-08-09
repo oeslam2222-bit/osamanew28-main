@@ -3,6 +3,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import NetworkStatusBar from './components/NetworkStatusBar';
 import InitializingOverlay from './components/InitializingOverlay';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
+import { useWebPush } from './hooks/useWebPush';
 import { Location, Driver, Trip, Rider, SystemStats, TripStatus, Region, Ad } from './types';
 import { RiderView } from './components/RiderView';
 import { DriverView } from './components/DriverView';
@@ -28,6 +29,7 @@ import {
   saveStats,
   fetchLocations,
   saveLocationInDB,
+  getDeviceId,
   authenticateAdmin,
   deleteDriverInDB,
   deleteRiderInDB,
@@ -39,12 +41,14 @@ import {
   saveSession,
   loadSession,
   clearSession,
+  setAppRole,
   markPromoCodeAsUsed,
   fetchRegions,
   fetchAds,
   fetchActiveAdsForPlacement,
   sendNewTripNotification,
-  saveRiderPreferences
+  saveRiderPreferences,
+  fetchAllActiveTrips
 } from './supabaseService';
 import {
   requestNotificationPermission,
@@ -75,6 +79,8 @@ import { hashPassword, verifyPassword, isSecureHash } from './utils/security';
 import { auditLogger } from './utils/auditLog';
 import { riderAuthLimiter, driverAuthLimiter, adminAuthLimiter } from './utils/security';
 import { supabase } from './supabaseClient';
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined) || '';
+const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || '';
 
 // Support secure data storage with password obfuscation / encryption
 const obfuscatePassword = (password: string): string => {
@@ -168,12 +174,18 @@ export default function App() {
   const lastTripCompletedRef = useRef(false);
   const lastTripCancelledRef = useRef(false);
   const cancelInProgressRef = useRef(false);
+  const endTripInProgressRef = useRef(false);
+  const requestInProgressRef = useRef(false);
+  const rejectTripInProgressRef = useRef(false);
   const pendingDriverToggleRef = useRef<string | null>(null);
   const resetDriverStatusOnceRef = useRef<Record<string, boolean>>({});
+  const driversRef = useRef<Driver[]>(drivers);
+  driversRef.current = drivers;
   const [noAvailableDrivers, setNoAvailableDrivers] = useState(false);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [tripsHistory, setTripsHistory] = useState<Trip[]>([]);
   const [ads, setAds] = useState<Ad[]>([]);
+  const [liveTrips, setLiveTrips] = useState<Trip[]>([]);
   const [stats, setStats] = useState<SystemStats>({
     commissionRate: 15,
     totalRevenue: 0,
@@ -244,7 +256,7 @@ export default function App() {
   // Handler: Transfer trip to next offered driver when current driver cancels/requests transfer
   const handleTransferTrip = () => {
     const currentTrip = activeTrip;
-    if (!currentTrip) return;
+    if (!currentTrip || (currentTrip.status !== 'SEARCHING' && currentTrip.status !== 'ACCEPTED')) return;
     const currentDriverId = currentTrip.driverId;
     const currentIdx = currentTrip.offeredDriverIds?.indexOf(currentDriverId || '') ?? -1;
     const nextDriverId = (currentTrip.offeredDriverIds && currentIdx !== -1 && currentIdx + 1 < currentTrip.offeredDriverIds.length)
@@ -252,18 +264,25 @@ export default function App() {
       : undefined;
 
     if (nextDriverId) {
-      const nextDrv = drivers.find(d => d.id === nextDriverId);
+      const nextDrv = driversRef.current.find(d => d.id === nextDriverId);
       const updatedTrip = {
         ...currentTrip,
         status: 'SEARCHING' as TripStatus,
         driverId: undefined,
         driverName: undefined,
         currentOfferedDriverId: nextDriverId,
+        dispatchTimer: currentTrip.dispatchTimerMax || currentTrip.dispatchTimer || 300,
       };
       setActiveTripWithTracking(updatedTrip);
       setDrivers((prev) => prev.map((d) => (d.id === currentDriverId ? { ...d, status: 'AVAILABLE' } : d)));
       if (supabaseConnected) {
         saveActiveTrip(updatedTrip).then((ok) => console.log('[handleTransferTrip] saved updated trip:', ok));
+        if (currentDriverId) {
+          const currentDrv = driversRef.current.find(d => d.id === currentDriverId);
+          if (currentDrv) {
+            saveDriver({ ...currentDrv, status: 'AVAILABLE' }).catch(() => {});
+          }
+        }
       }
       if (nextDrv) {
         setDrivers((prev) =>
@@ -288,7 +307,7 @@ export default function App() {
       }
     } else {
       // No next driver -> cancel the trip
-      handleCancelRide();
+      handleCancelRide({ userId: currentDriverId, role: 'driver' });
     }
   };
 
@@ -317,7 +336,7 @@ export default function App() {
 
   const getRealRoute = useCallback(async (pickup: Location, dropoff: Location): Promise<RouteResult | null> => {
     const cacheKey = `${pickup.lat.toFixed(4)}_${pickup.lng.toFixed(4)}_${dropoff.lat.toFixed(4)}_${dropoff.lng.toFixed(4)}`;
-    const cached = routeCache[cacheKey] || getCachedRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng);
+    const cached = routeCache[cacheKey] || getCachedRoute([pickup.lat, pickup.lng, dropoff.lat, dropoff.lng]);
     if (cached && cached.distance > 0) return cached;
 
     const coordStr = `${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}`;
@@ -393,7 +412,7 @@ export default function App() {
           }
           if (distance > 0 && geometry && geometry.length > 1) {
             const result: RouteResult = { distance, geometry, durationSeconds, steps };
-            setCachedRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng, result);
+            setCachedRoute([pickup.lat, pickup.lng, dropoff.lat, dropoff.lng], result);
             lastRouteCacheUseRef.current = Date.now();
             setRouteCache(prev => {
               const updated = { ...prev, [cacheKey]: result };
@@ -420,7 +439,7 @@ export default function App() {
     dropoff: Location
   ): Promise<RouteResult | null> => {
     const cacheKey = `nav_${driverLat.toFixed(4)}_${driverLng.toFixed(4)}_${pickup.lat.toFixed(4)}_${pickup.lng.toFixed(4)}_${dropoff.lat.toFixed(4)}_${dropoff.lng.toFixed(4)}`;
-    const cached = routeCache[cacheKey] || getCachedRoute(driverLat, driverLng, pickup.lat, pickup.lng);
+    const cached = routeCache[cacheKey] || getCachedRoute([driverLat, driverLng, pickup.lat, pickup.lng, dropoff.lat, dropoff.lng], 'nav_');
     if (cached && cached.distance > 0) return cached;
 
     const coordStr = `${driverLng},${driverLat};${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}`;
@@ -503,6 +522,7 @@ export default function App() {
               const updated = { ...prev, [cacheKey]: result };
               return updated;
             });
+            setCachedRoute([driverLat, driverLng, pickup.lat, pickup.lng, dropoff.lat, dropoff.lng], result, 'nav_');
             console.log(`[nav] ${provider.name} OK: ${distance} km, ${geometry.length} pts, ${steps.length} steps`);
             return result;
           }
@@ -626,6 +646,8 @@ export default function App() {
     return localStorage.getItem('ezz_driver_logged_in') === 'true';
   });
 
+  const { sendPushToDriver } = useWebPush(driverIsLoggedIn ? selectedDriverId : undefined, supabaseConnected);
+
   // Admin login states (persisted locally)
   const [adminIsLoggedIn, setAdminIsLoggedIn] = useState<boolean>(() => {
     return localStorage.getItem('ezz_admin_logged_in') === 'true';
@@ -636,6 +658,7 @@ export default function App() {
   const [adminPassword, setAdminPassword] = useState<string>(() => {
     return localStorage.getItem('ezz_admin_password') || '';
   });
+  const [adminUserId, setAdminUserId] = useState<string>('');
   const [adminLoginError, setAdminLoginError] = useState('');
 
   // Prevent duplicate login submissions (button spam / rapid Enter presses)
@@ -823,6 +846,29 @@ export default function App() {
 
     resetDriverToAvailable();
   }, [driverIsLoggedIn, selectedDriverId, supabaseConnected, drivers, activeTrip]);
+
+  // Notify Service Worker when driver logs in/out for background polling
+  useEffect(() => {
+    if (!('serviceWorker' in navigator) || !navigator.serviceWorker?.ready) return;
+
+    const notifySW = async () => {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        if (driverIsLoggedIn && selectedDriverId) {
+          registration.active?.postMessage({
+            type: 'DRIVER_LOGIN',
+            driverId: selectedDriverId,
+            supabaseUrl: SUPABASE_URL || '',
+            supabaseKey: SUPABASE_ANON_KEY || '',
+          });
+        } else {
+          registration.active?.postMessage({ type: 'DRIVER_LOGOUT' });
+        }
+      } catch {}
+    };
+
+    notifySW();
+  }, [driverIsLoggedIn, selectedDriverId, supabaseConnected]);
 
   // Online/Offline connectivity toast notifications (state tracking is handled by useNetworkStatus hook)
   useEffect(() => {
@@ -1110,12 +1156,14 @@ export default function App() {
             if (r) {
               setRider({ ...r, isLoggedIn: true });
               restoreRiderPickupRegion(r);
+              if (supabaseConnected) setAppRole('RIDER');
             }
           } else if (session.role === 'DRIVER') {
             const d = dbDrivers?.find(x => x.id === session.userId);
             if (d) {
               setSelectedDriverId(d.id);
               setDriverIsLoggedIn(true);
+              if (supabaseConnected) setAppRole('DRIVER');
               const driverTrip = await fetchActiveTrip(d.id, 'driver');
               if (driverTrip && driverTrip !== 'NO_TABLE') {
                 setActiveTripWithTracking(driverTrip);
@@ -1123,10 +1171,11 @@ export default function App() {
             }
           } else if (session.role === 'ADMIN') {
             setAdminIsLoggedIn(true);
+            if (supabaseConnected) setAppRole('ADMIN');
           }
 
           const userRole = session.role.toLowerCase() as 'rider' | 'driver';
-          const dbHistory = await fetchTripsHistory({ userId: session.userId, role: userRole });
+          const dbHistory = await fetchTripsHistory({ userId: session.userId, role: userRole, deviceId: getDeviceId() });
           if (dbHistory && dbHistory.length > 0) {
             setTripsHistory(dbHistory);
           }
@@ -1196,8 +1245,7 @@ export default function App() {
             if (prev && prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
               return prev;
             }
-            // When the active trip record is deleted from the DB, clear it locally
-            // unless it is a completed trip still pending feedback.
+            return null;
           }
 
           if (dismissedTripIdsRef.current.has(trip.id)) {
@@ -1258,7 +1306,7 @@ export default function App() {
       try {
         const remoteActiveTrip = await fetchActiveTrip(driverIsLoggedIn ? selectedDriverId : (rider.id || undefined), driverIsLoggedIn ? 'driver' : (rider.id ? 'rider' : undefined));
         if (!isMountedRef.current) return;
-        if (!remoteActiveTrip || remoteActiveTrip === 'NO_TABLE') {
+        if (!remoteActiveTrip) {
           setActiveTripWithTracking((prev) => {
             if (prev && prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
               if (!prev.driverRatingToRider) {
@@ -1269,6 +1317,11 @@ export default function App() {
             // If the trip disappeared from the DB, clear the local active trip immediately.
             return null;
           });
+          return;
+        }
+
+        if (remoteActiveTrip === 'NO_TABLE') {
+          console.warn('[Polling] fetchActiveTrip returned NO_TABLE, keeping local active trip');
           return;
         }
 
@@ -1402,19 +1455,20 @@ export default function App() {
                 if (ldPending) return ldPending;
                 return rd;
               }
-              const ld = localDrivers.find((l) => l.id === rd.id);
-              if (ld) {
-                const isActiveTripDriver = currentTrip && currentTrip.driverId === rd.id && (currentTrip.status === 'ACCEPTED' || currentTrip.status === 'STARTED');
-                const isStale = rd.lastSeen ? (now - new Date(rd.lastSeen).getTime() > staleThreshold) : false;
-                return {
-                  ...rd,
-                  currentX: isActiveTripDriver ? ld.currentX : rd.currentX,
-                  currentY: isActiveTripDriver ? ld.currentY : rd.currentY,
-                  isOnline: isStale ? false : rd.isOnline,
-                  status: isStale ? 'AVAILABLE' : (rd.isOnline ? rd.status : 'OFFLINE'),
-                };
-              }
-              return rd;
+               const ld = localDrivers.find((l) => l.id === rd.id);
+               if (ld) {
+                 const isActiveTripDriver = currentTrip && currentTrip.driverId === rd.id && (currentTrip.status === 'ACCEPTED' || currentTrip.status === 'STARTED');
+                 const isStale = rd.lastSeen ? (now - new Date(rd.lastSeen).getTime() > staleThreshold) : false;
+                 const merged = {
+                   ...rd,
+                   currentX: isActiveTripDriver ? ld.currentX : rd.currentX,
+                   currentY: isActiveTripDriver ? ld.currentY : rd.currentY,
+                   isOnline: isStale ? false : rd.isOnline,
+                   status: isStale ? 'AVAILABLE' : (rd.isOnline ? rd.status : 'OFFLINE'),
+                 };
+                 return merged;
+               }
+               return rd;
             });
           });
         }
@@ -1425,6 +1479,27 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [supabaseConnected, dataSaverMode]);
+
+  // 1e. Polling for live/active trips (admin dashboard)
+  useEffect(() => {
+    if (!supabaseConnected || !adminIsLoggedIn) return;
+
+    const pollInterval = 5000;
+
+    const interval = setInterval(async () => {
+      if (!isMountedRef.current) return;
+      try {
+        const trips = await fetchAllActiveTrips();
+        if (isMountedRef.current) {
+          setLiveTrips(trips);
+        }
+      } catch (err) {
+        console.warn('Live trips polling error:', err);
+      }
+    }, pollInterval);
+
+    return () => clearInterval(interval);
+  }, [supabaseConnected, adminIsLoggedIn]);
 
   // Heartbeat: update driver lastSeen every 10s so stale drivers can be detected quickly
   useEffect(() => {
@@ -1558,37 +1633,37 @@ export default function App() {
   const lastNotifiedTripIdRef = useRef<string | null>(null);
   const lastNotifiedOfferedDriverIdRef = useRef<string | null>(null);
 
-      useEffect(() => {
-       if (!activeTrip) {
-         const prevStatus = lastTripStatusBeforeNullRef.current;
-         if (prevStatus === 'COMPLETED' || prevStatus === 'SEARCHING') {
-           notifiedEventsRef.current.add('cancelled_notified');
-           lastTripStatusBeforeNullRef.current = null;
-           return;
-         }
-         if (notifiedEventsRef.current.has('had_trip') && !notifiedEventsRef.current.has('cancelled_notified')) {
-           notifiedEventsRef.current.add('cancelled_notified');
-           if (lastTripCompletedRef.current) {
-             lastTripCompletedRef.current = false;
-             return;
-           }
-          if (lastTripCancelledRef.current) {
-            lastTripCancelledRef.current = false;
-            return;
-          }
-          if (!['COMPLETED', 'SEARCHING'].includes(prevStatus || '')) {
-            playNotificationSound('alert');
-            sendNativeNotification('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', '❌');
-            triggerToast('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', 'warning');
-          }
-         }
-         return;
-       }
+  useEffect(() => {
+    if (!activeTrip) {
+      const prevStatus = lastTripStatusBeforeNullRef.current;
+      if (prevStatus === 'COMPLETED' || prevStatus === 'SEARCHING') {
+        notifiedEventsRef.current.add('cancelled_notified');
+        lastTripStatusBeforeNullRef.current = null;
+        return;
+      }
+      if (notifiedEventsRef.current.has('had_trip') && !notifiedEventsRef.current.has('cancelled_notified')) {
+        notifiedEventsRef.current.add('cancelled_notified');
+        if (lastTripCompletedRef.current) {
+          lastTripCompletedRef.current = false;
+          return;
+        }
+        if (lastTripCancelledRef.current) {
+          lastTripCancelledRef.current = false;
+          return;
+        }
+        if (!['COMPLETED', 'SEARCHING'].includes(prevStatus || '')) {
+          playNotificationSound('alert');
+          sendNativeNotification('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', '❌');
+          triggerToast('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', 'warning');
+        }
+      }
+      return;
+    }
 
-     lastTripStatusBeforeNullRef.current = activeTrip.status;
+    lastTripStatusBeforeNullRef.current = activeTrip.status;
 
-     notifiedEventsRef.current.add('had_trip');
-     notifiedEventsRef.current.delete('cancelled_notified');
+    notifiedEventsRef.current.add('had_trip');
+    notifiedEventsRef.current.delete('cancelled_notified');
 
     const currentTripId = activeTrip.id;
     const currentStatus = activeTrip.status;
@@ -1596,114 +1671,114 @@ export default function App() {
 
     const statusEventKey = `${currentTripId}_status_${currentStatus}`;
 
-     if (!notifiedEventsRef.current.has(statusEventKey)) {
-         if (currentStatus === 'SEARCHING' && driverIsLoggedIn) {
-           notifiedEventsRef.current.add(statusEventKey);
-           lastTripCompletedRef.current = false;
-           lastTripCancelledRef.current = false;
-         } else if (currentStatus === 'ACCEPTED' && !isDriverActor) {
-           notifiedEventsRef.current.add(statusEventKey);
-         playNotificationSound('trip_accepted');
-         speakText(
-           lang === 'ar'
-             ? `تم قبول رحلتك، الكابتن ${activeTrip.driverName || 'عز الدين'} في الطريق إليك الآن.`
-             : `Your ride has been accepted. Captain ${activeTrip.driverName || 'Ezz'} is on the way.`,
-           lang === 'ar' ? 'ar-EG' : 'en-US'
-         );
-         sendNativeNotification(
-           '🚗 تم قبول رحلتك!',
-           `الكابتن ${activeTrip.driverName || 'عز الدين'} في الطريق إليك الآن.`,
-           '✅'
-         );
-         startTitleFlash('🚗 الكابتن قادم!');
-         setTimeout(stopTitleFlash, 5000);
-         triggerVibration([200, 100, 200, 100, 300]);
-         triggerToast(
-           '🚗 تم قبول رحلتك!',
-           `الكابتن ${activeTrip.driverName || 'عز الدين'} في الطريق إليك الآن.`,
-           'success'
-         );
-       } else if (currentStatus === 'ARRIVED' && !isDriverActor) {
-           notifiedEventsRef.current.add(statusEventKey);
-         playNotificationSound('trip_accepted');
-         speakText(
-           lang === 'ar'
-             ? 'وصل الكابتن إلى موقعك وهو في انتظارك الآن.'
-             : 'The captain has arrived at your location.',
-           lang === 'ar' ? 'ar-EG' : 'en-US'
-         );
-         sendNativeNotification(
-           '📍 الكابتن وصل!',
-           'الكابتن متواجد في نقطة الركوب الآن بانتظارك.',
-           '⭐'
-         );
-         triggerToast(
-           '📍 الكابتن وصل!',
-           'الكابتن متواجد في نقطة الركوب الآن بانتظارك.',
-           'info'
-         );
-       } else if (currentStatus === 'STARTED' && !isDriverActor) {
-           notifiedEventsRef.current.add(statusEventKey);
-         playNotificationSound('trip_accepted');
-         speakText(
-           lang === 'ar'
-             ? 'بدأت الرحلة الآن، نتمنى لك مشواراً آمناً.'
-             : 'The ride has started, wish you a safe trip.',
-           lang === 'ar' ? 'ar-EG' : 'en-US'
-         );
-         triggerToast(
-           '🚀 بدأت الرحلة الآن!',
-           'نتمنى لك رحلة سعيدة وآمنة مع كابتن عز.',
-           'success'
-         );
-       } else if (currentStatus === 'COMPLETED' && !isDriverActor) {
-           notifiedEventsRef.current.add(statusEventKey);
-         lastTripCompletedRef.current = true;
-         playNotificationSound('trip_completed');
-         speakText(
-           lang === 'ar'
-             ? 'حمد لله على السلامة، تم إكمال الرحلة بنجاح وشكراً لاختيارك عز.'
-             : 'Welcome back, trip completed successfully. Thank you for choosing Ezz.',
-           lang === 'ar' ? 'ar-EG' : 'en-US'
-         );
-         sendNativeNotification(
-           '🎉 وصلت بالسلامة!',
-           'تم إكمال الرحلة بنجاح. شكراً لك على اختيارك كابتن عز!',
-           '✨'
-         );
-         startTitleFlash('✨ وصلت بالسلامة!');
-         setTimeout(stopTitleFlash, 5000);
-         triggerToast(
-           '🎉 وصلت بالسلامة!',
-           'تم إكمال الرحلة بنجاح. شكراً لك على اختيارك كابتن عز!',
-           'success'
-         );
-       } else if (currentStatus === 'CANCELLED') {
-           notifiedEventsRef.current.add(statusEventKey);
-         lastTripCancelledRef.current = true;
-         playNotificationSound('alert');
-         speakText(
-           lang === 'ar'
-             ? 'تم إلغاء الرحلة بسبب عدم قبول أي سائق. يمكنك طلب رحلة جديدة.'
-             : 'The ride was cancelled because no driver accepted. You can request a new ride.',
-           lang === 'ar' ? 'ar-EG' : 'en-US'
-         );
-         sendNativeNotification(
-           '❌ تم إلغاء الرحلة',
-           lang === 'ar'
-             ? 'لم يقبل أي سائق الرحلة. يمكنك طلب رحلة جديدة.'
-             : 'No driver accepted the ride. You can request a new ride.',
-           '❌'
-         );
-         triggerToast(
-           '❌ تم إلغاء الرحلة',
-           lang === 'ar'
-             ? 'لم يقبل أي سائق الرحلة. يمكنك طلب رحلة جديدة.'
-             : 'No driver accepted the ride. You can request a new ride.',
-           'warning'
-         );
-       }
-     }
+    if (!notifiedEventsRef.current.has(statusEventKey)) {
+      if (currentStatus === 'SEARCHING' && driverIsLoggedIn) {
+        notifiedEventsRef.current.add(statusEventKey);
+        lastTripCompletedRef.current = false;
+        lastTripCancelledRef.current = false;
+      } else if (currentStatus === 'ACCEPTED' && !isDriverActor) {
+        notifiedEventsRef.current.add(statusEventKey);
+        playNotificationSound('trip_accepted');
+        speakText(
+          lang === 'ar'
+            ? `تم قبول رحلتك، الكابتن ${activeTrip.driverName || 'عز الدين'} في الطريق إليك الآن.`
+            : `Your ride has been accepted. Captain ${activeTrip.driverName || 'Ezz'} is on the way.`,
+          lang === 'ar' ? 'ar-EG' : 'en-US'
+        );
+        sendNativeNotification(
+          '🚗 تم قبول رحلتك!',
+          `الكابتن ${activeTrip.driverName || 'عز الدين'} في الطريق إليك الآن.`,
+          '✅'
+        );
+        startTitleFlash('🚗 الكابتن قادم!');
+        setTimeout(stopTitleFlash, 5000);
+        triggerVibration([200, 100, 200, 100, 300]);
+        triggerToast(
+          '🚗 تم قبول رحلتك!',
+          `الكابتن ${activeTrip.driverName || 'عز الدين'} في الطريق إليك الآن.`,
+          'success'
+        );
+      } else if (currentStatus === 'ARRIVED' && !isDriverActor) {
+        notifiedEventsRef.current.add(statusEventKey);
+        playNotificationSound('trip_accepted');
+        speakText(
+          lang === 'ar'
+            ? 'وصل الكابتن إلى موقعك وهو في انتظارك الآن.'
+            : 'The captain has arrived at your location.',
+          lang === 'ar' ? 'ar-EG' : 'en-US'
+        );
+        sendNativeNotification(
+          '📍 الكابتن وصل!',
+          'الكابتن متواجد في نقطة الركوب الآن بانتظارك.',
+          '⭐'
+        );
+        triggerToast(
+          '📍 الكابتن وصل!',
+          'الكابتن متواجد في نقطة الركوب الآن بانتظارك.',
+          'info'
+        );
+      } else if (currentStatus === 'STARTED' && !isDriverActor) {
+        notifiedEventsRef.current.add(statusEventKey);
+        playNotificationSound('trip_accepted');
+        speakText(
+          lang === 'ar'
+            ? 'بدأت الرحلة الآن، نتمنى لك مشواراً آمناً.'
+            : 'The ride has started, wish you a safe trip.',
+          lang === 'ar' ? 'ar-EG' : 'en-US'
+        );
+        triggerToast(
+          '🚀 بدأت الرحلة الآن!',
+          'نتمنى لك رحلة سعيدة وآمنة مع كابتن عز.',
+          'success'
+        );
+      } else if (currentStatus === 'COMPLETED' && !isDriverActor) {
+        notifiedEventsRef.current.add(statusEventKey);
+        lastTripCompletedRef.current = true;
+        playNotificationSound('trip_completed');
+        speakText(
+          lang === 'ar'
+            ? 'حمد لله على السلامة، تم إكمال الرحلة بنجاح وشكراً لاختيارك عز.'
+            : 'Welcome back, trip completed successfully. Thank you for choosing Ezz.',
+          lang === 'ar' ? 'ar-EG' : 'en-US'
+        );
+        sendNativeNotification(
+          '🎉 وصلت بالسلامة!',
+          'تم إكمال الرحلة بنجاح. شكراً لك على اختيارك كابتن عز!',
+          '✨'
+        );
+        startTitleFlash('✨ وصلت بالسلامة!');
+        setTimeout(stopTitleFlash, 5000);
+        triggerToast(
+          '🎉 وصلت بالسلامة!',
+          'تم إكمال الرحلة بنجاح. شكراً لك على اختيارك كابتن عز!',
+          'success'
+        );
+      } else if (currentStatus === 'CANCELLED') {
+        notifiedEventsRef.current.add(statusEventKey);
+        lastTripCancelledRef.current = true;
+        playNotificationSound('alert');
+        speakText(
+          lang === 'ar'
+            ? 'تم إلغاء الرحلة بسبب عدم قبول أي سائق. يمكنك طلب رحلة جديدة.'
+            : 'The ride was cancelled because no driver accepted. You can request a new ride.',
+          lang === 'ar' ? 'ar-EG' : 'en-US'
+        );
+        sendNativeNotification(
+          '❌ تم إلغاء الرحلة',
+          lang === 'ar'
+            ? 'لم يقبل أي سائق الرحلة. يمكنك طلب رحلة جديدة.'
+            : 'No driver accepted the ride. You can request a new ride.',
+          '❌'
+        );
+        triggerToast(
+          '❌ تم إلغاء الرحلة',
+          lang === 'ar'
+            ? 'لم يقبل أي سائق الرحلة. يمكنك طلب رحلة جديدة.'
+            : 'No driver accepted the ride. You can request a new ride.',
+          'warning'
+        );
+      }
+    }
 
     // Chat Message Notifications — short tone only, no native push, no toast
     if (activeTrip.chatMessages && activeTrip.chatMessages.length > 0) {
@@ -1912,7 +1987,9 @@ export default function App() {
         d.totalEarnings !== last.totalEarnings ||
         d.totalCommissionPaid !== last.totalCommissionPaid ||
         d.totalTrips !== last.totalTrips ||
-        d.rating !== last.rating
+        d.rating !== last.rating ||
+        d.approvalStatus !== last.approvalStatus ||
+        JSON.stringify(d.serviceAreas || []) !== JSON.stringify(last.serviceAreas || [])
       );
     });
     if (changedDrivers.length === 0) return;
@@ -1927,6 +2004,8 @@ export default function App() {
         totalCommissionPaid: d.totalCommissionPaid,
         totalTrips: d.totalTrips,
         rating: d.rating,
+        approvalStatus: d.approvalStatus,
+        serviceAreas: d.serviceAreas,
       };
     });
   };
@@ -2123,199 +2202,226 @@ export default function App() {
     requestedVehicleType: 'CAR' | 'MOTORCYCLE' | 'TOKTOK' | 'TRICYCLE' = 'CAR',
     pickupLandmark?: string,
     promoCode?: string,
-    promoCodeId?: string
+    promoCodeId?: string,
+    promoDiscount?: number
   ) => {
-    if (!selectedPickup || !selectedDropoff) return;
-    if (!riderPickupRegion) {
-      triggerToast(
-        lang === 'ar' ? 'اختر المنطقة أولاً' : 'Select a region first',
-        lang === 'ar' ? 'يرجى تحديد منطقة الالتقاء قبل طلب الرحلة.' : 'Please select your pickup region before requesting a ride.',
-        'warning'
-      );
-      return;
-    }
-    const pLoc = locations.find((l) => l.id === selectedPickup);
-    const dLoc = locations.find((l) => l.id === selectedDropoff);
-    if (!pLoc || !dLoc) return;
-    setNoAvailableDrivers(false);
-
-    // Use ONLY real road distance from cache or ORS/OSRM API
-    let distance: number | null = null;
-    let etaMinutes: number | undefined;
-    let routeGeometry: [number, number][] | undefined;
-    const cacheKey = `${pLoc.lat.toFixed(4)}_${pLoc.lng.toFixed(4)}_${dLoc.lat.toFixed(4)}_${dLoc.lng.toFixed(4)}`;
-    const cachedRoute = routeCache[cacheKey];
-    if (cachedRoute && cachedRoute.distance > 0) {
-      distance = Math.max(1, parseFloat(cachedRoute.distance.toFixed(2)));
-      etaMinutes = cachedRoute.durationSeconds ? Math.max(1, Math.round(cachedRoute.durationSeconds / 60)) : undefined;
-      routeGeometry = cachedRoute.geometry;
-    } else {
-      try {
-        const realRoute = await getRealRoute(pLoc, dLoc);
-        if (realRoute && realRoute.distance > 0) {
-          distance = Math.max(1, parseFloat(realRoute.distance.toFixed(2)));
-          etaMinutes = realRoute.durationSeconds ? Math.max(1, Math.round(realRoute.durationSeconds / 60)) : undefined;
-          routeGeometry = realRoute.geometry;
-        }
-      } catch {
-        // ignore
+    if (requestInProgressRef.current) return;
+    if (!rider.isLoggedIn) return;
+    requestInProgressRef.current = true;
+    try {
+      if (!selectedPickup || !selectedDropoff) return;
+      if (!riderPickupRegion) {
+        triggerToast(
+          lang === 'ar' ? 'اختر المنطقة أولاً' : 'Select a region first',
+          lang === 'ar' ? 'يرجى تحديد منطقة الالتقاء قبل طلب الرحلة.' : 'Please select your pickup region before requesting a ride.',
+          'warning'
+        );
+        return;
       }
-    }
+      const pLoc = locations.find((l) => l.id === selectedPickup);
+      const dLoc = locations.find((l) => l.id === selectedDropoff);
+      if (!pLoc || !dLoc) return;
+      setNoAvailableDrivers(false);
 
-    // Fallback: if real route unavailable, use estimated distance so trip still proceeds
-    if (!distance) {
-      const directDistance = calculateHaversineDistance(pLoc.lat, pLoc.lng, dLoc.lat, dLoc.lng);
-      const fallbackDistance = estimateDrivingDistance(directDistance, stats.distanceBuffer ?? 1.25) + (stats.additionalKm ?? 0.0);
-      distance = Math.max(1, parseFloat(fallbackDistance.toFixed(2)));
-    }
-
-    let appliedDiscount = 0;
-    let appliedPromoCode: string | undefined;
-    let appliedPromoDiscount: number | undefined;
-
-    if (promoCode && promoCodeId) {
-      appliedDiscount = 0;
-      appliedPromoCode = promoCode;
-      appliedPromoDiscount = 0;
-    } else if (promoCode && stats?.promoCode && promoCode.trim().toUpperCase() === stats.promoCode.trim().toUpperCase()) {
-      appliedDiscount = stats.promoValue || 5;
-      appliedPromoCode = promoCode;
-      appliedPromoDiscount = appliedDiscount;
-    }
-
-    const { baseFare, commission, finalFare } = calculateFullTripFare(distance, requestedVehicleType, stats, appliedDiscount);
-    const fare = finalFare;
-
-    // Broadcast dispatch to up to 5 available drivers in the region simultaneously.
-    // The first driver to accept wins the ride. 5-minute acceptance window.
-    const MAX_OFFERED_DRIVERS = 5;
-    const DISPATCH_TIMER_SECONDS = 300;
-
-    let currentOfferedDriverId: string | undefined = undefined;
-    let offeredDriverIds: string[] = [];
-
-    const eligibleDrivers = await fetchEligibleDriversForRegion(riderPickupRegion);
-
-    // Filter drivers by the pickup region selected by this rider.
-    const selectedRegion = regions.find((r) => r.id === riderPickupRegion);
-
-    const dispatchTimer = DISPATCH_TIMER_SECONDS;
-    const dispatchTimerMax = DISPATCH_TIMER_SECONDS;
-
-    // Filter eligible drivers by requested vehicle type to avoid dispatching wrong vehicle
-    const eligibleDriversByType = eligibleDrivers.filter(
-      (d) => String(d.vehicleType).toUpperCase() === requestedVehicleType
-    );
-
-    if (eligibleDriversByType.length === 0) {
-      setNoAvailableDrivers(true);
-      triggerToast(
-        lang === 'ar' ? 'لا يوجد سائقين من نوع المركبة المختار' : 'No drivers available for the selected vehicle type',
-        lang === 'ar'
-          ? 'عذراً، لا يوجد سائقين من هذا النوع في منطقتك حالياً. يرجى اختيار نوع آخر أو المحاولة لاحقاً.'
-          : 'Sorry, there are no drivers of the selected vehicle type in your area right now. Please choose another type or try again later.',
-        'warning'
-      );
-      return;
-    }
-
-    if (eligibleDriversByType.length > 0) {
-      // Sort drivers by precise Haversine distance to pickup location
-      const sortedDrivers = eligibleDriversByType
-        .map((d) => {
-          const dCoords = getCoordsFromXY(d.currentX, d.currentY);
-          const dist = calculateHaversineDistance(
-            dCoords.lat,
-            dCoords.lng,
-            pLoc.lat,
-            pLoc.lng
-          );
-          return { driver: d, distance: dist };
-        })
-        .sort((a, b) => a.distance - b.distance);
-
-      offeredDriverIds = sortedDrivers.slice(0, MAX_OFFERED_DRIVERS).map((item) => item.driver.id);
-      currentOfferedDriverId = offeredDriverIds[0];
-
-      // Send push notification to all offered drivers immediately
-      const notifiedDrivers = drivers.filter(d => offeredDriverIds.includes(d.id));
-      const newTrip: Trip = {
-        id: `trip_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-        riderId: rider.id,
-        riderName: rider.name,
-        riderPhone: rider.phone,
-        pickup: pLoc,
-        dropoff: dLoc,
-        pickupLandmark,
-        status: 'SEARCHING',
-        fare,
-        commission,
-        distance,
-        routeGeometry,
-        etaMinutes,
-        requestedVehicleType,
-        createdAt: new Date().toISOString(),
-        chatMessages: [],
-        currentOfferedDriverId,
-        offeredDriverIds,
-        dispatchTimer,
-        dispatchTimerMax,
-        appliedPromoCode,
-        appliedPromoDiscount,
-        pickupRegionId: selectedRegion?.id,
-        pickupRegionName: selectedRegion?.nameAr,
-      };
-
-      setActiveTripWithTracking(newTrip);
-
-      playNotificationSound('new_trip');
-      triggerToast(
-        lang === 'ar' ? 'تم طلب الرحلة بنجاح' : 'Ride request sent',
-        lang === 'ar'
-          ? `رحلتك من ${pLoc.nameAr} إلى ${dLoc.nameAr} | ${fare} ج.م`
-          : `Ride from ${pLoc.nameEn} to ${dLoc.nameEn} | ${fare} EGP`,
-        'new_trip'
-      );
-      sendNativeNotification(
-        '🚖 تم طلب رحلة جديدة',
-        lang === 'ar'
-          ? `رحلتك من ${pLoc.nameAr} إلى ${dLoc.nameAr} | ${fare} ج.م`
-          : `Ride from ${pLoc.nameEn} to ${dLoc.nameEn} | ${fare} EGP`,
-        '🚖'
-      );
-
-      if (supabaseConnected) {
-        saveActiveTrip(newTrip).then((ok) => {
-          console.log('[handleRequestRide] saveActiveTrip result:', ok);
-          if (ok && promoCodeId) {
-            markPromoCodeAsUsed(promoCodeId, newTrip.id).catch(() => {});
+      // Use ONLY real road distance from cache or ORS/OSRM API
+      let distance: number | null = null;
+      let etaMinutes: number | undefined;
+      let routeGeometry: [number, number][] | undefined;
+      const cacheKey = `${pLoc.lat.toFixed(4)}_${pLoc.lng.toFixed(4)}_${dLoc.lat.toFixed(4)}_${dLoc.lng.toFixed(4)}`;
+      const cachedRoute = routeCache[cacheKey];
+      if (cachedRoute && cachedRoute.distance > 0) {
+        distance = Math.max(1, parseFloat(cachedRoute.distance.toFixed(2)));
+        etaMinutes = cachedRoute.durationSeconds ? Math.max(1, Math.round(cachedRoute.durationSeconds / 60)) : undefined;
+        routeGeometry = cachedRoute.geometry;
+      } else {
+        try {
+          const realRoute = await getRealRoute(pLoc, dLoc);
+          if (realRoute && realRoute.distance > 0) {
+            distance = Math.max(1, parseFloat(realRoute.distance.toFixed(2)));
+            etaMinutes = realRoute.durationSeconds ? Math.max(1, Math.round(realRoute.durationSeconds / 60)) : undefined;
+            routeGeometry = realRoute.geometry;
           }
-          if (ok) {
-            sendNewTripNotification({
-              tripId: newTrip.id,
-              origin: pLoc.nameAr,
-              destination: dLoc.nameAr,
-              fare,
-              distance,
-            }).catch(() => {});
-          }
-        });
-
-        const waitingAds = await fetchActiveAdsForPlacement('waiting');
-        if (waitingAds && waitingAds.length > 0) {
-          setAds(waitingAds);
+        } catch {
+          // ignore
         }
       }
-    } else {
-      setNoAvailableDrivers(true);
-      triggerToast(
-        lang === 'ar' ? 'لا يوجد سائقين متاحين' : 'No available drivers',
-        lang === 'ar'
-          ? 'عذراً، لا يوجد سائقين متاحين في منطقتك حالياً. يرجى المحاولة مرة أخرى لاحقاً.'
-          : 'Sorry, there are no available drivers in your area right now. Please try again later.',
-        'warning'
+
+      // Fallback: if real route unavailable, use estimated distance so trip still proceeds
+      if (!distance) {
+        const directDistance = calculateHaversineDistance(pLoc.lat, pLoc.lng, dLoc.lat, dLoc.lng);
+        const fallbackDistance = estimateDrivingDistance(directDistance, stats.distanceBuffer ?? 1.25) + (stats.additionalKm ?? 0.0);
+        distance = Math.max(1, parseFloat(fallbackDistance.toFixed(2)));
+      }
+
+      let appliedDiscount = 0;
+      let appliedPromoCode: string | undefined;
+      let appliedPromoDiscount: number | undefined;
+
+      if (promoCode && promoCodeId) {
+        appliedDiscount = promoDiscount || 0;
+        appliedPromoCode = promoCode;
+        appliedPromoDiscount = appliedDiscount;
+      } else if (promoCode && stats?.promoCode && promoCode.trim().toUpperCase() === stats.promoCode.trim().toUpperCase()) {
+        appliedDiscount = stats.promoValue || 5;
+        appliedPromoCode = promoCode;
+        appliedPromoDiscount = appliedDiscount;
+      }
+
+      const { baseFare, commission, finalFare } = calculateFullTripFare(distance, requestedVehicleType, stats, appliedDiscount);
+      const fare = finalFare;
+
+      // Broadcast dispatch to up to 5 available drivers in the region simultaneously.
+      // The first driver to accept wins the ride. 5-minute acceptance window.
+      const MAX_OFFERED_DRIVERS = 5;
+      const DISPATCH_TIMER_SECONDS = 300;
+
+      let currentOfferedDriverId: string | undefined = undefined;
+      let offeredDriverIds: string[] = [];
+
+      const eligibleDrivers = await fetchEligibleDriversForRegion(riderPickupRegion);
+
+      // Filter drivers by the pickup region selected by this rider.
+      const selectedRegion = regions.find((r) => r.id === riderPickupRegion);
+
+      const dispatchTimer = DISPATCH_TIMER_SECONDS;
+      const dispatchTimerMax = DISPATCH_TIMER_SECONDS;
+
+      // Filter eligible drivers by requested vehicle type to avoid dispatching wrong vehicle
+      const eligibleDriversByType = eligibleDrivers.filter(
+        (d) => String(d.vehicleType).toUpperCase() === requestedVehicleType
       );
-      return;
+
+      if (eligibleDriversByType.length === 0) {
+        setNoAvailableDrivers(true);
+        triggerToast(
+          lang === 'ar' ? 'لا يوجد سائقين من نوع المركبة المختار' : 'No drivers available for the selected vehicle type',
+          lang === 'ar'
+            ? 'عذراً، لا يوجد سائقين من هذا النوع في منطقتك حالياً. يرجى اختيار نوع آخر أو المحاولة لاحقاً.'
+            : 'Sorry, there are no drivers of the selected vehicle type in your area right now. Please choose another type or try again later.',
+          'warning'
+        );
+        return;
+      }
+
+      if (eligibleDriversByType.length > 0) {
+        // Sort drivers by precise Haversine distance to pickup location
+        const sortedDrivers = eligibleDriversByType
+          .map((d) => {
+            const dCoords = getCoordsFromXY(d.currentX, d.currentY);
+            const dist = calculateHaversineDistance(
+              dCoords.lat,
+              dCoords.lng,
+              pLoc.lat,
+              pLoc.lng
+            );
+            return { driver: d, distance: dist };
+          })
+          .sort((a, b) => a.distance - b.distance);
+
+        offeredDriverIds = sortedDrivers.slice(0, MAX_OFFERED_DRIVERS).map((item) => item.driver.id);
+        currentOfferedDriverId = offeredDriverIds[0];
+
+        const newTrip: Trip = {
+          id: `trip_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+          riderId: rider.id,
+          riderName: rider.name,
+          riderPhone: rider.phone,
+          pickup: pLoc,
+          dropoff: dLoc,
+          pickupLandmark,
+          status: 'SEARCHING',
+          fare,
+          commission,
+          distance,
+          routeGeometry,
+          etaMinutes,
+          requestedVehicleType,
+          createdAt: new Date().toISOString(),
+          chatMessages: [],
+          currentOfferedDriverId,
+          offeredDriverIds,
+          dispatchTimer,
+          dispatchTimerMax,
+          appliedPromoCode,
+          appliedPromoDiscount,
+          pickupRegionId: selectedRegion?.id,
+          pickupRegionName: selectedRegion?.nameAr,
+        };
+
+        setActiveTripWithTracking(newTrip);
+
+        playNotificationSound('new_trip');
+        triggerToast(
+          lang === 'ar' ? 'تم طلب الرحلة بنجاح' : 'Ride request sent',
+          lang === 'ar'
+            ? `رحلتك من ${pLoc.nameAr} إلى ${dLoc.nameAr} | ${fare} ج.م`
+            : `Ride from ${pLoc.nameEn} to ${dLoc.nameEn} | ${fare} EGP`,
+          'new_trip'
+        );
+        sendNativeNotification(
+          '🚖 تم طلب رحلة جديدة',
+          lang === 'ar'
+            ? `رحلتك من ${pLoc.nameAr} إلى ${dLoc.nameAr} | ${fare} ج.م`
+            : `Ride from ${pLoc.nameEn} to ${dLoc.nameEn} | ${fare} EGP`,
+          '🚖'
+        );
+
+        if (supabaseConnected) {
+          saveActiveTrip(newTrip).then((ok) => {
+            console.log('[handleRequestRide] saveActiveTrip result:', ok);
+            if (ok && promoCodeId) {
+              markPromoCodeAsUsed(promoCodeId, newTrip.id).catch(() => {});
+            }
+            if (ok) {
+              sendNewTripNotification({
+                tripId: newTrip.id,
+                origin: pLoc.nameAr,
+                destination: dLoc.nameAr,
+                fare,
+                distance,
+              }).catch(() => {});
+
+              offeredDriverIds.forEach((driverId) => {
+                const drv = eligibleDriversByType.find((d) => d.id === driverId);
+                sendPushToDriver(driverId, {
+                  tripId: newTrip.id,
+                  title: lang === 'ar' ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!',
+                  body: lang === 'ar'
+                    ? `من ${pLoc.nameAr} إلى ${dLoc.nameAr} | ${fare} ج.م`
+                    : `${pLoc.nameEn} → ${dLoc.nameEn} | ${fare} EGP`,
+                  url: '/?screen=DRIVER',
+                  tag: `ride-request-${newTrip.id}`,
+                  data: {
+                    tripId: newTrip.id,
+                    driverId,
+                    pickupLat: pLoc.lat,
+                    pickupLng: pLoc.lng,
+                    dropoffLat: dLoc.lat,
+                    dropoffLng: dLoc.lng,
+                  },
+                }).catch(() => {});
+              });
+            }
+          });
+
+          const waitingAds = await fetchActiveAdsForPlacement('waiting');
+          if (waitingAds && waitingAds.length > 0) {
+            setAds(waitingAds);
+          }
+        }
+      } else {
+        setNoAvailableDrivers(true);
+        triggerToast(
+          lang === 'ar' ? 'لا يوجد سائقين متاحين' : 'No available drivers',
+          lang === 'ar'
+            ? 'عذراً، لا يوجد سائقين متاحين في منطقتك حالياً. يرجى المحاولة مرة أخرى لاحقاً.'
+            : 'Sorry, there are no available drivers in your area right now. Please try again later.',
+          'warning'
+        );
+        return;
+      }
+    } finally {
+      requestInProgressRef.current = false;
     }
   };
 
@@ -2331,10 +2437,10 @@ export default function App() {
   // Refresh a waiting trip: re-evaluate eligible drivers and re-dispatch
   const refreshWaitingTrip = async (tripOverride?: Trip): Promise<boolean> => {
     const trip = tripOverride ?? activeTrip;
-    if (!trip || trip.status !== 'SEARCHING' || !rider.isLoggedIn || !selectedPickup || !selectedDropoff) return false;
+    if (!trip || trip.status !== 'SEARCHING' || !rider.isLoggedIn) return false;
 
-    const pLoc = locations.find((l) => l.id === selectedPickup);
-    const dLoc = locations.find((l) => l.id === selectedDropoff);
+    const pLoc = trip.pickup;
+    const dLoc = trip.dropoff;
     const regionId = trip.pickupRegionId ?? riderPickupRegion;
     if (!pLoc || !dLoc || !regionId) return false;
 
@@ -2388,7 +2494,7 @@ export default function App() {
           const cancelled = { ...prev, status: 'CANCELLED' as TripStatus, completedAt: new Date().toISOString() };
           setTripsHistory((history) => [cancelled, ...history]);
           if (supabaseConnected) {
-            saveTripToHistory(cancelled);
+            saveTripToHistory(cancelled, rider.id, 'rider', getDeviceId());
             saveActiveTrip(null, prev.id).catch(() => {});
           }
           playNotificationSound('alert');
@@ -2455,13 +2561,16 @@ export default function App() {
   };
 
   // Handler: Cancel Ride
-  const handleCancelRide = () => {
+  const handleCancelRide = async (cancelledBy?: { userId: string; role: 'rider' | 'driver' }) => {
     if (!activeTrip || cancelInProgressRef.current) return;
 
     cancelInProgressRef.current = true;
     dismissedTripIdsRef.current.add(activeTrip.id);
     const { driverId } = activeTrip;
     const cancelledTripId = activeTrip.id;
+
+    const cancelUserId = cancelledBy?.userId || rider.id || '';
+    const cancelRole = cancelledBy?.role || 'rider';
 
     if (driverId) {
       setDrivers((prev) =>
@@ -2477,15 +2586,15 @@ export default function App() {
 
     setTripsHistory((prev) => [cancelledTrip, ...prev]);
 
-    if (supabaseConnected) {
-      saveTripToHistory(cancelledTrip);
-      saveActiveTrip(null, cancelledTripId).then((ok) => {
-        console.log('[handleCancelRide] Cleared active trip from DB, result:', ok);
-        cancelInProgressRef.current = false;
-      }).catch(() => {
-        cancelInProgressRef.current = false;
-      });
-    } else {
+    try {
+      if (supabaseConnected) {
+        await saveTripToHistory(cancelledTrip, cancelUserId, cancelRole, getDeviceId());
+        await saveActiveTrip(null, cancelledTripId);
+        console.log('[handleCancelRide] Cleared active trip from DB');
+      }
+    } catch (err) {
+      console.warn('[handleCancelRide] Error clearing trip:', err);
+    } finally {
       cancelInProgressRef.current = false;
     }
 
@@ -2537,20 +2646,23 @@ export default function App() {
       });
       const driver = updated.find((d) => d.id === driverId);
       if (driver && supabaseConnected) {
-        saveDriver(driver).then((ok) => {
-          if (ok) {
-            console.log('[handleToggleOnline] Driver status saved:', driverId, driver.isOnline ? 'online' : 'offline');
-          } else {
-            console.warn('[handleToggleOnline] Failed to save driver status:', driverId);
-          }
-          pendingDriverToggleRef.current = null;
-        });
+        saveDriver(driver)
+          .then((ok) => {
+            if (ok) {
+              console.log('[handleToggleOnline] Driver status saved:', driverId, driver.isOnline ? 'online' : 'offline');
+            } else {
+              console.warn('[handleToggleOnline] Failed to save driver status:', driverId);
+            }
+          })
+          .catch(() => {
+            console.warn('[handleToggleOnline] Error saving driver status:', driverId);
+          })
+          .finally(() => {
+            pendingDriverToggleRef.current = null;
+          });
       }
       return updated;
     });
-    setTimeout(() => {
-      pendingDriverToggleRef.current = null;
-    }, 10000);
   };
 
   const handleUpdateDriverLocation = (driverId: string, lat: number, lng: number, x: number, y: number) => {
@@ -2565,7 +2677,7 @@ export default function App() {
       const timeSince = now - last;
       const SHOULD_SAVE_MS = 5000; // at most once every 5s per driver
       if (supabaseConnected && (timeSince >= SHOULD_SAVE_MS)) {
-        const drv = drivers.find(d => d.id === driverId);
+        const drv = driversRef.current.find(d => d.id === driverId);
         if (drv) {
           const toSave = { ...drv, lat, lng, currentX: x, currentY: y };
           saveDriver(toSave).then((ok) => {
@@ -2625,17 +2737,54 @@ export default function App() {
         })
         .eq('id', activeTrip.id)
         .eq('status', 'SEARCHING')
-        .select('id, status');
+        .select('id, status, driver_id');
 
       if (updateError || !updated || updated.length === 0) {
-        setActiveTripWithTracking((prev) => {
-          if (!prev || prev.status !== 'ACCEPTED') return prev;
-          return { ...prev, status: 'SEARCHING' as TripStatus, driverId: undefined, driverName: undefined };
-        });
-        setDrivers((prev) =>
-          prev.map((d) => (d.id === driverId ? { ...d, status: 'AVAILABLE' } : d))
-        );
-        return;
+        const { data: currentTrip } = await supabase
+          .from('ezz_active_trip')
+          .select('status, driver_id')
+          .eq('id', activeTrip.id)
+          .maybeSingle();
+
+        if (currentTrip?.status === 'ACCEPTED' && currentTrip?.driver_id === driverId) {
+          console.log('[handleAcceptTrip] Already accepted by this driver (useEffect won the race), continuing...');
+        } else if (currentTrip?.status === 'ACCEPTED' && currentTrip?.driver_id && currentTrip?.driver_id !== driverId) {
+          console.log('[handleAcceptTrip] Another driver already accepted, rolling back');
+          setActiveTripWithTracking((prev) => {
+            if (!prev || prev.status !== 'ACCEPTED') return prev;
+            return { ...prev, status: 'SEARCHING' as TripStatus, driverId: undefined, driverName: undefined };
+          });
+          setDrivers((prev) =>
+            prev.map((d) => (d.id === driverId ? { ...d, status: 'AVAILABLE' } : d))
+          );
+          return;
+        } else {
+          console.log('[handleAcceptTrip] Trip still SEARCHING, retrying update...');
+           const { data: retryUpdated } = await supabase
+             .from('ezz_active_trip')
+             .update({
+               status: 'ACCEPTED',
+               driver_id: driverId,
+               driver_name: drv?.name || null,
+               driver_lat: drv?.lat || null,
+               driver_lng: drv?.lng || null,
+             })
+             .eq('id', activeTrip.id)
+             .eq('status', 'SEARCHING')
+             .select('id, status');
+
+          if (!retryUpdated || retryUpdated.length === 0) {
+            console.log('[handleAcceptTrip] Retry failed, rolling back');
+            setActiveTripWithTracking((prev) => {
+              if (!prev || prev.status !== 'ACCEPTED') return prev;
+              return { ...prev, status: 'SEARCHING' as TripStatus, driverId: undefined, driverName: undefined };
+            });
+            setDrivers((prev) =>
+              prev.map((d) => (d.id === driverId ? { ...d, status: 'AVAILABLE' } : d))
+            );
+            return;
+          }
+        }
       }
     }
 
@@ -2643,22 +2792,43 @@ export default function App() {
       const driverLat = drv?.lat ?? (drv ? getCoordsFromXY(drv.currentX, drv.currentY).lat : undefined);
       const driverLng = drv?.lng ?? (drv ? getCoordsFromXY(drv.currentX, drv.currentY).lng : undefined);
 
-      if (driverLat !== undefined && driverLng !== undefined) {
-        const route = await getNavigationRoute(driverLat, driverLng, activeTrip.pickup, activeTrip.dropoff);
-        if (route) {
-          const routeUpdated: Trip = {
-            ...acceptedTrip,
-            routeGeometry: route.geometry,
-            etaMinutes: route.durationSeconds ? Math.ceil(route.durationSeconds / 60) : acceptedTrip.etaMinutes,
-          };
-          setActiveTripWithTracking(routeUpdated);
-          if (supabaseConnected) {
-            saveActiveTrip(routeUpdated).then((ok) => console.log('[handleAcceptTrip] saveActiveTrip route result:', ok));
-          }
-        }
+      if (driverLat === undefined || driverLng === undefined) {
+        throw new Error('Driver coordinates unavailable');
+      }
+
+      const route = await getNavigationRoute(driverLat, driverLng, activeTrip.pickup, activeTrip.dropoff);
+      if (!route) {
+        throw new Error('No route found');
+      }
+
+      const routeUpdated: Trip = {
+        ...acceptedTrip,
+        routeGeometry: route.geometry,
+        etaMinutes: route.durationSeconds ? Math.ceil(route.durationSeconds / 60) : acceptedTrip.etaMinutes,
+      };
+      setActiveTripWithTracking(routeUpdated);
+      if (supabaseConnected) {
+        await saveActiveTrip(routeUpdated);
       }
     } catch (err) {
-      console.warn('[handleAcceptTrip] route calculation failed:', err);
+      console.warn('[handleAcceptTrip] route calculation failed, rolling back:', err);
+      setActiveTripWithTracking((prev) => {
+        if (!prev || prev.status !== 'ACCEPTED') return prev;
+        return { ...prev, status: 'SEARCHING' as TripStatus, driverId: undefined, driverName: undefined, routeGeometry: undefined, etaMinutes: undefined };
+      });
+      setDrivers((prev) =>
+        prev.map((d) => (d.id === driverId ? { ...d, status: 'AVAILABLE' } : d))
+      );
+      if (supabaseConnected) {
+        saveActiveTrip({ ...acceptedTrip, status: 'SEARCHING', driverId: undefined, driverName: undefined, routeGeometry: undefined, etaMinutes: undefined }).catch(() => {});
+        saveDriver({ ...drv, status: 'AVAILABLE' }).catch(() => {});
+      }
+      triggerToast(
+        lang === 'ar' ? 'تنبيه' : 'Notice',
+        lang === 'ar' ? 'لم يتم العثور على مسار. تم إلغاء قبول الرحلة.' : 'No route found. Ride acceptance cancelled.',
+        'warning'
+      );
+      return;
     }
 
     if (drv) {
@@ -2689,45 +2859,57 @@ export default function App() {
     }
   };
 
-  const handleRejectTrip = () => {
+  const handleRejectTrip = async () => {
+    if (rejectTripInProgressRef.current) return;
     const currentTrip = activeTrip;
     if (!currentTrip || currentTrip.status !== 'SEARCHING' || !currentTrip.currentOfferedDriverId) return;
 
+    rejectTripInProgressRef.current = true;
     const currentIdx = currentTrip.offeredDriverIds?.indexOf(currentTrip.currentOfferedDriverId) ?? -1;
     const nextDriverId = (currentTrip.offeredDriverIds && currentIdx !== -1 && currentIdx + 1 < currentTrip.offeredDriverIds.length)
       ? currentTrip.offeredDriverIds[currentIdx + 1]
       : undefined;
 
-    if (nextDriverId) {
-      const updatedTrip = { ...currentTrip, currentOfferedDriverId: nextDriverId };
-      setActiveTripWithTracking(updatedTrip);
-      if (supabaseConnected) {
-        saveActiveTrip(updatedTrip).then((ok) => {
-          console.log('[handleRejectTrip] Advanced to next driver, result:', ok);
-        });
+    try {
+      if (nextDriverId) {
+        const updatedTrip = { 
+          ...currentTrip, 
+          currentOfferedDriverId: nextDriverId,
+          dispatchTimer: currentTrip.dispatchTimerMax || currentTrip.dispatchTimer || 300,
+        };
+        setActiveTripWithTracking(updatedTrip);
+        if (supabaseConnected) {
+          await saveActiveTrip(updatedTrip);
+        }
+      } else {
+        const rejectingDriverId = currentTrip.currentOfferedDriverId;
+        setDrivers((prev) =>
+          prev.map((d) => (d.id === rejectingDriverId ? { ...d, status: 'AVAILABLE' } : d))
+        );
+        const withoutRejector = (currentTrip.offeredDriverIds || []).filter((id) => id !== rejectingDriverId);
+        const resetTrip: Trip = {
+          ...currentTrip,
+          status: 'SEARCHING' as TripStatus,
+          offeredDriverIds: withoutRejector,
+          currentOfferedDriverId: withoutRejector[0],
+          dispatchTimer: currentTrip.dispatchTimerMax || currentTrip.dispatchTimer || 300,
+        };
+        setActiveTripWithTracking(resetTrip);
+        if (supabaseConnected) {
+          await saveActiveTrip(resetTrip);
+          if (rejectingDriverId) {
+            const rejectingDrv = driversRef.current.find(d => d.id === rejectingDriverId);
+            if (rejectingDrv) {
+              await saveDriver({ ...rejectingDrv, status: 'AVAILABLE' }).catch(() => {});
+            }
+          }
+        }
+        if (!resetTrip.currentOfferedDriverId) {
+          await refreshWaitingTrip(resetTrip);
+        }
       }
-    } else {
-      const rejectingDriverId = currentTrip.currentOfferedDriverId;
-      setDrivers((prev) =>
-        prev.map((d) => (d.id === rejectingDriverId ? { ...d, status: 'AVAILABLE' } : d))
-      );
-      const withoutRejector = (currentTrip.offeredDriverIds || []).filter((id) => id !== rejectingDriverId);
-      const resetTrip: Trip = {
-        ...currentTrip,
-        status: 'SEARCHING' as TripStatus,
-        offeredDriverIds: withoutRejector,
-        currentOfferedDriverId: withoutRejector[0],
-        dispatchTimer: currentTrip.dispatchTimerMax || currentTrip.dispatchTimer || 300,
-      };
-      setActiveTripWithTracking(resetTrip);
-      if (supabaseConnected) {
-        saveActiveTrip(resetTrip).then((ok) => {
-          console.log('[handleRejectTrip] Re-dispatching after reject, result:', ok);
-        });
-      }
-      if (!resetTrip.currentOfferedDriverId) {
-        refreshWaitingTrip(resetTrip);
-      }
+    } finally {
+      rejectTripInProgressRef.current = false;
     }
   };
 
@@ -2834,83 +3016,91 @@ export default function App() {
     }
   };
 
-  const handleEndTrip = () => {
-    if (!activeTrip || activeTrip.status !== 'STARTED') return;
+  const handleEndTrip = async () => {
+    if (!activeTrip || activeTrip.status !== 'STARTED' || endTripInProgressRef.current) return;
+
+    endTripInProgressRef.current = true;
 
     const { driverId, fare, commission } = activeTrip;
     const netEarnings = fare - commission;
 
-    if (driverId) {
-      setDrivers((prev) => {
-        const updated = prev.map((d) => {
-          if (d.id !== driverId) return d;
-          return {
-            ...d,
-            status: 'OFFLINE' as const,
-            isOnline: false,
-            totalTrips: d.totalTrips + 1,
-            totalEarnings: d.totalEarnings + netEarnings,
-            totalCommissionPaid: d.totalCommissionPaid + commission,
-          };
+    try {
+      if (driverId) {
+        setDrivers((prev) => {
+          const updated = prev.map((d) => {
+            if (d.id !== driverId) return d;
+            return {
+              ...d,
+              status: 'OFFLINE' as const,
+              isOnline: false,
+              totalTrips: d.totalTrips + 1,
+              totalEarnings: d.totalEarnings + netEarnings,
+              totalCommissionPaid: d.totalCommissionPaid + commission,
+            };
+          });
+          const updatedDriver = updated.find((d) => d.id === driverId);
+          if (updatedDriver && supabaseConnected) {
+            saveDriver(updatedDriver).catch((err) => {
+              console.warn('[handleEndTrip] Failed to save driver stats:', err);
+            });
+          }
+          return updated;
         });
-        const updatedDriver = updated.find((d) => d.id === driverId);
-        if (updatedDriver && supabaseConnected) {
-          saveDriver(updatedDriver).catch(() => {});
-        }
-        return updated;
+      }
+
+      setStats((s) => ({
+        ...s,
+        totalRevenue: s.totalRevenue + fare,
+        totalCommission: s.totalCommission + commission,
+        totalCompletedTrips: s.totalCompletedTrips + 1,
+      }));
+
+      const completed: Trip = {
+        ...activeTrip,
+        status: 'COMPLETED' as TripStatus,
+        completedAt: new Date().toISOString(),
+      };
+
+      lastRouteCacheUseRef.current = Date.now();
+      setRouteCache((cache) => {
+        const { pickup, dropoff } = completed;
+        const key = `${pickup.lat.toFixed(4)}_${pickup.lng.toFixed(4)}_${dropoff.lat.toFixed(4)}_${dropoff.lng.toFixed(4)}`;
+        const next = { ...cache };
+        delete next[key];
+        return next;
       });
-    }
 
-    setStats((s) => ({
-      ...s,
-      totalRevenue: s.totalRevenue + fare,
-      totalCommission: s.totalCommission + commission,
-      totalCompletedTrips: s.totalCompletedTrips + 1,
-    }));
+      setTripsHistory((history) => [completed, ...history]);
 
-    const completed: Trip = {
-      ...activeTrip,
-      status: 'COMPLETED' as TripStatus,
-      completedAt: new Date().toISOString(),
-    };
+      if (supabaseConnected) {
+        await saveActiveTrip(completed);
+        await saveTripToHistory(completed, driverId, 'driver', getDeviceId());
+      }
 
-    lastRouteCacheUseRef.current = Date.now();
-    setRouteCache((cache) => {
-      const { pickup, dropoff } = completed;
-      const key = `${pickup.lat.toFixed(4)}_${pickup.lng.toFixed(4)}_${dropoff.lat.toFixed(4)}_${dropoff.lng.toFixed(4)}`;
-      const next = { ...cache };
-      delete next[key];
-      return next;
-    });
+      setActiveTripWithTracking(completed);
 
-    setTripsHistory((history) => [completed, ...history]);
-
-    if (supabaseConnected) {
-      saveActiveTrip(completed);
-      saveTripToHistory(completed);
-    }
-
-    setActiveTripWithTracking(completed);
-
-    if (driverIsLoggedIn && driverId === selectedDriverId) {
-      playNotificationSound('trip_completed');
-      speakText(
-        lang === 'ar'
-          ? 'تم إنهاء الرحلة بنجاح. حمد لله على السلامة.'
-          : 'Trip completed successfully. Thank you.',
-        lang === 'ar' ? 'ar-EG' : 'en-US'
-      );
-      sendNativeNotification(
-        '🎉 تم إنهاء الرحلة',
-        'تم إكمال الرحلة بنجاح.',
-        '✨'
-      );
-      triggerVibration([200, 100, 200, 100, 300]);
-      triggerToast(
-        '🎉 تم إنهاء الرحلة',
-        'تم إكمال الرحلة بنجاح.',
-        'success'
-      );
+      if (driverIsLoggedIn && driverId === selectedDriverId) {
+        playNotificationSound('trip_completed');
+        speakText(
+          lang === 'ar'
+            ? 'تم إنهاء الرحلة بنجاح. حمد لله على السلامة.'
+            : 'Trip completed successfully. Thank you.',
+          lang === 'ar' ? 'ar-EG' : 'en-US'
+        );
+        sendNativeNotification(
+          '🎉 تم إنهاء الرحلة',
+          'تم إكمال الرحلة بنجاح.',
+          '✨'
+        );
+        triggerVibration([200, 100, 200, 100, 300]);
+        triggerToast(
+          '🎉 تم إنهاء الرحلة',
+          'تم إكمال الرحلة بنجاح.',
+          'success'
+        );
+      }
+    } finally {
+      endTripInProgressRef.current = false;
     }
   };
 
@@ -2939,7 +3129,7 @@ export default function App() {
       } else {
         setCurrentScreen('HOME');
       }
-     };
+    };
 
   const handleUpdateCommissionRate = (rate: number) => {
     setStats((prev) => ({ ...prev, commissionRate: rate }));
@@ -2985,10 +3175,32 @@ export default function App() {
     }
   };
 
-  const handleSettleDriverCommissions = (driverId: string) => {
-    setDrivers((prev) =>
-      prev.map((d) => (d.id === driverId ? { ...d, totalCommissionPaid: 0 } : d))
-    );
+  const handleSettleDriverCommissions = async (driverId: string) => {
+    const driver = drivers.find((d) => d.id === driverId);
+    console.log('[handleSettleDriverCommissions] driverId:', driverId, 'found:', !!driver, 'supabaseConnected:', supabaseConnected, 'currentCommission:', driver?.totalCommissionPaid);
+    if (!driver) return;
+    const cleared = { ...driver, totalCommissionPaid: 0 };
+    if (supabaseConnected) {
+      const saved = await saveDriver(cleared);
+      console.log('[handleSettleDriverCommissions] saveDriver result:', saved);
+      if (saved) {
+        setDrivers((prev) => prev.map((d) => (d.id === driverId ? cleared : d)));
+        lastSyncedDriversRef.current[driverId] = {
+          currentX: cleared.currentX,
+          currentY: cleared.currentY,
+          isOnline: cleared.isOnline,
+          status: cleared.status,
+          totalEarnings: cleared.totalEarnings,
+          totalCommissionPaid: 0,
+          totalTrips: cleared.totalTrips,
+          rating: cleared.rating,
+          approvalStatus: cleared.approvalStatus,
+          serviceAreas: cleared.serviceAreas,
+        };
+      }
+    } else {
+      setDrivers((prev) => prev.map((d) => (d.id === driverId ? cleared : d)));
+    }
   };
 
   // Handler: Update Regions (admin areas management)
@@ -2997,102 +3209,173 @@ export default function App() {
   };
 
   // Handler: Update Driver Service Areas
-  const handleUpdateServiceAreas = (driverId: string, areas: string[]) => {
-    setDrivers((prev) =>
-      prev.map((d) =>
-        d.id === driverId ? { ...d, serviceAreas: areas } : d
-      )
-    );
+  const handleUpdateServiceAreas = async (driverId: string, areas: string[]) => {
     const driver = drivers.find((d) => d.id === driverId);
-    if (driver && supabaseConnected) {
-      saveDriver({ ...driver, serviceAreas: areas });
+    if (!driver) return;
+    const updated = { ...driver, serviceAreas: areas };
+    if (supabaseConnected) {
+      const saved = await saveDriver(updated);
+      if (saved) {
+        setDrivers((prev) => prev.map((d) => (d.id === driverId ? updated : d)));
+        lastSyncedDriversRef.current[driverId] = {
+          currentX: updated.currentX,
+          currentY: updated.currentY,
+          isOnline: updated.isOnline,
+          status: updated.status,
+          totalEarnings: updated.totalEarnings,
+          totalCommissionPaid: updated.totalCommissionPaid,
+          totalTrips: updated.totalTrips,
+          rating: updated.rating,
+          approvalStatus: updated.approvalStatus,
+          serviceAreas: updated.serviceAreas,
+        };
+      }
+    } else {
+      setDrivers((prev) => prev.map((d) => (d.id === driverId ? updated : d)));
     }
   };
 
   // Account verification workflows called by Administrator
   const handleApproveDriver = async (driverId: string) => {
     const driver = drivers.find(d => d.id === driverId);
-    console.log('Approve driver clicked:', driverId, driver?.approvalStatus, 'supabaseConnected:', supabaseConnected);
-    setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
-    if (driver && supabaseConnected) {
-      const updated = { ...driver, approvalStatus: 'APPROVED' as const };
-      console.log('Saving approved driver to Supabase:', updated.id, updated.approvalStatus);
-      try {
-        const saved = await saveDriver(updated);
-        console.log('saveDriver result:', saved);
-        if (!saved) {
-          triggerToast(
-            lang === 'ar' ? 'خطأ في الحفظ' : 'Save error',
-            lang === 'ar' ? 'فشل حفظ التغيير في قاعدة البيانات' : 'Failed to save changes to database',
-            'warning'
-          );
-        } else {
-          triggerToast(
-            lang === 'ar' ? 'تم القبول بنجاح' : 'Approved successfully',
-            lang === 'ar' ? 'تم تفعيل السائق بنجاح' : 'Driver activated successfully',
-            'success'
-          );
-        }
-      } catch (e) {
-        console.error('Error saving driver approval:', e);
-        triggerToast(
-          lang === 'ar' ? 'خطأ' : 'Error',
-          lang === 'ar' ? 'حدث خطأ أثناء حفظ الموافقة' : 'Error occurred while saving approval',
-          'warning'
-        );
+    console.log('[handleApproveDriver] driverId:', driverId, 'found:', !!driver, 'supabaseConnected:', supabaseConnected, 'currentApproval:', driver?.approvalStatus);
+    if (!driver) return;
+    pendingDriverToggleRef.current = driverId;
+    if (!supabaseConnected) {
+      setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
+      pendingDriverToggleRef.current = null;
+      triggerToast(lang === 'ar' ? 'غير متصل' : 'Offline', lang === 'ar' ? 'السجل محفوظ محلياً فقط' : 'Saved locally only', 'warning');
+      return;
+    }
+    const updated = { ...driver, approvalStatus: 'APPROVED' as const };
+    try {
+      const saved = await saveDriver(updated);
+      console.log('[handleApproveDriver] saveDriver result:', saved);
+      if (saved) {
+        setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
+        lastSyncedDriversRef.current[driverId] = {
+          approvalStatus: 'APPROVED',
+          currentX: updated.currentX,
+          currentY: updated.currentY,
+          isOnline: updated.isOnline,
+          status: updated.status,
+          totalEarnings: updated.totalEarnings,
+          totalCommissionPaid: updated.totalCommissionPaid,
+          totalTrips: updated.totalTrips,
+          rating: updated.rating,
+          serviceAreas: updated.serviceAreas,
+        };
+        triggerToast(lang === 'ar' ? 'تم القبول بنجاح' : 'Approved successfully', lang === 'ar' ? 'تم تفعيل السائق بنجاح' : 'Driver activated successfully', 'success');
+      } else {
+        triggerToast(lang === 'ar' ? 'خطأ في الحفظ' : 'Save error', lang === 'ar' ? 'فشل حفظ التغيير في قاعدة البيانات' : 'Failed to save changes to database', 'warning');
       }
-    } else if (!supabaseConnected) {
-      console.warn('Supabase not connected - approval saved locally only');
-      triggerToast(
-        lang === 'ar' ? 'غير متصل' : 'Offline',
-        lang === 'ar' ? 'السجل محفوظ محلياً فقط' : 'Saved locally only',
-        'warning'
-      );
+    } catch (e) {
+      console.error('[handleApproveDriver] Error:', e);
+      triggerToast(lang === 'ar' ? 'خطأ' : 'Error', lang === 'ar' ? 'حدث خطأ أثناء حفظ الموافقة' : 'Error occurred while saving approval', 'warning');
+    } finally {
+      pendingDriverToggleRef.current = null;
     }
   };
 
   const handleRejectDriver = async (driverId: string) => {
     const driver = drivers.find(d => d.id === driverId);
-    setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'REJECTED' } : d));
-    if (driver && supabaseConnected) {
-      try {
-        const saved = await saveDriver({ ...driver, approvalStatus: 'REJECTED' as const });
-        if (!saved) {
-          triggerToast(lang === 'ar' ? 'خطأ في الحفظ' : 'Save error', lang === 'ar' ? 'فشل حفظ الرفض' : 'Failed to save rejection', 'warning');
-        }
-      } catch (e) {
-        console.error('Error rejecting driver:', e);
+    if (!driver) return;
+    pendingDriverToggleRef.current = driverId;
+    if (!supabaseConnected) {
+      setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'REJECTED' } : d));
+      pendingDriverToggleRef.current = null;
+      return;
+    }
+    try {
+      const updated = { ...driver, approvalStatus: 'REJECTED' as const };
+      const saved = await saveDriver(updated);
+      if (saved) {
+        setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'REJECTED' } : d));
+        lastSyncedDriversRef.current[driverId] = {
+          approvalStatus: 'REJECTED',
+          currentX: updated.currentX,
+          currentY: updated.currentY,
+          isOnline: updated.isOnline,
+          status: updated.status,
+          totalEarnings: updated.totalEarnings,
+          totalCommissionPaid: updated.totalCommissionPaid,
+          totalTrips: updated.totalTrips,
+          rating: updated.rating,
+          serviceAreas: updated.serviceAreas,
+        };
       }
+    } catch (e) {
+      console.error('Error rejecting driver:', e);
+    } finally {
+      pendingDriverToggleRef.current = null;
     }
   };
 
   const handleFreezeDriver = async (driverId: string) => {
     const driver = drivers.find(d => d.id === driverId);
-    setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'FROZEN', isOnline: false } : d));
-    if (driver && supabaseConnected) {
-      try {
-        const saved = await saveDriver({ ...driver, approvalStatus: 'FROZEN' as const, isOnline: false });
-        if (!saved) {
-          triggerToast(lang === 'ar' ? 'خطأ في الحفظ' : 'Save error', lang === 'ar' ? 'فشل حفظ التجميد' : 'Failed to save freeze', 'warning');
-        }
-      } catch (e) {
-        console.error('Error freezing driver:', e);
+    if (!driver) return;
+    pendingDriverToggleRef.current = driverId;
+    if (!supabaseConnected) {
+      setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'FROZEN', isOnline: false } : d));
+      pendingDriverToggleRef.current = null;
+      return;
+    }
+    try {
+      const updated = { ...driver, approvalStatus: 'FROZEN' as const, isOnline: false };
+      const saved = await saveDriver(updated);
+      if (saved) {
+        setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'FROZEN', isOnline: false } : d));
+        lastSyncedDriversRef.current[driverId] = {
+          approvalStatus: 'FROZEN',
+          isOnline: false,
+          currentX: updated.currentX,
+          currentY: updated.currentY,
+          status: updated.status,
+          totalEarnings: updated.totalEarnings,
+          totalCommissionPaid: updated.totalCommissionPaid,
+          totalTrips: updated.totalTrips,
+          rating: updated.rating,
+          serviceAreas: updated.serviceAreas,
+        };
       }
+    } catch (e) {
+      console.error('Error freezing driver:', e);
+    } finally {
+      pendingDriverToggleRef.current = null;
     }
   };
 
   const handleUnfreezeDriver = async (driverId: string) => {
     const driver = drivers.find(d => d.id === driverId);
-    setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
-    if (driver && supabaseConnected) {
-      try {
-        const saved = await saveDriver({ ...driver, approvalStatus: 'APPROVED' as const });
-        if (!saved) {
-          triggerToast(lang === 'ar' ? 'خطأ في الحفظ' : 'Save error', lang === 'ar' ? 'فشل حفظ إعادة التفعيل' : 'Failed to save unfreeze', 'warning');
-        }
-      } catch (e) {
-        console.error('Error unfreezing driver:', e);
+    if (!driver) return;
+    pendingDriverToggleRef.current = driverId;
+    if (!supabaseConnected) {
+      setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
+      pendingDriverToggleRef.current = null;
+      return;
+    }
+    try {
+      const updated = { ...driver, approvalStatus: 'APPROVED' as const };
+      const saved = await saveDriver(updated);
+      if (saved) {
+        setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, approvalStatus: 'APPROVED' } : d));
+        lastSyncedDriversRef.current[driverId] = {
+          approvalStatus: 'APPROVED',
+          currentX: updated.currentX,
+          currentY: updated.currentY,
+          isOnline: updated.isOnline,
+          status: updated.status,
+          totalEarnings: updated.totalEarnings,
+          totalCommissionPaid: updated.totalCommissionPaid,
+          totalTrips: updated.totalTrips,
+          rating: updated.rating,
+          serviceAreas: updated.serviceAreas,
+        };
       }
+    } catch (e) {
+      console.error('Error unfreezing driver:', e);
+    } finally {
+      pendingDriverToggleRef.current = null;
     }
   };
 
@@ -3145,7 +3428,7 @@ export default function App() {
     await Promise.allSettled([
       clearAllDriversInDB(),
       clearAllRidersInDB(),
-      clearTripsHistoryInDB()
+      clearTripsHistoryInDB(adminUserId, getDeviceId())
     ]);
 
     alert(lang === 'ar' ? 'تم مسح جميع البيانات الوهمية نهائياً' : 'All fake data has been permanently cleared');
@@ -3210,7 +3493,8 @@ export default function App() {
       setRider({ ...found, isLoggedIn: true });
       restoreRiderPickupRegion(found);
       if (supabaseConnected) {
-        await clearSession('DRIVER');
+        await setAppRole('RIDER');
+        await clearSession('RIDER');
         await clearSession('ADMIN');
         await saveSession('RIDER', found.id);
       }
@@ -3440,6 +3724,9 @@ export default function App() {
       }
       setSelectedDriverId(newId);
       setDriverIsLoggedIn(true);
+      if (supabaseConnected) {
+        await setAppRole('DRIVER');
+      }
       setCurrentScreen('DRIVER_DASHBOARD');
     };
     } finally {
@@ -4537,6 +4824,10 @@ if (activeTrip) {
                                   const admin = await authenticateAdmin(adminPhone.trim(), adminPassword.trim());
                                   if (admin) {
                                     setAdminIsLoggedIn(true);
+                                    setAdminUserId(admin.id);
+                                    if (supabaseConnected) {
+                                      await setAppRole('ADMIN');
+                                    }
                                     localStorage.setItem('ezz_admin_phone', adminPhone.trim());
                                     localStorage.setItem('ezz_admin_password', adminPassword.trim());
                                     if (supabaseConnected) {
@@ -4612,6 +4903,8 @@ if (activeTrip) {
                         regions={regions}
                         riders={registeredRiders}
                         visitorCount={visitorCount}
+                        liveTrips={liveTrips}
+                        totalUsers={drivers.length + registeredRiders.length}
                         onUpdateCommissionRate={handleUpdateCommissionRate}
                         onUpdatePricingStats={handleUpdatePricingStats}
                         onSavePricingStats={handleSavePricingStats}
@@ -4630,9 +4923,13 @@ if (activeTrip) {
                          onDeleteRider={handleDeleteRider}
                          onClearAllFakeData={handleClearAllFakeData}
                         lang={lang}
-                         onLogout={() => {
+                          onLogout={() => {
                             setAdminIsLoggedIn(false);
-                            if (supabaseConnected) clearSession('ADMIN');
+                            setAdminUserId('');
+                            if (supabaseConnected) {
+                              clearSession('ADMIN');
+                              setAppRole('ANON');
+                            }
                           }}
                          onTriggerToast={triggerToast}
                       />

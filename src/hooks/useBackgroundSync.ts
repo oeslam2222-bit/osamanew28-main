@@ -81,36 +81,39 @@ export const useBackgroundSync = (
     let syncInterval = 30000;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-    const scheduleSync = () => {
+    const scheduleSync = async () => {
       if (timeoutId) clearTimeout(timeoutId);
-      if (document.hidden) {
-        timeoutId = setTimeout(scheduleSync, 5000);
-        return;
-      }
-      timeoutId = setTimeout(async () => {
-        try {
-          const remoteRiders = await fetchRiders();
-          if (remoteRiders && remoteRiders.length > 0) {
-            setRegisteredRiders(() => remoteRiders);
-          }
-          const remoteStats = await fetchStats();
-          if (remoteStats && statsLoadedRef.current) {
-            setStats(() => remoteStats);
-          }
-          if (locations.length > 0) {
-            locations.forEach(l => saveLocationInDB(l));
-          }
-        } catch {
-          // ignore
+      try {
+        const remoteRiders = await fetchRiders();
+        if (remoteRiders && remoteRiders.length > 0) {
+          setRegisteredRiders(() => remoteRiders);
         }
-        scheduleSync();
-      }, syncInterval);
+        const remoteStats = await fetchStats();
+        if (remoteStats && statsLoadedRef.current) {
+          setStats(() => remoteStats);
+        }
+        if (locations.length > 0) {
+          locations.forEach(l => saveLocationInDB(l));
+        }
+      } catch {
+        // ignore
+      }
+      timeoutId = setTimeout(scheduleSync, syncInterval);
     };
 
     scheduleSync();
 
+    const handleVisibilityChange = () => {
+      if (!document.hidden && supabaseConnected) {
+        scheduleSync();
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       if (timeoutId) clearTimeout(timeoutId);
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [supabaseConnected, locations, statsLoadedRef, setRegisteredRiders, setStats]);
 

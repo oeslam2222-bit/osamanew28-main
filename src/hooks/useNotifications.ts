@@ -196,6 +196,7 @@ export const useNotifications = (
   useEffect(() => {
     if (!activeTrip || !activeTrip.chatMessages || activeTrip.chatMessages.length === 0) return;
     const lastMsg = activeTrip.chatMessages[activeTrip.chatMessages.length - 1];
+    if (!lastMsg || typeof lastMsg.id !== 'string' || !lastMsg.text) return;
     if (lastMsg.sender !== (driverIsLoggedIn ? 'RIDER' : 'DRIVER')) {
       const rateKey = `chat_${activeTrip.id}_${lastMsg.id}`;
       if (!isNotificationRateLimited(rateKey)) {
