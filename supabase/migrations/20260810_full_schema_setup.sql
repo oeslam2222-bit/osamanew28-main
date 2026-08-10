@@ -529,6 +529,22 @@ BEGIN
 END;
 $$;
 
+-- Helper RPC to securely return a session matching a device_id
+-- This runs as the DB owner (SECURITY DEFINER) and avoids exposing the
+-- entire ezz_sessions table via permissive RLS policies.
+CREATE OR REPLACE FUNCTION get_session_by_device(p_device_id TEXT)
+RETURNS TABLE(role TEXT, user_id TEXT)
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  SELECT role, user_id FROM ezz_sessions
+  WHERE device_id = p_device_id
+  ORDER BY updated_at DESC
+  LIMIT 1;
+$$;
+
+GRANT EXECUTE ON FUNCTION get_session_by_device(TEXT) TO anon;
+
 -- ============================================================
 -- RPC: Get paginated trips for current user (rider or driver)
 -- ============================================================
