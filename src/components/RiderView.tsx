@@ -1179,16 +1179,24 @@ export const RiderView: React.FC<RiderViewProps> = ({
                   }`}
                 >
                   <option value="">{lang === 'ar' ? '— اختر المنطقة —' : '— Select region —'}</option>
-                  {regions.map((region) => (
-                    <option key={region.id} value={region.id}>
-                      {region.nameAr} ({region.nameEn})
-                    </option>
-                  ))}
+                  {Array.isArray(regions)
+                    ? regions
+                        .filter((region) => region && region.id)
+                        .map((region) => (
+                          <option key={region.id} value={region.id}>
+                            {region.nameAr || region.nameEn || (lang === 'ar' ? 'منطقة' : 'Region')} ({region.nameEn || region.nameAr || (lang === 'ar' ? 'منطقة' : 'Region')})
+                          </option>
+                        ))
+                    : null}
                 </select>
                 {selectedRegion && (
                   <div className="flex items-center gap-1.5 text-[9px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg w-fit border border-emerald-100">
                     <Check className="w-3 h-3" />
-                    <span>{lang === 'ar' ? `تم اختيار: ${selectedRegion.nameAr}` : `Selected: ${selectedRegion.nameEn}`}</span>
+                    <span>
+                      {lang === 'ar'
+                        ? `تم اختيار: ${selectedRegion.nameAr || selectedRegion.nameEn || ''}`
+                        : `Selected: ${selectedRegion.nameEn || selectedRegion.nameAr || ''}`}
+                    </span>
                   </div>
                 )}
               </div>
