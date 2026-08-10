@@ -12,8 +12,8 @@ export const getEligibleDrivers = (
       const lastSeenMs = new Date(d.lastSeen).getTime();
       if (now - lastSeenMs > staleThreshold) return false;
     }
-    if (selectedRegion && selectedRegion.id && d.serviceAreas?.length > 0) {
-      const regionMatch = d.serviceAreas.some((area: string) => {
+    if (selectedRegion && selectedRegion.id && (d.serviceAreas || []).length > 0) {
+      const regionMatch = (d.serviceAreas || []).some((area: string) => {
         const areaLower = area.toLowerCase();
         const regionNameLower = (selectedRegion.nameAr || selectedRegion.nameEn || '').toLowerCase();
         const regionId = String(selectedRegion.id).toLowerCase();
