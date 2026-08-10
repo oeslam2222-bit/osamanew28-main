@@ -557,12 +557,12 @@ export const RiderView: React.FC<RiderViewProps> = ({
   // serviceAreas include that region. Drivers with no serviceAreas at all
   // are treated as serving all areas (backward compatibility).
   const selectedRegion = regions.find(r => r.id === selectedPickupRegion);
-  const selectedRegionName = selectedRegion?.nameAr;
+  const selectedRegionName = selectedRegion?.nameAr || selectedRegion?.nameEn || '';
 
   const onlineDrivers = drivers.filter((d) => {
     if (!d.isOnline || d.approvalStatus !== 'APPROVED') return false;
-    if (selectedRegionName && d.serviceAreas.length > 0) {
-      return d.serviceAreas.some(sa => sa === selectedRegionName || sa === selectedRegion?.nameEn);
+    if (selectedRegionName && (d.serviceAreas || []).length > 0) {
+      return (d.serviceAreas || []).some(sa => sa === selectedRegionName || sa === selectedRegion?.nameEn);
     }
     return true;
   });
