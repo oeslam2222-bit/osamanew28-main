@@ -14,8 +14,8 @@ export const getEligibleDrivers = (
     }
     if (selectedRegion && selectedRegion.id && (d.serviceAreas || []).length > 0) {
       const regionMatch = (d.serviceAreas || []).some((area: string) => {
-        const areaLower = area.toLowerCase();
-        const regionNameLower = (selectedRegion.nameAr || selectedRegion.nameEn || '').toLowerCase();
+        const areaLower = String(area || '').toLowerCase();
+        const regionNameLower = String(selectedRegion.nameAr || selectedRegion.nameEn || '').toLowerCase();
         const regionId = String(selectedRegion.id).toLowerCase();
         return (
           areaLower.includes(regionNameLower) ||
@@ -31,12 +31,12 @@ export const getEligibleDrivers = (
 };
 
 export const filterDriversByRegion = (drivers: any[], region: Region | null) => {
-  if (!region || !region.id || drivers.length === 0) return drivers;
+  if (!region || !region.id || !Array.isArray(drivers) || drivers.length === 0) return Array.isArray(drivers) ? drivers : [];
   return drivers.filter(d => {
     if (!d.serviceAreas || d.serviceAreas.length === 0) return true;
     return d.serviceAreas.some((area: string) => {
-      const areaLower = area.toLowerCase();
-      const regionNameLower = (region.nameAr || region.nameEn || '').toLowerCase();
+      const areaLower = String(area || '').toLowerCase();
+      const regionNameLower = String(region.nameAr || region.nameEn || '').toLowerCase();
       const regionId = String(region.id).toLowerCase();
       return (
         areaLower.includes(regionNameLower) ||
@@ -62,7 +62,11 @@ export const mergeChatMessages = (localMessages: any[], remoteMessages: any[]) =
       merged.push(m);
     }
   }
-  return merged.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  return merged.sort((a, b) => {
+    const ta = a && (a.timestamp || a.createdAt) ? new Date(a.timestamp || a.createdAt).getTime() : 0;
+    const tb = b && (b.timestamp || b.createdAt) ? new Date(b.timestamp || b.createdAt).getTime() : 0;
+    return ta - tb;
+  });
 };
 
 export const getCoordsFromXY = (x: number, y: number) => {
