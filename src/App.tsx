@@ -81,8 +81,8 @@ import { hashPassword, verifyPassword, isSecureHash } from './utils/security';
 import { auditLogger } from './utils/auditLog';
 import { riderAuthLimiter, driverAuthLimiter, adminAuthLimiter } from './utils/security';
 import { supabase } from './supabaseClient';
-const SUPABASE_URL = 'https://siqsougaberroesupskl.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNpcXNvdWdhYmVycm9lc3Vwc2tsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNDI3NTcsImV4cCI6MjEwMTkxODc1N30.QRhYApZAfpR4BghjiR8RaK8KS28pgpz6WANuSjid8bY';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://siqsougaberroesupskl.supabase.co';
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNpcXNvdWdhYmVycm9lc3Vwc2tsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNDI3NTcsImV4cCI6MjEwMTkxODc1N30.QRhYApZAfpR4BghjiR8RaK8KS28pgpz6WANuSjid8bY';
 
 // Support secure data storage with password obfuscation / encryption
 const obfuscatePassword = (password: string): string => {
@@ -651,17 +651,18 @@ export default function App() {
   const { sendPushToDriver } = useWebPush(driverIsLoggedIn ? selectedDriverId : undefined, supabaseConnected);
 
   // Admin login states (persisted locally)
-  const [adminIsLoggedIn, setAdminIsLoggedIn] = useState<boolean>(() => {
-    return localStorage.getItem('ezz_admin_logged_in') === 'true';
-  });
-  const [adminPhone, setAdminPhone] = useState<string>(() => {
-    return localStorage.getItem('ezz_admin_phone') || '';
-  });
-  const [adminPassword, setAdminPassword] = useState<string>(() => {
-    return localStorage.getItem('ezz_admin_password') || '';
-  });
+  const [adminIsLoggedIn, setAdminIsLoggedIn] = useState<boolean>(false);
+  const [adminPhone, setAdminPhone] = useState<string>('');
+  const [adminPassword, setAdminPassword] = useState<string>('');
   const [adminUserId, setAdminUserId] = useState<string>('');
   const [adminLoginError, setAdminLoginError] = useState('');
+
+  useEffect(() => {
+    try {
+      localStorage.removeItem('ezz_admin_phone');
+      localStorage.removeItem('ezz_admin_password');
+    } catch {}
+  }, []);
 
   // Prevent duplicate login submissions (button spam / rapid Enter presses)
   const [riderSubmitting, setRiderSubmitting] = useState(false);
@@ -900,18 +901,6 @@ export default function App() {
   }, [lang]);
 
   useEffect(() => {
-    localStorage.setItem('ezz_admin_logged_in', adminIsLoggedIn ? 'true' : 'false');
-  }, [adminIsLoggedIn]);
-
-  useEffect(() => {
-    localStorage.setItem('ezz_admin_phone', adminPhone);
-  }, [adminPhone]);
-
-  useEffect(() => {
-    localStorage.setItem('ezz_admin_password', adminPassword);
-  }, [adminPassword]);
-
-  useEffect(() => {
     localStorage.setItem('ezz_current_screen', currentScreen);
   }, [currentScreen]);
 
@@ -939,7 +928,10 @@ export default function App() {
   }, [regions]);
   useEffect(() => {
     try {
-      if (rider.id) localStorage.setItem('ezz_rider_session', JSON.stringify(rider));
+      if (rider.id) {
+        const { password, ...safeRider } = rider;
+        localStorage.setItem('ezz_rider_session', JSON.stringify(safeRider));
+      }
     } catch {}
   }, [rider]);
   useEffect(() => {
@@ -1043,7 +1035,7 @@ export default function App() {
             if (cachedRider) {
               const parsedRider = JSON.parse(cachedRider);
               if (parsedRider && parsedRider.id && parsedRider.phone) {
-                setRider({ ...parsedRider, isLoggedIn: true });
+                setRider({ ...parsedRider, password: '', isLoggedIn: true });
                 restoreRiderPickupRegion(parsedRider);
               }
             }
@@ -4821,8 +4813,6 @@ if (activeTrip) {
                                     if (supabaseConnected) {
                                       await setAppRole('ADMIN');
                                     }
-                                    localStorage.setItem('ezz_admin_phone', adminPhone.trim());
-                                    localStorage.setItem('ezz_admin_password', adminPassword.trim());
                                     if (supabaseConnected) {
                                       await clearSession('RIDER');
                                       await clearSession('DRIVER');
