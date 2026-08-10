@@ -1504,7 +1504,6 @@ export const fetchTripsHistory = async ({ userId, role, deviceId }: { userId?: s
     const { data, error } = await supabase.rpc('get_my_trips', {
       p_user_id: userId,
       p_role: role,
-      p_device_id: deviceId || null,
       p_page: 0,
       p_limit: 50,
       p_date_from: null,
@@ -1560,7 +1559,6 @@ export const fetchTripsHistoryCount = async ({
     const { data, error } = await supabase.rpc('count_my_trips', {
       p_user_id: userId,
       p_role: role,
-      p_device_id: deviceId || null,
       p_date_from: dateFrom || null,
       p_date_to: dateTo || null,
       p_status_filter: 'all',
@@ -1602,7 +1600,6 @@ export const fetchTripsHistoryPaginated = async ({
     const { data, error } = await supabase.rpc('get_my_trips', {
       p_user_id: userId,
       p_role: role,
-      p_device_id: deviceId || null,
       p_page: page,
       p_limit: limit,
       p_date_from: dateFrom || null,
@@ -1644,8 +1641,6 @@ export const fetchTripsHistoryFilteredPaginated = async ({
   try {
     const adminId = role === 'admin' ? userId : undefined;
     const { data, error } = await supabase.rpc('get_admin_trips', {
-      p_admin_user_id: adminId || userId || '',
-      p_device_id: deviceId || null,
       p_page: page,
       p_limit: limit,
       p_date_from: dateFrom || null,
@@ -1667,8 +1662,6 @@ export const fetchTripsHistoryFilteredPaginated = async ({
 export const fetchAllTrips = async (limit: number = 1000, adminUserId?: string, deviceId?: string): Promise<Trip[]> => {
   try {
     const { data, error } = await supabase.rpc('get_admin_trips', {
-      p_admin_user_id: adminUserId || '',
-      p_device_id: deviceId || null,
       p_page: 0,
       p_limit: limit,
       p_date_from: null,
@@ -1687,10 +1680,7 @@ export const fetchAllTrips = async (limit: number = 1000, adminUserId?: string, 
 // Clear Trips History (admin only - uses secure RPC)
 export const clearTripsHistoryInDB = async (adminUserId?: string, deviceId?: string): Promise<boolean> => {
   try {
-    const { error } = await supabase.rpc('admin_clear_all_trips', {
-      p_admin_user_id: adminUserId || '',
-      p_device_id: deviceId || null,
-    });
+    const { error } = await supabase.rpc('admin_clear_all_trips', {});
     if (error) throw error;
     return true;
   } catch (err: any) {
@@ -2138,16 +2128,15 @@ export const saveSession = async (role: 'RIDER' | 'DRIVER' | 'ADMIN', userId: st
 export const loadSession = async (): Promise<{ role: 'RIDER' | 'DRIVER' | 'ADMIN'; userId: string } | null> => {
   try {
     const deviceId = getDeviceId();
-    // Use a SECURITY DEFINER RPC to fetch session by device to avoid exposing
-    // the entire sessions table via permissive RLS policies. The RPC runs as
-    // the DB owner and returns only the matching session row for the device.
-    const { data, error } = await supabase.rpc('get_session_by_device', { p_device_id: deviceId });
+    const { data, error } = await supabase
+      .from('ezz_sessions')
+      .select('role,user_id,updated_at')
+      .eq('device_id', deviceId)
+      .order('updated_at', { ascending: false })
+      .limit(1);
     if (error) throw error;
-    if (!data) return null;
-    // postgrest returns an array for set-returning RPCs; handle both shapes
-    const row = Array.isArray(data) ? data[0] : data;
-    if (!row || !row.role || !row.user_id) return null;
-    return { role: row.role as any, userId: row.user_id };
+    if (!data || data.length === 0) return null;
+    return { role: data[0].role as any, userId: data[0].user_id };
   } catch (err: any) {
     console.warn('Could not load session from Supabase:', err.message);
     return null;
