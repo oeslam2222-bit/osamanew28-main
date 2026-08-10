@@ -77,6 +77,12 @@ export const DriverView: React.FC<DriverViewProps> = ({
 
   const currentDriver = visibleDrivers.find((d) => d.id === safeSelectedId) || visibleDrivers[0] || null;
   const currentDriverId = currentDriver?.id || '';
+  const getLocationName = (location: Location, language: 'ar' | 'en') => {
+    const ar = location?.nameAr || '';
+    const en = location?.nameEn || '';
+    if (language === 'ar') return ar || en || 'موقع غير معروف';
+    return en || ar || 'Unknown location';
+  };
   const activeTripRef = useRef(activeTrip);
   activeTripRef.current = activeTrip;
   const onUpdateDriverLocationRef = useRef(onUpdateDriverLocation);
@@ -511,21 +517,21 @@ export const DriverView: React.FC<DriverViewProps> = ({
         </div>
 
         {/* Service Areas Selection (Mandatory - Dropdown) */}
-        {currentDriver.approvalStatus === 'APPROVED' && (
+        {currentDriver && currentDriver.approvalStatus === 'APPROVED' && (
           <div className="mt-2 pt-2 border-t border-white/10 space-y-1.5">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-white/90 flex items-center gap-1">
                 <MapPin className="w-3 h-3 text-amber-300" />
                 {lang === 'ar' ? 'اختر منطقة التغطية *' : 'Select Coverage Area *'}
               </span>
-              {currentDriver.serviceAreas.length === 0 && (
+              {(currentDriver.serviceAreas || []).length === 0 && (
                 <span className="text-[8px] bg-rose-500 text-white font-black px-1.5 py-0.5 rounded-full animate-pulse">
                   {lang === 'ar' ? 'مطلوب!' : 'REQUIRED'}
                 </span>
               )}
             </div>
 
-            {regions.length === 0 ? (
+            {(!Array.isArray(regions) || regions.length === 0) ? (
               <span className="text-[9px] text-amber-300 font-semibold block">
                 {lang === 'ar' ? 'لا توجد مناطق معرفة — تواصل مع الإدارة' : 'No regions defined yet — contact admin'}
               </span>
@@ -538,38 +544,42 @@ export const DriverView: React.FC<DriverViewProps> = ({
                     if (!regionId) return;
                     const region = regions.find(r => r.id === regionId);
                     if (!region) return;
-                    const isSelected = currentDriver.serviceAreas.some(sa => sa === region.nameAr || sa === region.nameEn);
+                    const areaList = currentDriver.serviceAreas || [];
+                    const isSelected = areaList.some(sa => sa === region.nameAr || sa === region.nameEn);
                     let newAreas: string[];
                     if (isSelected) {
-                      newAreas = currentDriver.serviceAreas.filter(sa => sa !== region.nameAr && sa !== region.nameEn);
+                      newAreas = areaList.filter(sa => sa !== region.nameAr && sa !== region.nameEn);
                     } else {
-                      newAreas = [...currentDriver.serviceAreas, region.nameAr];
+                      newAreas = [...areaList, region.nameAr];
                     }
                     onUpdateServiceAreas?.(currentDriver.id, newAreas);
                   }}
                   className="w-full bg-white text-slate-800 border border-slate-200 rounded-xl py-2 px-2.5 text-[11px] font-bold focus:outline-none cursor-pointer pointer-events-auto shadow-xs"
                 >
                   <option value="">{lang === 'ar' ? '— اضغط هنا لاختيار المنطقة لتفعيلها —' : '— Select region to activate —'}</option>
-                  {regions.map((region) => {
-                    const isSelected = currentDriver.serviceAreas.some(sa => sa === region.nameAr || sa === region.nameEn);
+                  {regions.filter(Boolean).map((region) => {
+                    const r = region as Region | undefined;
+                    const areaList = currentDriver.serviceAreas || [];
+                    const isSelected = r ? areaList.some(sa => sa === r.nameAr || sa === r.nameEn) : false;
+                    if (!r) return null;
                     return (
-                      <option key={region.id} value={region.id}>
-                        {isSelected ? '✓ ' : ''}{region.nameAr} ({region.nameEn}) {isSelected ? (lang === 'ar' ? '— (مفعّلة)' : '— (Active)') : ''}
+                      <option key={r.id} value={r.id}>
+                        {isSelected ? '✓ ' : ''}{r.nameAr || ''} ({r.nameEn || ''}) {isSelected ? (lang === 'ar' ? '— (مفعّلة)' : '— (Active)') : ''}
                       </option>
                     );
                   })}
                 </select>
 
                 {/* Active Regions Badges */}
-                {currentDriver.serviceAreas.length > 0 && (
+                {(currentDriver.serviceAreas || []).length > 0 && (
                   <div className="flex flex-wrap gap-1 pt-0.5">
-                    {currentDriver.serviceAreas.map((areaName) => (
+                    {(currentDriver.serviceAreas || []).map((areaName) => (
                       <span key={areaName} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-[10px] font-black shadow-2xs">
                         <span>{areaName}</span>
                         <button
                           type="button"
                           onClick={() => {
-                            const newAreas = currentDriver.serviceAreas.filter(sa => sa !== areaName);
+                            const newAreas = (currentDriver.serviceAreas || []).filter(sa => sa !== areaName);
                             onUpdateServiceAreas?.(currentDriver.id, newAreas);
                           }}
                           className="text-white/80 hover:text-white font-bold cursor-pointer pointer-events-auto text-[10px]"
@@ -584,7 +594,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
               </div>
             )}
 
-            {currentDriver.serviceAreas.length === 0 && currentDriver.isOnline && (
+            {(currentDriver.serviceAreas || []).length === 0 && currentDriver.isOnline && (
               <div className="bg-amber-500/20 border border-amber-400/40 rounded-lg p-1.5 text-[9px] text-amber-200 font-semibold flex items-center gap-1">
                 <AlertTriangle className="w-3 h-3 text-amber-300 shrink-0" />
                 {lang === 'ar'
@@ -672,7 +682,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 <div>
                   <p className="text-[10px] text-slate-400">{lang === 'ar' ? 'نقطة الركوب' : 'Pickup'}</p>
                   <p className="text-xs font-semibold text-slate-800">
-                    {lang === 'ar' ? activeTrip.pickup.nameAr : activeTrip.pickup.nameEn}
+                    {getLocationName(activeTrip.pickup, lang)}
                   </p>
                 </div>
               </div>
@@ -681,7 +691,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 <div>
                   <p className="text-[10px] text-slate-400">{lang === 'ar' ? 'الوجهة' : 'Dropoff'}</p>
                   <p className="text-xs font-semibold text-slate-800">
-                    {lang === 'ar' ? activeTrip.dropoff.nameAr : activeTrip.dropoff.nameEn}
+                    {getLocationName(activeTrip.dropoff, lang)}
                   </p>
                 </div>
               </div>
@@ -746,8 +756,8 @@ export const DriverView: React.FC<DriverViewProps> = ({
                   <MapPin className="w-4 h-4 text-emerald-500" />
                   <span>
                     {lang === 'ar'
-                      ? `توجه إلى: ${activeTrip.pickup.nameAr}`
-                      : `Go to pickup: ${activeTrip.pickup.nameEn}`}
+                      ? `توجه إلى: ${getLocationName(activeTrip.pickup, lang)}`
+                      : `Go to pickup: ${getLocationName(activeTrip.pickup, lang)}`}
                   </span>
                 </div>
               )}
@@ -756,8 +766,8 @@ export const DriverView: React.FC<DriverViewProps> = ({
                   <Navigation className="w-4 h-4 text-rose-500 rotate-45" />
                   <span>
                     {lang === 'ar'
-                      ? `توجه إلى: ${activeTrip.dropoff.nameAr}`
-                      : `Go to destination: ${activeTrip.dropoff.nameEn}`}
+                      ? `توجه إلى: ${getLocationName(activeTrip.dropoff, lang)}`
+                      : `Go to destination: ${getLocationName(activeTrip.dropoff, lang)}`}
                   </span>
                 </div>
               )}
@@ -1125,6 +1135,8 @@ export const DriverView: React.FC<DriverViewProps> = ({
                     hour: 'numeric',
                     minute: '2-digit'
                   }) : '';
+                  const pickupLabel = getLocationName(trip.pickup, lang);
+                  const dropoffLabel = getLocationName(trip.dropoff, lang);
                   return (
                     <div key={trip.id} className="pt-2 flex justify-between items-center text-[10px] text-slate-600 gap-2">
                       <div className="text-left font-mono shrink-0">
@@ -1138,10 +1150,10 @@ export const DriverView: React.FC<DriverViewProps> = ({
                       </div>
                       <div className="text-right flex-1 min-w-0">
                         <p className="font-bold text-slate-800 truncate" dir="rtl">
-                          🏁 {lang === 'ar' ? trip.dropoff.nameAr : trip.dropoff.nameEn}
+                          🏁 {dropoffLabel}
                         </p>
                         <p className="text-[9px] text-slate-400 truncate mt-0.5" dir="rtl">
-                          📍 {lang === 'ar' ? trip.pickup.nameAr : trip.pickup.nameEn}
+                          📍 {pickupLabel}
                         </p>
                         <p className="text-[8px] text-slate-500 mt-0.5">
                           {trip.riderName}

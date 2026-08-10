@@ -48,7 +48,9 @@ import {
   fetchActiveAdsForPlacement,
   sendNewTripNotification,
   saveRiderPreferences,
-  fetchAllActiveTrips
+  fetchAllActiveTrips,
+  uploadDriverImage,
+  uploadDriverImageFromBase64
 } from './supabaseService';
 import {
   requestNotificationPermission,
@@ -79,8 +81,8 @@ import { hashPassword, verifyPassword, isSecureHash } from './utils/security';
 import { auditLogger } from './utils/auditLog';
 import { riderAuthLimiter, driverAuthLimiter, adminAuthLimiter } from './utils/security';
 import { supabase } from './supabaseClient';
-const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined) || '';
-const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || '';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://siqsougaberroesupskl.supabase.co';
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNpcXNvdWdhYmVycm9lc3Vwc2tsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNDI3NTcsImV4cCI6MjEwMTkxODc1N30.QRhYApZAfpR4BghjiR8RaK8KS28pgpz6WANuSjid8bY';
 
 // Support secure data storage with password obfuscation / encryption
 const obfuscatePassword = (password: string): string => {
@@ -294,12 +296,12 @@ export default function App() {
         if (!isNotificationRateLimited(rateKey)) {
           notifyDriverWithAudioFirst({
             title: lang === 'ar' ? 'يوجد رحلة جديدة' : 'New trip available',
-            body: `${currentTrip.pickup.nameAr || currentTrip.pickup.nameEn} ← ${currentTrip.dropoff.nameAr || currentTrip.dropoff.nameEn} | ${currentTrip.fare} EGP`,
+            body: `${currentTrip.pickup?.nameAr || currentTrip.pickup?.nameEn || ''} ← ${currentTrip.dropoff?.nameAr || currentTrip.dropoff?.nameEn || ''} | ${currentTrip.fare} EGP`,
             soundType: 'new_trip',
             speechText:
               lang === 'ar'
-                ? `يوجد رحلة جديدة من ${currentTrip.pickup.nameAr} إلى ${currentTrip.dropoff.nameAr} بقيمة ${currentTrip.fare} جنيه.`
-                : `New ride available from ${currentTrip.pickup.nameEn} to ${currentTrip.dropoff.nameEn} for ${currentTrip.fare} EGP.`,
+                ? `يوجد رحلة جديدة من ${currentTrip.pickup?.nameAr || currentTrip.pickup?.nameEn || ''} إلى ${currentTrip.dropoff?.nameAr || currentTrip.dropoff?.nameEn || ''} بقيمة ${currentTrip.fare} جنيه.`
+                : `New ride available from ${currentTrip.pickup?.nameEn || currentTrip.pickup?.nameAr || ''} to ${currentTrip.dropoff?.nameEn || currentTrip.dropoff?.nameAr || ''} for ${currentTrip.fare} EGP.`,
             lang: lang === 'ar' ? 'ar-EG' : 'en-US',
             tag: `trip-${currentTrip.id}`,
           });
@@ -649,17 +651,18 @@ export default function App() {
   const { sendPushToDriver } = useWebPush(driverIsLoggedIn ? selectedDriverId : undefined, supabaseConnected);
 
   // Admin login states (persisted locally)
-  const [adminIsLoggedIn, setAdminIsLoggedIn] = useState<boolean>(() => {
-    return localStorage.getItem('ezz_admin_logged_in') === 'true';
-  });
-  const [adminPhone, setAdminPhone] = useState<string>(() => {
-    return localStorage.getItem('ezz_admin_phone') || '';
-  });
-  const [adminPassword, setAdminPassword] = useState<string>(() => {
-    return localStorage.getItem('ezz_admin_password') || '';
-  });
+  const [adminIsLoggedIn, setAdminIsLoggedIn] = useState<boolean>(false);
+  const [adminPhone, setAdminPhone] = useState<string>('');
+  const [adminPassword, setAdminPassword] = useState<string>('');
   const [adminUserId, setAdminUserId] = useState<string>('');
   const [adminLoginError, setAdminLoginError] = useState('');
+
+  useEffect(() => {
+    try {
+      localStorage.removeItem('ezz_admin_phone');
+      localStorage.removeItem('ezz_admin_password');
+    } catch {}
+  }, []);
 
   // Prevent duplicate login submissions (button spam / rapid Enter presses)
   const [riderSubmitting, setRiderSubmitting] = useState(false);
@@ -898,18 +901,6 @@ export default function App() {
   }, [lang]);
 
   useEffect(() => {
-    localStorage.setItem('ezz_admin_logged_in', adminIsLoggedIn ? 'true' : 'false');
-  }, [adminIsLoggedIn]);
-
-  useEffect(() => {
-    localStorage.setItem('ezz_admin_phone', adminPhone);
-  }, [adminPhone]);
-
-  useEffect(() => {
-    localStorage.setItem('ezz_admin_password', adminPassword);
-  }, [adminPassword]);
-
-  useEffect(() => {
     localStorage.setItem('ezz_current_screen', currentScreen);
   }, [currentScreen]);
 
@@ -937,7 +928,10 @@ export default function App() {
   }, [regions]);
   useEffect(() => {
     try {
-      if (rider.id) localStorage.setItem('ezz_rider_session', JSON.stringify(rider));
+      if (rider.id) {
+        const { password, ...safeRider } = rider;
+        localStorage.setItem('ezz_rider_session', JSON.stringify(safeRider));
+      }
     } catch {}
   }, [rider]);
   useEffect(() => {
@@ -1041,7 +1035,7 @@ export default function App() {
             if (cachedRider) {
               const parsedRider = JSON.parse(cachedRider);
               if (parsedRider && parsedRider.id && parsedRider.phone) {
-                setRider({ ...parsedRider, isLoggedIn: true });
+                setRider({ ...parsedRider, password: '', isLoggedIn: true });
                 restoreRiderPickupRegion(parsedRider);
               }
             }
@@ -1299,7 +1293,7 @@ export default function App() {
   useEffect(() => {
     if (!supabaseConnected) return;
 
-    const pollInterval = getAdaptivePollingInterval(3000, dataSaverMode, !!activeTrip);
+    const pollInterval = getAdaptivePollingInterval(8000, dataSaverMode, !!activeTrip);
 
     const interval = setInterval(async () => {
       if (!isMountedRef.current) return;
@@ -1423,7 +1417,7 @@ export default function App() {
   useEffect(() => {
     if (!supabaseConnected) return;
 
-    const pollInterval = getAdaptivePollingInterval(3000, dataSaverMode, false);
+    const pollInterval = getAdaptivePollingInterval(8000, dataSaverMode, false);
 
     const interval = setInterval(async () => {
       if (!isMountedRef.current) return;
@@ -1484,7 +1478,7 @@ export default function App() {
   useEffect(() => {
     if (!supabaseConnected || !adminIsLoggedIn) return;
 
-    const pollInterval = 5000;
+    const pollInterval = 8000;
 
     const interval = setInterval(async () => {
       if (!isMountedRef.current) return;
@@ -1522,7 +1516,7 @@ export default function App() {
     };
 
     updateLastSeen();
-    const interval = setInterval(updateLastSeen, 10000);
+    const interval = setInterval(updateLastSeen, 15000);
 
     // Mark offline immediately when app/tab is closed
     const markOffline = async () => {
@@ -1810,7 +1804,7 @@ export default function App() {
           notifyRideRequest(
             lang === 'ar' ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!',
             lang === 'ar'
-              ? `من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr} | ${activeTrip.fare} ج.م`
+              ? `من ${activeTrip.pickup?.nameAr || activeTrip.pickup?.nameEn || ''} إلى ${activeTrip.dropoff?.nameAr || activeTrip.dropoff?.nameEn || ''} | ${activeTrip.fare} ج.م`
               : `${activeTrip.pickup.nameEn} → ${activeTrip.dropoff.nameEn} | ${activeTrip.fare} EGP`,
             lang === 'ar' ? 'ar-EG' : 'en-US'
           );
@@ -1818,8 +1812,8 @@ export default function App() {
         triggerToast(
           lang === 'ar' ? 'يوجد رحلة جديدة' : 'New trip available',
           lang === 'ar'
-            ? `العميل ${activeTrip.riderName} يطلب رحلة من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr}.`
-            : `Rider ${activeTrip.riderName} requests a ride from ${activeTrip.pickup.nameEn} to ${activeTrip.dropoff.nameEn}.`,
+            ? `العميل ${activeTrip.riderName} يطلب رحلة من ${activeTrip.pickup?.nameAr || activeTrip.pickup?.nameEn || ''} إلى ${activeTrip.dropoff?.nameAr || activeTrip.dropoff?.nameEn || ''}.`
+            : `Rider ${activeTrip.riderName} requests a ride from ${activeTrip.pickup?.nameEn || activeTrip.pickup?.nameAr || ''} to ${activeTrip.dropoff?.nameEn || activeTrip.dropoff?.nameAr || ''}.`,
           'new_trip'
         );
       }
@@ -2842,7 +2836,7 @@ export default function App() {
       sendNativeNotification(
         lang === 'ar' ? '✅ تم قبول الرحلة!' : '✅ Ride Accepted!',
         lang === 'ar'
-          ? `أنت الآن في الطريق إلى العميل من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr}.`
+          ? `أنت الآن في الطريق إلى العميل من ${activeTrip.pickup?.nameAr || activeTrip.pickup?.nameEn || ''} إلى ${activeTrip.dropoff?.nameAr || activeTrip.dropoff?.nameEn || ''}.`
           : `You are now heading to the client from ${activeTrip.pickup.nameEn} to ${activeTrip.dropoff.nameEn}.`,
         '🚗'
       );
@@ -3672,6 +3666,13 @@ export default function App() {
 
       const hashedPassword = await hashPassword(drvFormPassword.trim());
 
+      const [personalPhoto, nationalIdImage, driverLicenseImage, vehicleLicenseImage] = await Promise.all([
+        uploadDriverImageFromBase64(drvFormPersonalPhoto || '', newId, 'personal'),
+        uploadDriverImageFromBase64(drvFormNationalIdImage || '', newId, 'national'),
+        uploadDriverImageFromBase64(drvFormLicenseImage || '', newId, 'license'),
+        uploadDriverImageFromBase64(drvFormVehicleLicenseImage || '', newId, 'vehicle'),
+      ]);
+
       const newDriver: Driver = {
         id: newId,
         name: drvFormName.trim(),
@@ -3683,10 +3684,10 @@ export default function App() {
         vehicleName: drvFormVehicleName.trim(),
         nationalId: drvFormNationalId.trim(),
         driverLicense: drvFormLicense.trim(),
-        personalPhoto: drvFormPersonalPhoto || defaultPersonal,
-        nationalIdImage: drvFormNationalIdImage || defaultNational,
-        driverLicenseImage: drvFormLicenseImage || defaultLicense,
-        vehicleLicenseImage: drvFormVehicleLicenseImage || defaultVehicle,
+        personalPhoto: personalPhoto || defaultPersonal,
+        nationalIdImage: nationalIdImage || defaultNational,
+        driverLicenseImage: driverLicenseImage || defaultLicense,
+        vehicleLicenseImage: vehicleLicenseImage || defaultVehicle,
         isOnline: true,
         status: 'AVAILABLE',
         approvalStatus: 'PENDING', // Saved as PENDING for admin approval request!
@@ -4812,8 +4813,6 @@ if (activeTrip) {
                                     if (supabaseConnected) {
                                       await setAppRole('ADMIN');
                                     }
-                                    localStorage.setItem('ezz_admin_phone', adminPhone.trim());
-                                    localStorage.setItem('ezz_admin_password', adminPassword.trim());
                                     if (supabaseConnected) {
                                       await clearSession('RIDER');
                                       await clearSession('DRIVER');

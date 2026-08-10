@@ -444,9 +444,9 @@ export const RiderView: React.FC<RiderViewProps> = ({
     .slice(0, 3)
     .map(t => ({
       id: t.id,
-      name: t.dropoff.nameAr || t.dropoff.nameEn,
-      lat: t.dropoff.lat,
-      lng: t.dropoff.lng,
+      name: t.dropoff?.nameAr || t.dropoff?.nameEn || '',
+      lat: t.dropoff?.lat || 0,
+      lng: t.dropoff?.lng || 0,
     }));
 
   const loadMyTrips = async (reset = false) => {
@@ -557,12 +557,12 @@ export const RiderView: React.FC<RiderViewProps> = ({
   // serviceAreas include that region. Drivers with no serviceAreas at all
   // are treated as serving all areas (backward compatibility).
   const selectedRegion = regions.find(r => r.id === selectedPickupRegion);
-  const selectedRegionName = selectedRegion?.nameAr;
+  const selectedRegionName = selectedRegion?.nameAr || selectedRegion?.nameEn || '';
 
   const onlineDrivers = drivers.filter((d) => {
     if (!d.isOnline || d.approvalStatus !== 'APPROVED') return false;
-    if (selectedRegionName && d.serviceAreas.length > 0) {
-      return d.serviceAreas.some(sa => sa === selectedRegionName || sa === selectedRegion?.nameEn);
+    if (selectedRegionName && (d.serviceAreas || []).length > 0) {
+      return (d.serviceAreas || []).some(sa => sa === selectedRegionName || sa === selectedRegion?.nameEn);
     }
     return true;
   });
@@ -637,17 +637,25 @@ export const RiderView: React.FC<RiderViewProps> = ({
 
   const handleSetHome = () => {
     if (!pickupLoc) return;
-    const home = { id: pickupLoc.id, name: lang === 'ar' ? pickupLoc.nameAr : pickupLoc.nameEn, lat: pickupLoc.lat, lng: pickupLoc.lng };
-    setHomeLocation(home);
-    persistPreferences({ homeLocation: home });
-    setShowHomeModal(false);
-  };
+      const home = {
+        id: pickupLoc.id,
+        name: lang === 'ar' ? (pickupLoc.nameAr || pickupLoc.nameEn || '') : (pickupLoc.nameEn || pickupLoc.nameAr || ''),
+        lat: pickupLoc.lat,
+        lng: pickupLoc.lng,
+      };
+      setHomeLocation(home);
+      persistPreferences({ homeLocation: home });
+      setShowHomeModal(false);
+    };
 
-  const handleSetWork = () => {
-    if (!pickupLoc) return;
-    const work = { id: pickupLoc.id, name: lang === 'ar' ? pickupLoc.nameAr : pickupLoc.nameEn, lat: pickupLoc.lat, lng: pickupLoc.lng };
-    setWorkLocation(work);
-    persistPreferences({ workLocation: work });
+    const handleSetWork = () => {
+      if (!pickupLoc) return;
+      const work = {
+        id: pickupLoc.id,
+        name: lang === 'ar' ? (pickupLoc.nameAr || pickupLoc.nameEn || '') : (pickupLoc.nameEn || pickupLoc.nameAr || ''),
+        lat: pickupLoc.lat,
+        lng: pickupLoc.lng,
+      };
     setShowWorkModal(false);
   };
 
@@ -845,7 +853,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
                     : `Searching for an available driver (${drivers.filter(d => d.isOnline && d.approvalStatus === 'APPROVED' && d.status === 'AVAILABLE').length} available).`)}
                   {activeTrip.status === 'ACCEPTED' && (lang === 'ar' ? `قبل ${activeTrip.driverName} رحلتك وهو يتجه الآن إليك.` : `${activeTrip.driverName} accepted your ride and is heading to your pickup location.`)}
                   {activeTrip.status === 'ARRIVED' && (lang === 'ar' ? 'السيارة تنتظرك بالخارج. تفضل بالركوب لتفعيل الرحلة.' : 'The driver has arrived at your location. Please board to start the trip.')}
-                  {activeTrip.status === 'STARTED' && (lang === 'ar' ? `متجهون إلى ${lang === 'ar' ? activeTrip.dropoff.nameAr : activeTrip.dropoff.nameEn}. رحلة سعيدة!` : `Heading to ${activeTrip.dropoff.nameEn}. Wish you a safe ride!`)}
+                  {activeTrip.status === 'STARTED' && (lang === 'ar' ? `متجهون إلى ${lang === 'ar' ? activeTrip.dropoff?.nameAr || activeTrip.dropoff?.nameEn || '' : activeTrip.dropoff?.nameEn || activeTrip.dropoff?.nameAr || ''}. رحلة سعيدة!` : `Heading to ${activeTrip.dropoff?.nameEn || activeTrip.dropoff?.nameAr || ''}. Wish you a safe ride!`)}
                 </p>
                 
                 {/* Ready/Decline buttons for ARRIVED status */}
@@ -922,7 +930,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
                 <div>
                   <p className="text-[10px] text-slate-400">{lang === 'ar' ? 'من (نقطة الركوب)' : 'From (Pickup)'}</p>
                   <p className="text-xs font-medium text-slate-800">
-                    {lang === 'ar' ? activeTrip.pickup.nameAr : activeTrip.pickup.nameEn}
+                    {lang === 'ar' ? activeTrip.pickup?.nameAr || activeTrip.pickup?.nameEn || '' : activeTrip.pickup?.nameEn || activeTrip.pickup?.nameAr || ''}
                   </p>
                 </div>
               </div>
@@ -931,7 +939,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
                 <div>
                   <p className="text-[10px] text-slate-400">{lang === 'ar' ? 'إلى (نقطة الوصول)' : 'To (Dropoff)'}</p>
                   <p className="text-xs font-medium text-slate-800">
-                    {lang === 'ar' ? activeTrip.dropoff.nameAr : activeTrip.dropoff.nameEn}
+                    {lang === 'ar' ? activeTrip.dropoff?.nameAr || activeTrip.dropoff?.nameEn || '' : activeTrip.dropoff?.nameEn || activeTrip.dropoff?.nameAr || ''}
                   </p>
                 </div>
               </div>
@@ -1068,11 +1076,11 @@ export const RiderView: React.FC<RiderViewProps> = ({
             <div className="bg-white rounded-xl p-3 space-y-1.5 text-right border border-rose-100">
               <div className="flex gap-2 text-[10px]">
                 <MapPin className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                <span className="font-medium text-slate-700">{lang === 'ar' ? activeTrip.pickup.nameAr : activeTrip.pickup.nameEn}</span>
+                <span className="font-medium text-slate-700">{lang === 'ar' ? (activeTrip.pickup?.nameAr || activeTrip.pickup?.nameEn || '') : (activeTrip.pickup?.nameEn || activeTrip.pickup?.nameAr || '')}</span>
               </div>
               <div className="flex gap-2 text-[10px]">
                 <Navigation className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5 rotate-45" />
-                <span className="font-medium text-slate-700">{lang === 'ar' ? activeTrip.dropoff.nameAr : activeTrip.dropoff.nameEn}</span>
+                <span className="font-medium text-slate-700">{lang === 'ar' ? (activeTrip.dropoff?.nameAr || activeTrip.dropoff?.nameEn || '') : (activeTrip.dropoff?.nameEn || activeTrip.dropoff?.nameAr || '')}</span>
               </div>
               <div className="flex justify-between text-[10px] border-t border-rose-100 pt-1.5 mt-1">
                 <span className="font-black text-slate-500">{lang === 'ar' ? 'التكلفة:' : 'Fare:'}</span>
@@ -1179,16 +1187,24 @@ export const RiderView: React.FC<RiderViewProps> = ({
                   }`}
                 >
                   <option value="">{lang === 'ar' ? '— اختر المنطقة —' : '— Select region —'}</option>
-                  {regions.map((region) => (
-                    <option key={region.id} value={region.id}>
-                      {region.nameAr} ({region.nameEn})
-                    </option>
-                  ))}
+                  {Array.isArray(regions)
+                    ? regions
+                        .filter((region) => region && region.id)
+                        .map((region) => (
+                          <option key={region.id} value={region.id}>
+                            {region.nameAr || region.nameEn || (lang === 'ar' ? 'منطقة' : 'Region')} ({region.nameEn || region.nameAr || (lang === 'ar' ? 'منطقة' : 'Region')})
+                          </option>
+                        ))
+                    : null}
                 </select>
                 {selectedRegion && (
                   <div className="flex items-center gap-1.5 text-[9px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg w-fit border border-emerald-100">
                     <Check className="w-3 h-3" />
-                    <span>{lang === 'ar' ? `تم اختيار: ${selectedRegion.nameAr}` : `Selected: ${selectedRegion.nameEn}`}</span>
+                    <span>
+                      {lang === 'ar'
+                        ? `تم اختيار: ${selectedRegion.nameAr || selectedRegion.nameEn || ''}`
+                        : `Selected: ${selectedRegion.nameEn || selectedRegion.nameAr || ''}`}
+                    </span>
                   </div>
                 )}
               </div>
@@ -1404,7 +1420,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
                   <div className={`bg-slate-50 border rounded-xl px-3 py-2.5 text-xs font-medium min-h-[42px] flex items-center transition-colors ${
                     pickupLoc ? 'border-emerald-200 text-slate-800' : 'border-slate-200 text-slate-400'
                   }`}>
-                    <span className="truncate">{pickupLoc ? (lang === 'ar' ? pickupLoc.nameAr : pickupLoc.nameEn) : (lang === 'ar' ? 'اضغط على الخريطة لتحديد نقطة الركوب' : 'Tap on map to set pickup')}</span>
+                    <span className="truncate">{pickupLoc ? (lang === 'ar' ? pickupLoc.nameAr || pickupLoc.nameEn || '' : pickupLoc.nameEn || pickupLoc.nameAr || '') : (lang === 'ar' ? 'اضغط على الخريطة لتحديد نقطة الركوب' : 'Tap on map to set pickup')}</span>
                   </div>
                 </div>
               </div>
@@ -1439,7 +1455,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
                   <div className={`bg-slate-50 border rounded-xl px-3 py-2.5 text-xs font-medium min-h-[42px] flex items-center transition-colors ${
                     dropoffLoc ? 'border-rose-200 text-slate-800' : 'border-slate-200 text-slate-400'
                   }`}>
-                    <span className="truncate">{dropoffLoc ? (lang === 'ar' ? dropoffLoc.nameAr : dropoffLoc.nameEn) : (lang === 'ar' ? 'اضغط على الخريطة لتحديد وجهة الوصول' : 'Tap on map to set dropoff')}</span>
+                    <span className="truncate">{dropoffLoc ? (lang === 'ar' ? dropoffLoc.nameAr || dropoffLoc.nameEn || '' : dropoffLoc.nameEn || dropoffLoc.nameAr || '') : (lang === 'ar' ? 'اضغط على الخريطة لتحديد وجهة الوصول' : 'Tap on map to set dropoff')}</span>
                   </div>
                 </div>
               </div>
@@ -1587,8 +1603,8 @@ export const RiderView: React.FC<RiderViewProps> = ({
                 </div>
 
                 <div className="bg-white/60 border border-amber-200/50 rounded-xl p-2.5 text-[10px] font-medium text-slate-600 leading-normal">
-                  📌 {lang === 'ar' ? `من: ${pickupLoc.nameAr}` : `From: ${pickupLoc.nameEn}`}<br/>
-                  🏁 {lang === 'ar' ? `إلى: ${dropoffLoc.nameAr}` : `To: ${dropoffLoc.nameEn}`}
+                  📌 {lang === 'ar' ? `من: ${pickupLoc?.nameAr || pickupLoc?.nameEn || ''}` : `From: ${pickupLoc?.nameEn || pickupLoc?.nameAr || ''}`}<br/>
+                  🏁 {lang === 'ar' ? `إلى: ${dropoffLoc?.nameAr || dropoffLoc?.nameEn || ''}` : `To: ${dropoffLoc?.nameEn || dropoffLoc?.nameAr || ''}`}
                 </div>
               </div>
             ) : (
@@ -1733,13 +1749,13 @@ export const RiderView: React.FC<RiderViewProps> = ({
                           <span className="text-[10px] font-bold text-slate-500">
                             {lang === 'ar' ? 'من:' : 'From:'}
                           </span>
-                          <span className="text-[10px] font-bold text-slate-800">{lang === 'ar' ? pickupLoc.nameAr : pickupLoc.nameEn}</span>
+                          <span className="text-[10px] font-bold text-slate-800">{lang === 'ar' ? (pickupLoc?.nameAr || pickupLoc?.nameEn || '') : (pickupLoc?.nameEn || pickupLoc?.nameAr || '')}</span>
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-[10px] font-bold text-slate-500">
                             {lang === 'ar' ? 'إلى:' : 'To:'}
                           </span>
-                          <span className="text-[10px] font-bold text-slate-800">{lang === 'ar' ? dropoffLoc.nameAr : dropoffLoc.nameEn}</span>
+                          <span className="text-[10px] font-bold text-slate-800">{lang === 'ar' ? (dropoffLoc?.nameAr || dropoffLoc?.nameEn || '') : (dropoffLoc?.nameEn || dropoffLoc?.nameAr || '')}</span>
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-[10px] font-bold text-slate-500">
@@ -1852,10 +1868,10 @@ export const RiderView: React.FC<RiderViewProps> = ({
                       </div>
                           <div className="text-right flex-1 min-w-0">
                             <p className="font-bold text-slate-800 truncate" dir="rtl">
-                              🏁 {lang === 'ar' ? trip.dropoff.nameAr : trip.dropoff.nameEn}
+                              🏁 {lang === 'ar' ? trip.dropoff?.nameAr || trip.dropoff?.nameEn || '' : trip.dropoff?.nameEn || trip.dropoff?.nameAr || ''}
                             </p>
                             <p className="text-[9px] text-slate-400 truncate mt-0.5" dir="rtl">
-                              📍 {lang === 'ar' ? trip.pickup.nameAr : trip.pickup.nameEn}
+                              📍 {lang === 'ar' ? trip.pickup?.nameAr || trip.pickup?.nameEn || '' : trip.pickup?.nameEn || trip.pickup?.nameAr || ''}
                             </p>
                           </div>
                         </div>

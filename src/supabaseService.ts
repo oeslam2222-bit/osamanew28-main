@@ -5,14 +5,40 @@ import { verifyPassword, isSecureHash, hashPassword, generateUUID } from './util
 
 const PAGE_SIZE = PAGINATION_PAGE_SIZE;
 
+const RETRYABLE_CODES = new Set(['PGRST301', 'PGRST302', 'PGRST303', '57P01', '57P02', '57P03', 'XX000']);
+
+async function withRetry<T>(
+  fn: () => any,
+  retries = 2,
+  baseDelay = 600
+): Promise<{ data: T | null; error: any }> {
+  let lastError: any;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const result = await fn();
+      if (!result.error) return result;
+      const code = result.error.code || '';
+      const msg = result.error.message || '';
+      const isRetryable = RETRYABLE_CODES.has(code) || /timed out|connection pool|acquiring connection|cancel/i.test(msg);
+      if (!isRetryable || attempt === retries) return result;
+      lastError = result.error;
+    } catch (err: any) {
+      if (attempt === retries) return { data: null, error: err };
+      lastError = err;
+    }
+    const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 300;
+    await new Promise(r => setTimeout(r, delay));
+  }
+  return { data: null, error: lastError };
+}
+
 // Helper to determine if we can connect to Supabase
 let isSupabaseHealthy = true;
 
 export const checkSupabaseConnection = async (): Promise<boolean> => {
   try {
-    const { error } = await supabase.from('ezz_stats').select('id').limit(1);
+    const { error } = await supabase.from('ezz_locations').select('id').limit(1);
     if (error && error.code === 'PGRST116') {
-      // Table exists but is empty
       isSupabaseHealthy = true;
       return true;
     }
@@ -31,6 +57,89 @@ export const checkSupabaseConnection = async (): Promise<boolean> => {
 };
 
 export const getSupabaseStatus = () => isSupabaseHealthy;
+
+const DRIVER_IMAGES_BUCKET = 'driver-documents';
+const MAX_IMAGE_WIDTH = 800;
+const IMAGE_QUALITY = 0.6;
+
+function compressImageFile(file: File): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, MAX_IMAGE_WIDTH / img.width);
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return reject(new Error('Canvas context unavailable'));
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return reject(new Error('Compression failed'));
+          const out = new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), {
+            type: 'image/jpeg',
+            lastModified: Date.now(),
+          });
+          resolve(out);
+        },
+        'image/jpeg',
+        IMAGE_QUALITY
+      );
+    };
+    img.onerror = () => reject(new Error('Image load failed'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+export async function uploadDriverImage(
+  file: File,
+  driverId: string,
+  type: 'personal' | 'national' | 'license' | 'vehicle'
+): Promise<string | null> {
+  try {
+    const compressed = await compressImageFile(file);
+    const ext = compressed.name.split('.').pop() || 'jpg';
+    const path = `${driverId}/${type}_${Date.now()}.${ext}`;
+    const { error } = await supabase.storage
+      .from(DRIVER_IMAGES_BUCKET)
+      .upload(path, compressed, { cacheControl: '3600', upsert: true });
+    if (error) throw error;
+    const { data } = supabase.storage.from(DRIVER_IMAGES_BUCKET).getPublicUrl(path);
+    return data.publicUrl;
+  } catch (err: any) {
+    console.warn('[uploadDriverImage] Storage upload failed, falling back to base64:', err.message);
+    return toBase64(file).catch(() => null);
+  }
+}
+
+export async function uploadDriverImageFromBase64(
+  base64: string,
+  driverId: string,
+  type: 'personal' | 'national' | 'license' | 'vehicle'
+): Promise<string> {
+  if (!base64 || !base64.startsWith('data:')) return base64;
+  try {
+    const res = await fetch(base64);
+    const blob = await res.blob();
+    const ext = blob.type.split('/')[1] || 'jpg';
+    const file = new File([blob], `upload.${ext}`, { type: blob.type });
+    const url = await uploadDriverImage(file, driverId, type);
+    return url || base64;
+  } catch {
+    return base64;
+  }
+}
+
+function toBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 // SQL initialization schema for user convenience
 export const SQL_SCHEMA = `-- كابتن عز - قاعدة البيانات الكاملة - انسخ الكود بالكامل والزقه في SQL Editor بـ Supabase
@@ -682,9 +791,18 @@ DROP POLICY IF EXISTS "Allow public write audit_logs" ON ezz_audit_logs;
 CREATE POLICY "anon_write_audit_logs" ON ezz_audit_logs FOR INSERT TO anon WITH CHECK (true);
 
 -- Sessions: القراءة والكتابة للتسجيل
+DROP POLICY IF EXISTS "Deny anon read sessions" ON ezz_sessions;
 DROP POLICY IF EXISTS "Allow public read sessions" ON ezz_sessions;
-CREATE POLICY "anon_read_sessions" ON ezz_sessions FOR SELECT USING (true);
 DROP POLICY IF EXISTS "Allow public write sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "Allow public update sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "Allow public delete sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "anon can insert sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "anon can update sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "anon can delete sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "device_read_own_sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "anon_write_sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "anon_read_sessions" ON ezz_sessions;
+CREATE POLICY "anon_read_sessions" ON ezz_sessions FOR SELECT TO anon USING (true);
 CREATE POLICY "anon_write_sessions" ON ezz_sessions FOR ALL TO anon USING (true) WITH CHECK (true);
 
 -- Promo Codes: القراءة للكودات النشطة، الكتابة للإدمن
@@ -706,6 +824,131 @@ DROP POLICY IF EXISTS "Allow public delete ads" ON ads;
 CREATE POLICY "admin_write_ads" ON ads FOR ALL TO anon USING (
   EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
 ) WITH CHECK (true);
+
+-- ============================================================
+-- Push Subscriptions table for Web Push notifications
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ezz_push_subscriptions (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  driver_id TEXT NOT NULL,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ezz_push_subscriptions_driver_id ON ezz_push_subscriptions(driver_id);
+CREATE INDEX IF NOT EXISTS idx_ezz_push_subscriptions_endpoint ON ezz_push_subscriptions(endpoint);
+
+ALTER TABLE ezz_push_subscriptions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "anon can select push subscriptions" ON ezz_push_subscriptions FOR SELECT TO anon USING (true);
+CREATE POLICY "anon can insert push subscriptions" ON ezz_push_subscriptions FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "anon can update push subscriptions" ON ezz_push_subscriptions FOR UPDATE TO anon USING (true);
+CREATE POLICY "anon can delete push subscriptions" ON ezz_push_subscriptions FOR DELETE TO anon USING (true);
+
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+DROP TRIGGER IF EXISTS update_push_subscriptions_updated_at ON ezz_push_subscriptions;
+CREATE TRIGGER update_push_subscriptions_updated_at
+BEFORE UPDATE ON ezz_push_subscriptions
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================================
+-- Additional Indexes for performance
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_sessions_device_id ON ezz_sessions(device_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_role_device ON ezz_sessions(role, device_id);
+CREATE INDEX IF NOT EXISTS idx_ezz_sessions_role_device ON ezz_sessions (role, device_id);
+CREATE INDEX IF NOT EXISTS idx_ezz_sessions_role_user_id ON ezz_sessions(role, user_id);
+CREATE INDEX IF NOT EXISTS idx_ezz_drivers_id ON ezz_drivers (id);
+
+-- ============================================================
+-- Helper function to set role per-request
+-- ============================================================
+CREATE OR REPLACE FUNCTION set_app_role(role TEXT)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  PERFORM set_config('app.current_role', role, false);
+END;
+$$;
+
+-- ============================================================
+-- SECURITY DEFINER functions for driver admin operations
+-- (bypasses RLS to avoid connection pooling issues)
+-- ============================================================
+CREATE OR REPLACE FUNCTION admin_update_driver(
+  p_driver_id TEXT,
+  p_data JSONB
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  UPDATE ezz_drivers
+  SET
+    approval_status = COALESCE(p_data->>'approval_status', approval_status),
+    is_online       = COALESCE((p_data->>'is_online')::BOOLEAN, is_online)
+  WHERE id = p_driver_id;
+
+  RETURN FOUND;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION admin_set_driver_approval(
+  p_driver_id TEXT,
+  p_approval_status TEXT
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  UPDATE ezz_drivers
+  SET approval_status = p_approval_status
+  WHERE id = p_driver_id;
+
+  RETURN FOUND;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, JSONB) TO anon;
+GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT) TO anon;
+GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, JSONB) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, JSONB) TO service_role;
+GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT) TO service_role;
+
+-- ============================================================
+-- Storage bucket setup:
+-- ============================================================
+-- 1. Go to Supabase Dashboard -> Storage
+-- 2. Create bucket named: driver-documents (PUBLIC)
+-- 3. Add these policies in Storage -> Policies:
+--
+--    CREATE POLICY "anon_upload_driver_docs" ON storage.objects
+--      FOR INSERT TO anon WITH CHECK (bucket_id = 'driver-documents');
+--    CREATE POLICY "anon_read_driver_docs" ON storage.objects
+--      FOR SELECT TO anon USING (bucket_id = 'driver-documents');
+--    CREATE POLICY "anon_update_driver_docs" ON storage.objects
+--      FOR UPDATE TO anon USING (bucket_id = 'driver-documents');
+--    CREATE POLICY "anon_delete_driver_docs" ON storage.objects
+--      FOR DELETE TO anon USING (bucket_id = 'driver-documents');
+-- ============================================================
 `;
 
 // --- DRIVER TRANSFORMS ---
@@ -935,13 +1178,30 @@ export const mapTripToDB = (trip: Trip) => ({
 
 // --- API METHODS ---
 
+// Fetch Drivers (lightweight for polling — excludes heavy image columns)
+export const fetchDriversBasic = async (): Promise<Driver[] | null> => {
+  try {
+    const result = await withRetry<Driver[]>(() =>
+      supabase
+        .from('ezz_drivers')
+        .select('id,name,phone,car_model,car_plate,vehicle_type,vehicle_name,national_id,driver_license,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,agreed_to_terms,service_areas,last_seen,auto_accept,auto_show_map,fcm_token')
+    );
+    if (result.error) throw result.error;
+    return (result.data || []).map(mapDriverFromDB);
+  } catch (err: any) {
+    console.warn('Could not fetch drivers (basic) from Supabase:', err.message);
+    return null;
+  }
+};
+
 // Fetch Drivers
 export const fetchDrivers = async (): Promise<Driver[] | null> => {
   try {
-    // Include `service_areas` in the select so remote fetch preserves driver coverage areas
-    const { data, error } = await supabase.from('ezz_drivers').select('id,name,phone,password,car_model,car_plate,vehicle_type,vehicle_name,national_id,driver_license,personal_photo,national_id_image,driver_license_image,vehicle_license_image,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,agreed_to_terms,service_areas,last_seen,auto_accept,auto_show_map,fcm_token');
-    if (error) throw error;
-    return data.map(mapDriverFromDB);
+    const result = await withRetry<Driver[]>(() =>
+      supabase.from('ezz_drivers').select('id,name,phone,password,car_model,car_plate,vehicle_type,vehicle_name,national_id,driver_license,personal_photo,national_id_image,driver_license_image,vehicle_license_image,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,agreed_to_terms,service_areas,last_seen,auto_accept,auto_show_map,fcm_token')
+    );
+    if (result.error) throw result.error;
+    return (result.data || []).map(mapDriverFromDB);
   } catch (err: any) {
     console.warn('Could not fetch drivers from Supabase, using local:', err.message);
     return null;
@@ -1015,9 +1275,11 @@ export const deleteDriverInDB = async (driverId: string): Promise<boolean> => {
 // Fetch Registered Riders
 export const fetchRiders = async (): Promise<Rider[] | null> => {
   try {
-    const { data, error } = await supabase.from('ezz_riders').select('id,name,phone,password,rating,total_trips,approval_status,preferences');
-    if (error) throw error;
-    return data.map(mapRiderFromDB);
+    const result = await withRetry<Rider[]>(() =>
+      supabase.from('ezz_riders').select('id,name,phone,password,rating,total_trips,approval_status,preferences')
+    );
+    if (result.error) throw result.error;
+    return (result.data || []).map(mapRiderFromDB);
   } catch (err: any) {
     console.warn('Could not fetch riders from Supabase:', err.message);
     return null;
@@ -1035,8 +1297,10 @@ export const saveRider = async (rider: Rider): Promise<boolean> => {
     } else {
       delete riderData.password;
     }
-    const { error } = await supabase.from('ezz_riders').upsert(riderData);
-    if (error) throw error;
+    const result = await withRetry<boolean>(() =>
+      supabase.from('ezz_riders').upsert(riderData)
+    );
+    if (result.error) throw result.error;
     return true;
   } catch (err: any) {
     console.warn('Could not save rider to Supabase:', err.message);
@@ -1073,7 +1337,8 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
     // admin gets all
 
     const isDriverQuery = userId && userRole === 'driver';
-    const { data, error } = await query.limit(isDriverQuery ? 5 : 1);
+    const result = await withRetry<any[]>(() => query.limit(isDriverQuery ? 5 : 1));
+    const { data, error } = result;
     if (error) {
       if (error.code === 'PGRST116') {
         console.log('[fetchActiveTrip] No active trip in DB (empty table)');
@@ -1238,7 +1503,6 @@ export const fetchTripsHistory = async ({ userId, role, deviceId }: { userId?: s
     const { data, error } = await supabase.rpc('get_my_trips', {
       p_user_id: userId,
       p_role: role,
-      p_device_id: deviceId || null,
       p_page: 0,
       p_limit: 50,
       p_date_from: null,
@@ -1294,7 +1558,6 @@ export const fetchTripsHistoryCount = async ({
     const { data, error } = await supabase.rpc('count_my_trips', {
       p_user_id: userId,
       p_role: role,
-      p_device_id: deviceId || null,
       p_date_from: dateFrom || null,
       p_date_to: dateTo || null,
       p_status_filter: 'all',
@@ -1336,7 +1599,6 @@ export const fetchTripsHistoryPaginated = async ({
     const { data, error } = await supabase.rpc('get_my_trips', {
       p_user_id: userId,
       p_role: role,
-      p_device_id: deviceId || null,
       p_page: page,
       p_limit: limit,
       p_date_from: dateFrom || null,
@@ -1378,8 +1640,6 @@ export const fetchTripsHistoryFilteredPaginated = async ({
   try {
     const adminId = role === 'admin' ? userId : undefined;
     const { data, error } = await supabase.rpc('get_admin_trips', {
-      p_admin_user_id: adminId || userId || '',
-      p_device_id: deviceId || null,
       p_page: page,
       p_limit: limit,
       p_date_from: dateFrom || null,
@@ -1401,8 +1661,6 @@ export const fetchTripsHistoryFilteredPaginated = async ({
 export const fetchAllTrips = async (limit: number = 1000, adminUserId?: string, deviceId?: string): Promise<Trip[]> => {
   try {
     const { data, error } = await supabase.rpc('get_admin_trips', {
-      p_admin_user_id: adminUserId || '',
-      p_device_id: deviceId || null,
       p_page: 0,
       p_limit: limit,
       p_date_from: null,
@@ -1421,10 +1679,7 @@ export const fetchAllTrips = async (limit: number = 1000, adminUserId?: string, 
 // Clear Trips History (admin only - uses secure RPC)
 export const clearTripsHistoryInDB = async (adminUserId?: string, deviceId?: string): Promise<boolean> => {
   try {
-    const { error } = await supabase.rpc('admin_clear_all_trips', {
-      p_admin_user_id: adminUserId || '',
-      p_device_id: deviceId || null,
-    });
+    const { error } = await supabase.rpc('admin_clear_all_trips', {});
     if (error) throw error;
     return true;
   } catch (err: any) {
@@ -1460,10 +1715,12 @@ export const clearAllDriversInDB = async (): Promise<boolean> => {
 // Fetch Stats
 export const fetchStats = async (): Promise<SystemStats | null> => {
   try {
-    const { data, error } = await supabase.from('ezz_stats').select('*').eq('id', 'singleton');
-    if (error) throw error;
-    if (!data || data.length === 0) return null;
-    const row = data[0];
+    const result = await withRetry<any[]>(() =>
+      supabase.from('ezz_stats').select('*').eq('id', 'singleton')
+    );
+    if (result.error) throw result.error;
+    if (!result.data || result.data.length === 0) return null;
+    const row = result.data[0];
   return {
     commissionRate: row.commission_rate || 15,
     totalRevenue: row.total_revenue || 0,
@@ -1727,8 +1984,10 @@ export const fetchLocations = async (): Promise<Location[] | null> => {
 // Save Location
 export const saveLocationInDB = async (loc: Location): Promise<boolean> => {
   try {
-    const { error } = await supabase.from('ezz_locations').upsert(mapLocationToDB(loc));
-    if (error) throw error;
+    const result = await withRetry<boolean>(() =>
+      supabase.from('ezz_locations').upsert(mapLocationToDB(loc))
+    );
+    if (result.error) throw result.error;
     return true;
   } catch (err: any) {
     console.warn('Could not save location to Supabase:', err.message);
@@ -2094,27 +2353,8 @@ export const sendNewTripNotification = async (params: {
   fare?: number;
   distance?: number;
 }): Promise<{ sent: number; results: any[] }> => {
-  try {
-    const { data, error } = await supabase.functions.invoke('send-fcm-notification', {
-      body: {
-        tripId: params.tripId,
-        origin: params.origin,
-        destination: params.destination,
-        fare: params.fare,
-        distance: params.distance,
-      },
-    });
-
-    if (error) {
-      console.warn('sendNewTripNotification Edge Function error:', error.message);
-      return { sent: 0, results: [] };
-    }
-
-    return data as { sent: number; results: any[] };
-  } catch (err: any) {
-    console.warn('sendNewTripNotification failed:', err.message);
-    return { sent: 0, results: [] };
-  }
+  console.warn('[sendNewTripNotification] Skipped: Edge Function not configured');
+  return { sent: 0, results: [] };
 };
 
 // Push subscriptions helpers
