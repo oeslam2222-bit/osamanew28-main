@@ -296,12 +296,12 @@ export default function App() {
         if (!isNotificationRateLimited(rateKey)) {
           notifyDriverWithAudioFirst({
             title: lang === 'ar' ? 'يوجد رحلة جديدة' : 'New trip available',
-            body: `${currentTrip.pickup.nameAr || currentTrip.pickup.nameEn} ← ${currentTrip.dropoff.nameAr || currentTrip.dropoff.nameEn} | ${currentTrip.fare} EGP`,
+            body: `${currentTrip.pickup?.nameAr || currentTrip.pickup?.nameEn || ''} ← ${currentTrip.dropoff?.nameAr || currentTrip.dropoff?.nameEn || ''} | ${currentTrip.fare} EGP`,
             soundType: 'new_trip',
             speechText:
               lang === 'ar'
-                ? `يوجد رحلة جديدة من ${currentTrip.pickup.nameAr} إلى ${currentTrip.dropoff.nameAr} بقيمة ${currentTrip.fare} جنيه.`
-                : `New ride available from ${currentTrip.pickup.nameEn} to ${currentTrip.dropoff.nameEn} for ${currentTrip.fare} EGP.`,
+                ? `يوجد رحلة جديدة من ${currentTrip.pickup?.nameAr || currentTrip.pickup?.nameEn || ''} إلى ${currentTrip.dropoff?.nameAr || currentTrip.dropoff?.nameEn || ''} بقيمة ${currentTrip.fare} جنيه.`
+                : `New ride available from ${currentTrip.pickup?.nameEn || currentTrip.pickup?.nameAr || ''} to ${currentTrip.dropoff?.nameEn || currentTrip.dropoff?.nameAr || ''} for ${currentTrip.fare} EGP.`,
             lang: lang === 'ar' ? 'ar-EG' : 'en-US',
             tag: `trip-${currentTrip.id}`,
           });
@@ -1804,7 +1804,7 @@ export default function App() {
           notifyRideRequest(
             lang === 'ar' ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!',
             lang === 'ar'
-              ? `من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr} | ${activeTrip.fare} ج.م`
+              ? `من ${activeTrip.pickup?.nameAr || activeTrip.pickup?.nameEn || ''} إلى ${activeTrip.dropoff?.nameAr || activeTrip.dropoff?.nameEn || ''} | ${activeTrip.fare} ج.م`
               : `${activeTrip.pickup.nameEn} → ${activeTrip.dropoff.nameEn} | ${activeTrip.fare} EGP`,
             lang === 'ar' ? 'ar-EG' : 'en-US'
           );
@@ -1812,8 +1812,8 @@ export default function App() {
         triggerToast(
           lang === 'ar' ? 'يوجد رحلة جديدة' : 'New trip available',
           lang === 'ar'
-            ? `العميل ${activeTrip.riderName} يطلب رحلة من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr}.`
-            : `Rider ${activeTrip.riderName} requests a ride from ${activeTrip.pickup.nameEn} to ${activeTrip.dropoff.nameEn}.`,
+            ? `العميل ${activeTrip.riderName} يطلب رحلة من ${activeTrip.pickup?.nameAr || activeTrip.pickup?.nameEn || ''} إلى ${activeTrip.dropoff?.nameAr || activeTrip.dropoff?.nameEn || ''}.`
+            : `Rider ${activeTrip.riderName} requests a ride from ${activeTrip.pickup?.nameEn || activeTrip.pickup?.nameAr || ''} to ${activeTrip.dropoff?.nameEn || activeTrip.dropoff?.nameAr || ''}.`,
           'new_trip'
         );
       }
@@ -2836,7 +2836,7 @@ export default function App() {
       sendNativeNotification(
         lang === 'ar' ? '✅ تم قبول الرحلة!' : '✅ Ride Accepted!',
         lang === 'ar'
-          ? `أنت الآن في الطريق إلى العميل من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr}.`
+          ? `أنت الآن في الطريق إلى العميل من ${activeTrip.pickup?.nameAr || activeTrip.pickup?.nameEn || ''} إلى ${activeTrip.dropoff?.nameAr || activeTrip.dropoff?.nameEn || ''}.`
           : `You are now heading to the client from ${activeTrip.pickup.nameEn} to ${activeTrip.dropoff.nameEn}.`,
         '🚗'
       );
