@@ -81,8 +81,8 @@ import { hashPassword, verifyPassword, isSecureHash } from './utils/security';
 import { auditLogger } from './utils/auditLog';
 import { riderAuthLimiter, driverAuthLimiter, adminAuthLimiter } from './utils/security';
 import { supabase } from './supabaseClient';
-const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined) || '';
-const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || '';
+const SUPABASE_URL = 'https://siqsougaberroesupskl.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNpcXNvdWdhYmVycm9lc3Vwc2tsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNDI3NTcsImV4cCI6MjEwMTkxODc1N30.QRhYApZAfpR4BghjiR8RaK8KS28pgpz6WANuSjid8bY';
 
 // Support secure data storage with password obfuscation / encryption
 const obfuscatePassword = (password: string): string => {

@@ -792,9 +792,18 @@ DROP POLICY IF EXISTS "Allow public write audit_logs" ON ezz_audit_logs;
 CREATE POLICY "anon_write_audit_logs" ON ezz_audit_logs FOR INSERT TO anon WITH CHECK (true);
 
 -- Sessions: القراءة والكتابة للتسجيل
+DROP POLICY IF EXISTS "Deny anon read sessions" ON ezz_sessions;
 DROP POLICY IF EXISTS "Allow public read sessions" ON ezz_sessions;
-CREATE POLICY "anon_read_sessions" ON ezz_sessions FOR SELECT USING (true);
 DROP POLICY IF EXISTS "Allow public write sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "Allow public update sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "Allow public delete sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "anon can insert sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "anon can update sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "anon can delete sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "device_read_own_sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "anon_write_sessions" ON ezz_sessions;
+DROP POLICY IF EXISTS "anon_read_sessions" ON ezz_sessions;
+CREATE POLICY "anon_read_sessions" ON ezz_sessions FOR SELECT TO anon USING (true);
 CREATE POLICY "anon_write_sessions" ON ezz_sessions FOR ALL TO anon USING (true) WITH CHECK (true);
 
 -- Promo Codes: القراءة للكودات النشطة، الكتابة للإدمن
@@ -816,6 +825,93 @@ DROP POLICY IF EXISTS "Allow public delete ads" ON ads;
 CREATE POLICY "admin_write_ads" ON ads FOR ALL TO anon USING (
   EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
 ) WITH CHECK (true);
+
+-- ============================================================
+-- Additional Indexes for performance
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_sessions_device_id ON ezz_sessions(device_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_role_device ON ezz_sessions(role, device_id);
+CREATE INDEX IF NOT EXISTS idx_ezz_sessions_role_device ON ezz_sessions (role, device_id);
+CREATE INDEX IF NOT EXISTS idx_ezz_sessions_role_user_id ON ezz_sessions(role, user_id);
+CREATE INDEX IF NOT EXISTS idx_ezz_drivers_id ON ezz_drivers (id);
+
+-- ============================================================
+-- Helper function to set role per-request
+-- ============================================================
+CREATE OR REPLACE FUNCTION set_app_role(role TEXT)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  PERFORM set_config('app.current_role', role, false);
+END;
+$$;
+
+-- ============================================================
+-- SECURITY DEFINER functions for driver admin operations
+-- (bypasses RLS to avoid connection pooling issues)
+-- ============================================================
+CREATE OR REPLACE FUNCTION admin_update_driver(
+  p_driver_id TEXT,
+  p_data JSONB
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  UPDATE ezz_drivers
+  SET
+    approval_status = COALESCE(p_data->>'approval_status', approval_status),
+    is_online       = COALESCE((p_data->>'is_online')::BOOLEAN, is_online)
+  WHERE id = p_driver_id;
+
+  RETURN FOUND;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION admin_set_driver_approval(
+  p_driver_id TEXT,
+  p_approval_status TEXT
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  UPDATE ezz_drivers
+  SET approval_status = p_approval_status
+  WHERE id = p_driver_id;
+
+  RETURN FOUND;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, JSONB) TO anon;
+GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT) TO anon;
+GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, JSONB) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, JSONB) TO service_role;
+GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT) TO service_role;
+
+-- ============================================================
+-- Storage bucket setup:
+-- ============================================================
+-- 1. Go to Supabase Dashboard -> Storage
+-- 2. Create bucket named: driver-documents (PUBLIC)
+-- 3. Add these policies in Storage -> Policies:
+--
+--    CREATE POLICY "anon_upload_driver_docs" ON storage.objects
+--      FOR INSERT TO anon WITH CHECK (bucket_id = 'driver-documents');
+--    CREATE POLICY "anon_read_driver_docs" ON storage.objects
+--      FOR SELECT TO anon USING (bucket_id = 'driver-documents');
+--    CREATE POLICY "anon_update_driver_docs" ON storage.objects
+--      FOR UPDATE TO anon USING (bucket_id = 'driver-documents');
+--    CREATE POLICY "anon_delete_driver_docs" ON storage.objects
+--      FOR DELETE TO anon USING (bucket_id = 'driver-documents');
+-- ============================================================
 `;
 
 // --- DRIVER TRANSFORMS ---
