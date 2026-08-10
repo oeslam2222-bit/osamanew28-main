@@ -77,6 +77,12 @@ export const DriverView: React.FC<DriverViewProps> = ({
 
   const currentDriver = visibleDrivers.find((d) => d.id === safeSelectedId) || visibleDrivers[0] || null;
   const currentDriverId = currentDriver?.id || '';
+  const getLocationName = (location: Location, language: 'ar' | 'en') => {
+    const ar = location?.nameAr || '';
+    const en = location?.nameEn || '';
+    if (language === 'ar') return ar || en || 'موقع غير معروف';
+    return en || ar || 'Unknown location';
+  };
   const activeTripRef = useRef(activeTrip);
   activeTripRef.current = activeTrip;
   const onUpdateDriverLocationRef = useRef(onUpdateDriverLocation);
@@ -672,7 +678,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 <div>
                   <p className="text-[10px] text-slate-400">{lang === 'ar' ? 'نقطة الركوب' : 'Pickup'}</p>
                   <p className="text-xs font-semibold text-slate-800">
-                    {lang === 'ar' ? activeTrip.pickup.nameAr : activeTrip.pickup.nameEn}
+                    {getLocationName(activeTrip.pickup, lang)}
                   </p>
                 </div>
               </div>
@@ -681,7 +687,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 <div>
                   <p className="text-[10px] text-slate-400">{lang === 'ar' ? 'الوجهة' : 'Dropoff'}</p>
                   <p className="text-xs font-semibold text-slate-800">
-                    {lang === 'ar' ? activeTrip.dropoff.nameAr : activeTrip.dropoff.nameEn}
+                    {getLocationName(activeTrip.dropoff, lang)}
                   </p>
                 </div>
               </div>
@@ -746,8 +752,8 @@ export const DriverView: React.FC<DriverViewProps> = ({
                   <MapPin className="w-4 h-4 text-emerald-500" />
                   <span>
                     {lang === 'ar'
-                      ? `توجه إلى: ${activeTrip.pickup.nameAr}`
-                      : `Go to pickup: ${activeTrip.pickup.nameEn}`}
+                      ? `توجه إلى: ${getLocationName(activeTrip.pickup, lang)}`
+                      : `Go to pickup: ${getLocationName(activeTrip.pickup, lang)}`}
                   </span>
                 </div>
               )}
@@ -756,8 +762,8 @@ export const DriverView: React.FC<DriverViewProps> = ({
                   <Navigation className="w-4 h-4 text-rose-500 rotate-45" />
                   <span>
                     {lang === 'ar'
-                      ? `توجه إلى: ${activeTrip.dropoff.nameAr}`
-                      : `Go to destination: ${activeTrip.dropoff.nameEn}`}
+                      ? `توجه إلى: ${getLocationName(activeTrip.dropoff, lang)}`
+                      : `Go to destination: ${getLocationName(activeTrip.dropoff, lang)}`}
                   </span>
                 </div>
               )}
@@ -1125,6 +1131,8 @@ export const DriverView: React.FC<DriverViewProps> = ({
                     hour: 'numeric',
                     minute: '2-digit'
                   }) : '';
+                  const pickupLabel = getLocationName(trip.pickup, lang);
+                  const dropoffLabel = getLocationName(trip.dropoff, lang);
                   return (
                     <div key={trip.id} className="pt-2 flex justify-between items-center text-[10px] text-slate-600 gap-2">
                       <div className="text-left font-mono shrink-0">
@@ -1138,10 +1146,10 @@ export const DriverView: React.FC<DriverViewProps> = ({
                       </div>
                       <div className="text-right flex-1 min-w-0">
                         <p className="font-bold text-slate-800 truncate" dir="rtl">
-                          🏁 {lang === 'ar' ? trip.dropoff.nameAr : trip.dropoff.nameEn}
+                          🏁 {dropoffLabel}
                         </p>
                         <p className="text-[9px] text-slate-400 truncate mt-0.5" dir="rtl">
-                          📍 {lang === 'ar' ? trip.pickup.nameAr : trip.pickup.nameEn}
+                          📍 {pickupLabel}
                         </p>
                         <p className="text-[8px] text-slate-500 mt-0.5">
                           {trip.riderName}
