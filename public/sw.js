@@ -38,12 +38,17 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  const url = (event.notification && event.notification.data && event.notification.data.url) || '/';
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
-      if (clients.length > 0) {
-        return clients[0].focus();
+      for (const client of clients) {
+        try {
+          if (client.url === url && 'focus' in client) return client.focus();
+        } catch (e) {
+          // ignore
+        }
       }
-      return self.clients.openWindow('/');
+      if (self.clients.openWindow) return self.clients.openWindow(url);
     })
   );
 });
@@ -57,13 +62,16 @@ self.addEventListener('push', (event) => {
       payload.body = event.data.text();
     }
   }
+  payload.data = payload.data || {};
+  payload.data.url = payload.data.url || payload.url || '/?playNotification=1';
   const options = {
     body: payload.body,
     icon: '/favicon.ico',
     badge: '/favicon.ico',
     tag: 'ezz-ride-notification',
     requireInteraction: true,
-    data: payload.data || {},
+    vibrate: payload.data.vibrate || [300, 100, 300],
+    data: payload.data,
   };
   event.waitUntil(self.registration.showNotification(payload.title, options));
 });
@@ -74,17 +82,16 @@ self.addEventListener('message', (event) => {
   }
 
   if (event.data && event.data.type === 'SHOW_BACKGROUND_NOTIFICATION') {
-    const { title, body, icon, tag, vibrate } = event.data;
-    const options: any = {
+    const { title, body, icon, tag, vibrate, url } = event.data;
+    const options = {
       body,
       icon: icon || '/favicon.ico',
       badge: icon || '/favicon.ico',
       tag: tag || title,
       requireInteraction: true,
       vibrate: vibrate || [300, 100, 300, 100, 400],
+      data: { url: url || '/?playNotification=1' },
     };
-    event.waitUntil(
-      self.registration.showNotification(title, options)
-    );
+    event.waitUntil(self.registration.showNotification(title, options));
   }
 });
