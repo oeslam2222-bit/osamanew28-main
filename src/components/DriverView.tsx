@@ -517,21 +517,21 @@ export const DriverView: React.FC<DriverViewProps> = ({
         </div>
 
         {/* Service Areas Selection (Mandatory - Dropdown) */}
-        {currentDriver.approvalStatus === 'APPROVED' && (
+        {currentDriver && currentDriver.approvalStatus === 'APPROVED' && (
           <div className="mt-2 pt-2 border-t border-white/10 space-y-1.5">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-white/90 flex items-center gap-1">
                 <MapPin className="w-3 h-3 text-amber-300" />
                 {lang === 'ar' ? 'اختر منطقة التغطية *' : 'Select Coverage Area *'}
               </span>
-              {currentDriver.serviceAreas.length === 0 && (
+              {(currentDriver.serviceAreas || []).length === 0 && (
                 <span className="text-[8px] bg-rose-500 text-white font-black px-1.5 py-0.5 rounded-full animate-pulse">
                   {lang === 'ar' ? 'مطلوب!' : 'REQUIRED'}
                 </span>
               )}
             </div>
 
-            {regions.length === 0 ? (
+            {(!Array.isArray(regions) || regions.length === 0) ? (
               <span className="text-[9px] text-amber-300 font-semibold block">
                 {lang === 'ar' ? 'لا توجد مناطق معرفة — تواصل مع الإدارة' : 'No regions defined yet — contact admin'}
               </span>
@@ -556,18 +556,21 @@ export const DriverView: React.FC<DriverViewProps> = ({
                   className="w-full bg-white text-slate-800 border border-slate-200 rounded-xl py-2 px-2.5 text-[11px] font-bold focus:outline-none cursor-pointer pointer-events-auto shadow-xs"
                 >
                   <option value="">{lang === 'ar' ? '— اضغط هنا لاختيار المنطقة لتفعيلها —' : '— Select region to activate —'}</option>
-                  {regions.map((region) => {
-                    const isSelected = currentDriver.serviceAreas.some(sa => sa === region.nameAr || sa === region.nameEn);
+                  {regions.filter(Boolean).map((region) => {
+                    const r = region as Region | undefined;
+                    const areaList = currentDriver.serviceAreas || [];
+                    const isSelected = r ? areaList.some(sa => sa === r.nameAr || sa === r.nameEn) : false;
+                    if (!r) return null;
                     return (
-                      <option key={region.id} value={region.id}>
-                        {isSelected ? '✓ ' : ''}{region.nameAr} ({region.nameEn}) {isSelected ? (lang === 'ar' ? '— (مفعّلة)' : '— (Active)') : ''}
+                      <option key={r.id} value={r.id}>
+                        {isSelected ? '✓ ' : ''}{r.nameAr || ''} ({r.nameEn || ''}) {isSelected ? (lang === 'ar' ? '— (مفعّلة)' : '— (Active)') : ''}
                       </option>
                     );
                   })}
                 </select>
 
                 {/* Active Regions Badges */}
-                {currentDriver.serviceAreas.length > 0 && (
+                {(currentDriver.serviceAreas || []).length > 0 && (
                   <div className="flex flex-wrap gap-1 pt-0.5">
                     {currentDriver.serviceAreas.map((areaName) => (
                       <span key={areaName} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-[10px] font-black shadow-2xs">
