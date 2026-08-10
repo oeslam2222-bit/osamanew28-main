@@ -544,12 +544,13 @@ export const DriverView: React.FC<DriverViewProps> = ({
                     if (!regionId) return;
                     const region = regions.find(r => r.id === regionId);
                     if (!region) return;
-                    const isSelected = currentDriver.serviceAreas.some(sa => sa === region.nameAr || sa === region.nameEn);
+                    const areaList = currentDriver.serviceAreas || [];
+                    const isSelected = areaList.some(sa => sa === region.nameAr || sa === region.nameEn);
                     let newAreas: string[];
                     if (isSelected) {
-                      newAreas = currentDriver.serviceAreas.filter(sa => sa !== region.nameAr && sa !== region.nameEn);
+                      newAreas = areaList.filter(sa => sa !== region.nameAr && sa !== region.nameEn);
                     } else {
-                      newAreas = [...currentDriver.serviceAreas, region.nameAr];
+                      newAreas = [...areaList, region.nameAr];
                     }
                     onUpdateServiceAreas?.(currentDriver.id, newAreas);
                   }}
@@ -572,13 +573,13 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 {/* Active Regions Badges */}
                 {(currentDriver.serviceAreas || []).length > 0 && (
                   <div className="flex flex-wrap gap-1 pt-0.5">
-                    {currentDriver.serviceAreas.map((areaName) => (
+                    {(currentDriver.serviceAreas || []).map((areaName) => (
                       <span key={areaName} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-[10px] font-black shadow-2xs">
                         <span>{areaName}</span>
                         <button
                           type="button"
                           onClick={() => {
-                            const newAreas = currentDriver.serviceAreas.filter(sa => sa !== areaName);
+                            const newAreas = (currentDriver.serviceAreas || []).filter(sa => sa !== areaName);
                             onUpdateServiceAreas?.(currentDriver.id, newAreas);
                           }}
                           className="text-white/80 hover:text-white font-bold cursor-pointer pointer-events-auto text-[10px]"
@@ -593,7 +594,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
               </div>
             )}
 
-            {currentDriver.serviceAreas.length === 0 && currentDriver.isOnline && (
+            {(currentDriver.serviceAreas || []).length === 0 && currentDriver.isOnline && (
               <div className="bg-amber-500/20 border border-amber-400/40 rounded-lg p-1.5 text-[9px] text-amber-200 font-semibold flex items-center gap-1">
                 <AlertTriangle className="w-3 h-3 text-amber-300 shrink-0" />
                 {lang === 'ar'
