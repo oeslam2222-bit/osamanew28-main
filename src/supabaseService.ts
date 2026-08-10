@@ -827,6 +827,44 @@ CREATE POLICY "admin_write_ads" ON ads FOR ALL TO anon USING (
 ) WITH CHECK (true);
 
 -- ============================================================
+-- Push Subscriptions table for Web Push notifications
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ezz_push_subscriptions (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  driver_id TEXT NOT NULL,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ezz_push_subscriptions_driver_id ON ezz_push_subscriptions(driver_id);
+CREATE INDEX IF NOT EXISTS idx_ezz_push_subscriptions_endpoint ON ezz_push_subscriptions(endpoint);
+
+ALTER TABLE ezz_push_subscriptions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "anon can select push subscriptions" ON ezz_push_subscriptions FOR SELECT TO anon USING (true);
+CREATE POLICY "anon can insert push subscriptions" ON ezz_push_subscriptions FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "anon can update push subscriptions" ON ezz_push_subscriptions FOR UPDATE TO anon USING (true);
+CREATE POLICY "anon can delete push subscriptions" ON ezz_push_subscriptions FOR DELETE TO anon USING (true);
+
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+DROP TRIGGER IF EXISTS update_push_subscriptions_updated_at ON ezz_push_subscriptions;
+CREATE TRIGGER update_push_subscriptions_updated_at
+BEFORE UPDATE ON ezz_push_subscriptions
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================================
 -- Additional Indexes for performance
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_sessions_device_id ON ezz_sessions(device_id);
@@ -2326,27 +2364,8 @@ export const sendNewTripNotification = async (params: {
   fare?: number;
   distance?: number;
 }): Promise<{ sent: number; results: any[] }> => {
-  try {
-    const { data, error } = await supabase.functions.invoke('send-fcm-notification', {
-      body: {
-        tripId: params.tripId,
-        origin: params.origin,
-        destination: params.destination,
-        fare: params.fare,
-        distance: params.distance,
-      },
-    });
-
-    if (error) {
-      console.warn('sendNewTripNotification Edge Function error:', error.message);
-      return { sent: 0, results: [] };
-    }
-
-    return data as { sent: number; results: any[] };
-  } catch (err: any) {
-    console.warn('sendNewTripNotification failed:', err.message);
-    return { sent: 0, results: [] };
-  }
+  console.warn('[sendNewTripNotification] Skipped: Edge Function not configured');
+  return { sent: 0, results: [] };
 };
 
 // Push subscriptions helpers
