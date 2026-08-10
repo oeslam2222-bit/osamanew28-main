@@ -48,7 +48,9 @@ import {
   fetchActiveAdsForPlacement,
   sendNewTripNotification,
   saveRiderPreferences,
-  fetchAllActiveTrips
+  fetchAllActiveTrips,
+  uploadDriverImage,
+  uploadDriverImageFromBase64
 } from './supabaseService';
 import {
   requestNotificationPermission,
@@ -3672,6 +3674,13 @@ export default function App() {
 
       const hashedPassword = await hashPassword(drvFormPassword.trim());
 
+      const [personalPhoto, nationalIdImage, driverLicenseImage, vehicleLicenseImage] = await Promise.all([
+        uploadDriverImageFromBase64(drvFormPersonalPhoto || '', newId, 'personal'),
+        uploadDriverImageFromBase64(drvFormNationalIdImage || '', newId, 'national'),
+        uploadDriverImageFromBase64(drvFormLicenseImage || '', newId, 'license'),
+        uploadDriverImageFromBase64(drvFormVehicleLicenseImage || '', newId, 'vehicle'),
+      ]);
+
       const newDriver: Driver = {
         id: newId,
         name: drvFormName.trim(),
@@ -3683,10 +3692,10 @@ export default function App() {
         vehicleName: drvFormVehicleName.trim(),
         nationalId: drvFormNationalId.trim(),
         driverLicense: drvFormLicense.trim(),
-        personalPhoto: drvFormPersonalPhoto || defaultPersonal,
-        nationalIdImage: drvFormNationalIdImage || defaultNational,
-        driverLicenseImage: drvFormLicenseImage || defaultLicense,
-        vehicleLicenseImage: drvFormVehicleLicenseImage || defaultVehicle,
+        personalPhoto: personalPhoto || defaultPersonal,
+        nationalIdImage: nationalIdImage || defaultNational,
+        driverLicenseImage: driverLicenseImage || defaultLicense,
+        vehicleLicenseImage: vehicleLicenseImage || defaultVehicle,
         isOnline: true,
         status: 'AVAILABLE',
         approvalStatus: 'PENDING', // Saved as PENDING for admin approval request!

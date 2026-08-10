@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Driver, Rider, SystemStats, Location, Trip } from '../types';
 import {
   fetchDrivers,
+  fetchDriversBasic,
   saveDriver,
   fetchRiders,
   saveRider,
@@ -41,12 +42,12 @@ export const useBackgroundSync = (
   useEffect(() => {
     if (!supabaseConnected) return;
 
-    const pollInterval = 8000;
+    const pollInterval = 18000;
 
     const interval = setInterval(async () => {
       if (!isMountedRef.current) return;
       try {
-        const remoteDrivers = await fetchDrivers();
+        const remoteDrivers = await fetchDriversBasic();
         if (!isMountedRef.current) return;
         if (remoteDrivers && remoteDrivers.length > 0) {
           const now = Date.now();
@@ -56,11 +57,15 @@ export const useBackgroundSync = (
               const ld = localDrivers.find((l) => l.id === rd.id);
               if (ld) {
                 const isStale = rd.lastSeen ? (now - new Date(rd.lastSeen).getTime() > staleThreshold) : false;
-                 return {
-                   ...rd,
-                   isOnline: isStale ? false : rd.isOnline,
-                   status: isStale ? 'AVAILABLE' : (rd.isOnline ? rd.status : ld.status),
-                 };
+                return {
+                  ...rd,
+                  personalPhoto: ld.personalPhoto || rd.personalPhoto,
+                  nationalIdImage: ld.nationalIdImage || rd.nationalIdImage,
+                  driverLicenseImage: ld.driverLicenseImage || rd.driverLicenseImage,
+                  vehicleLicenseImage: ld.vehicleLicenseImage || rd.vehicleLicenseImage,
+                  isOnline: isStale ? false : rd.isOnline,
+                  status: isStale ? 'AVAILABLE' : (rd.isOnline ? rd.status : ld.status),
+                };
               }
               return rd;
             });

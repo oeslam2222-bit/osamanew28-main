@@ -59,6 +59,89 @@ export const checkSupabaseConnection = async (): Promise<boolean> => {
 
 export const getSupabaseStatus = () => isSupabaseHealthy;
 
+const DRIVER_IMAGES_BUCKET = 'driver-documents';
+const MAX_IMAGE_WIDTH = 800;
+const IMAGE_QUALITY = 0.6;
+
+function compressImageFile(file: File): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, MAX_IMAGE_WIDTH / img.width);
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return reject(new Error('Canvas context unavailable'));
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return reject(new Error('Compression failed'));
+          const out = new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), {
+            type: 'image/jpeg',
+            lastModified: Date.now(),
+          });
+          resolve(out);
+        },
+        'image/jpeg',
+        IMAGE_QUALITY
+      );
+    };
+    img.onerror = () => reject(new Error('Image load failed'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+export async function uploadDriverImage(
+  file: File,
+  driverId: string,
+  type: 'personal' | 'national' | 'license' | 'vehicle'
+): Promise<string | null> {
+  try {
+    const compressed = await compressImageFile(file);
+    const ext = compressed.name.split('.').pop() || 'jpg';
+    const path = `${driverId}/${type}_${Date.now()}.${ext}`;
+    const { error } = await supabase.storage
+      .from(DRIVER_IMAGES_BUCKET)
+      .upload(path, compressed, { cacheControl: '3600', upsert: true });
+    if (error) throw error;
+    const { data } = supabase.storage.from(DRIVER_IMAGES_BUCKET).getPublicUrl(path);
+    return data.publicUrl;
+  } catch (err: any) {
+    console.warn('[uploadDriverImage] Storage upload failed, falling back to base64:', err.message);
+    return toBase64(file).catch(() => null);
+  }
+}
+
+export async function uploadDriverImageFromBase64(
+  base64: string,
+  driverId: string,
+  type: 'personal' | 'national' | 'license' | 'vehicle'
+): Promise<string> {
+  if (!base64 || !base64.startsWith('data:')) return base64;
+  try {
+    const res = await fetch(base64);
+    const blob = await res.blob();
+    const ext = blob.type.split('/')[1] || 'jpg';
+    const file = new File([blob], `upload.${ext}`, { type: blob.type });
+    const url = await uploadDriverImage(file, driverId, type);
+    return url || base64;
+  } catch {
+    return base64;
+  }
+}
+
+function toBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 // SQL initialization schema for user convenience
 export const SQL_SCHEMA = `-- كابتن عز - قاعدة البيانات الكاملة - انسخ الكود بالكامل والزقه في SQL Editor بـ Supabase
 
@@ -961,6 +1044,22 @@ export const mapTripToDB = (trip: Trip) => ({
 });
 
 // --- API METHODS ---
+
+// Fetch Drivers (lightweight for polling — excludes heavy image columns)
+export const fetchDriversBasic = async (): Promise<Driver[] | null> => {
+  try {
+    const result = await withRetry<Driver[]>(() =>
+      supabase
+        .from('ezz_drivers')
+        .select('id,name,phone,car_model,car_plate,vehicle_type,vehicle_name,national_id,driver_license,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,agreed_to_terms,service_areas,last_seen,auto_accept,auto_show_map,fcm_token')
+    );
+    if (result.error) throw result.error;
+    return (result.data || []).map(mapDriverFromDB);
+  } catch (err: any) {
+    console.warn('Could not fetch drivers (basic) from Supabase:', err.message);
+    return null;
+  }
+};
 
 // Fetch Drivers
 export const fetchDrivers = async (): Promise<Driver[] | null> => {
