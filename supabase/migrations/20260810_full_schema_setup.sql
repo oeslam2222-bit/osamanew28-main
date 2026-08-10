@@ -473,8 +473,11 @@ DROP POLICY IF EXISTS "anon can delete sessions" ON ezz_sessions;
 DROP POLICY IF EXISTS "device_read_own_sessions" ON ezz_sessions;
 DROP POLICY IF EXISTS "anon_write_sessions" ON ezz_sessions;
 DROP POLICY IF EXISTS "anon_read_sessions" ON ezz_sessions;
-CREATE POLICY "anon_read_sessions" ON ezz_sessions FOR SELECT TO anon USING (true);
-CREATE POLICY "anon_write_sessions" ON ezz_sessions FOR ALL TO anon USING (true) WITH CHECK (true);
+-- Do NOT expose the full `ezz_sessions` table to the anonymous role.
+-- Clients must use the SECURITY DEFINER RPC `get_session_by_device(device_id)` instead.
+-- Allow anonymous clients to INSERT a session (for initial registration/login) but deny direct SELECT/UPDATE/DELETE.
+CREATE POLICY "deny_anon_read_sessions" ON ezz_sessions FOR SELECT TO anon USING (false);
+CREATE POLICY "anon_insert_sessions" ON ezz_sessions FOR INSERT TO anon WITH CHECK (true);
 
 -- Promo Codes: القراءة للكودات النشطة، الكتابة للإدمن
 DROP POLICY IF EXISTS "Allow anon read promo_codes" ON ezz_promo_codes;
