@@ -89,8 +89,8 @@ export const useNotifications = (
         triggerToast(
           lang === 'ar' ? 'يوجد رحلة جديدة' : 'New trip available',
           lang === 'ar'
-            ? `العميل ${activeTrip.riderName} يطلب رحلة من ${activeTrip.pickup.nameAr} إلى ${activeTrip.dropoff.nameAr}.`
-            : `Rider ${activeTrip.riderName} requests a ride from ${activeTrip.pickup.nameEn} to ${activeTrip.dropoff.nameEn}.`,
+            ? `العميل ${activeTrip.riderName} يطلب رحلة من ${activeTrip.pickup?.nameAr || activeTrip.pickup?.nameEn || ''} إلى ${activeTrip.dropoff?.nameAr || activeTrip.dropoff?.nameEn || ''}.`
+            : `Rider ${activeTrip.riderName} requests a ride from ${activeTrip.pickup?.nameEn || activeTrip.pickup?.nameAr || ''} to ${activeTrip.dropoff?.nameEn || activeTrip.dropoff?.nameAr || ''}.`,
           'new_trip'
         );
       } else if (currentStatus === 'ACCEPTED' && !isDriverActor) {
