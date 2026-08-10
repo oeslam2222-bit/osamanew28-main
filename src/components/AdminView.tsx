@@ -75,6 +75,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
     }
   };
 
+  const getLocationName = (location: Location, language: 'ar' | 'en') => {
+    const ar = location?.nameAr || '';
+    const en = location?.nameEn || '';
+    if (language === 'ar') return ar || en || 'موقع غير معروف';
+    return en || ar || 'Unknown location';
+  };
+
   const [activeTab, setActiveTab] = useState<'overview' | 'drivers' | 'riders' | 'history' | 'analytics' | 'legal' | 'regions' | 'ads'>('overview');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [adminUserId, setAdminUserId] = useState<string>('');
@@ -2318,12 +2325,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[10.5px]">
                                         <div className="space-y-1.5 text-right">
                                           <p className="font-bold text-slate-400 text-[8.5px] uppercase">{lang === 'ar' ? '📍 نقطة الركوب' : '📍 Pickup'}</p>
-                                          <p className="font-black text-slate-800">{lang === 'ar' ? trip.pickup.nameAr : trip.pickup.nameEn}</p>
+                                          <p className="font-black text-slate-800">{getLocationName(trip.pickup, lang)}</p>
                                           <p className="text-[8px] text-slate-400 font-mono">Lat: {trip.pickup.lat.toFixed(5)}, Lng: {trip.pickup.lng.toFixed(5)}</p>
                                         </div>
                                         <div className="space-y-1.5 text-right">
                                           <p className="font-bold text-slate-400 text-[8.5px] uppercase">{lang === 'ar' ? '🏁 وجهة الوصول' : '🏁 Dropoff'}</p>
-                                          <p className="font-black text-slate-800">{lang === 'ar' ? trip.dropoff.nameAr : trip.dropoff.nameEn}</p>
+                                          <p className="font-black text-slate-800">{getLocationName(trip.dropoff, lang)}</p>
                                           <p className="text-[8px] text-slate-400 font-mono">Lat: {trip.dropoff.lat.toFixed(5)}, Lng: {trip.dropoff.lng.toFixed(5)}</p>
                                         </div>
                                       </div>
@@ -3386,9 +3393,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                 {ad.placement === 'all' ? (lang === 'ar' ? 'كل الأماكن' : 'All') : ad.placement === 'home' ? (lang === 'ar' ? 'الرئيسية' : 'Home') : (lang === 'ar' ? 'الانتظار' : 'Wait')}
                               </span>
                               {ad.regionId ? (
-                                <span className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 rounded font-bold">
-                                  📍 {regions.find(r => r.id === ad.regionId) ? (lang === 'ar' ? regions.find(r => r.id === ad.regionId)!.nameAr : regions.find(r => r.id === ad.regionId)!.nameEn) : ad.regionId}
-                                </span>
+                                (() => {
+                                  const matchedRegion = regions.find(r => r.id === ad.regionId);
+                                  return (
+                                    <span className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 rounded font-bold">
+                                      📍 {matchedRegion ? (lang === 'ar' ? matchedRegion.nameAr : matchedRegion.nameEn) : ad.regionId}
+                                    </span>
+                                  );
+                                })()
                               ) : (
                                 <span className="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold">
                                   🌍 {lang === 'ar' ? 'كل المناطق' : 'Global'}
