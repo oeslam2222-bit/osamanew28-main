@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Driver, Trip, Location, SystemStats, Region } from '../types';
-import { ToggleLeft, ToggleRight, MapPin, Navigation, DollarSign, Wallet, Check, AlertTriangle, Users, Star, MessageSquare, Bell, ShieldAlert, Loader2, ChevronRight, ChevronLeft, Plus, X } from 'lucide-react';
+import { ToggleRight, MapPin, Navigation, DollarSign, Wallet, Check, AlertTriangle, Users, Star, MessageSquare, Bell, ShieldAlert, Loader2, ChevronRight, ChevronLeft, Plus, X } from 'lucide-react';
 import { fetchTripsHistoryPaginated, getDeviceId } from '../supabaseService';
 
 interface DriverViewProps {
@@ -11,7 +11,6 @@ interface DriverViewProps {
   locations: Location[];
   regions: Region[];
   commissionRate: number;
-  onToggleOnline: (driverId: string) => void;
   onUpdateDriverLocation?: (driverId: string, lat: number, lng: number, x: number, y: number) => void;
   onUpdateServiceAreas?: (driverId: string, areas: string[]) => void;
   onAcceptTrip: (driverId: string) => void;
@@ -43,7 +42,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
   locations,
   regions,
   commissionRate,
-  onToggleOnline,
   onUpdateDriverLocation,
   onUpdateServiceAreas,
   onAcceptTrip,
@@ -208,12 +206,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
     }
   };
 
-   const handleOnlineToggle = () => {
-    if (!currentDriver || !currentDriver.id) return;
-    onToggleOnline(currentDriver.id);
-  };
-
-  const loadMyTrips = async (reset = false) => {
+   const loadMyTrips = async (reset = false) => {
     if (!currentDriver || !currentDriver.id) return;
     setIsLoadingMyTrips(true);
     const page = reset ? 0 : myTripsPage;
@@ -458,29 +451,23 @@ export const DriverView: React.FC<DriverViewProps> = ({
             </div>
           </div>
 
-          {/* Primary Top Action Controls (Online Toggle & Logout) */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => onToggleOnline(currentDriver.id)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full font-black text-xs transition-all shadow-xs cursor-pointer pointer-events-auto ${
-                currentDriver.isOnline ? 'bg-white text-emerald-700' : 'bg-white/20 text-white/90 border border-white/20'
-              }`}
-            >
-              <span className="text-[11px]">{currentDriver.isOnline ? (lang === 'ar' ? 'متصل' : 'Online') : (lang === 'ar' ? 'غير متصل' : 'Offline')}</span>
-              {currentDriver.isOnline ? <ToggleRight className="w-4 h-4 text-emerald-600" /> : <ToggleLeft className="w-4 h-4 text-white/80" />}
-            </button>
+           {/* Primary Top Action Controls */}
+           <div className="flex items-center gap-1.5 shrink-0">
+             <span className="flex items-center gap-1 px-2.5 py-1 rounded-full font-black text-xs bg-emerald-500 text-white shadow-xs">
+               <span className="text-[11px]">{lang === 'ar' ? 'متصل' : 'Online'}</span>
+               <ToggleRight className="w-4 h-4 text-white" />
+             </span>
 
-            <button
-              onClick={onLogout}
-              type="button"
-              className="px-2 py-0.5 rounded-full bg-rose-500/90 hover:bg-rose-600 text-white text-[10px] font-bold shadow-xs flex items-center gap-0.5 transition-transform active:scale-95 cursor-pointer pointer-events-auto shrink-0"
-              title={lang === 'ar' ? 'تسجيل الخروج' : 'Logout'}
-            >
-              <span>🚪</span>
-              <span>{lang === 'ar' ? 'خروج' : 'Logout'}</span>
-            </button>
-          </div>
+             <button
+               onClick={onLogout}
+               type="button"
+               className="px-2 py-0.5 rounded-full bg-rose-500/90 hover:bg-rose-600 text-white text-[10px] font-bold shadow-xs flex items-center gap-0.5 transition-transform active:scale-95 cursor-pointer pointer-events-auto shrink-0"
+               title={lang === 'ar' ? 'تسجيل الخروج' : 'Logout'}
+             >
+               <span>🚪</span>
+               <span>{lang === 'ar' ? 'خروج' : 'Logout'}</span>
+             </button>
+           </div>
         </div>
 
         {/* Secondary Quick Toggles Bar */}
