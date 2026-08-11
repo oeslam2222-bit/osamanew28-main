@@ -1502,7 +1502,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
                   ].map((v) => {
                     const vFare = computeTripFare(distance, v.id, discountAmount);
                     const isSelected = requestedVehicleType === v.id;
-                    const countAvailable = onlineDrivers.filter((d) => d.status === 'AVAILABLE' && d.vehicleType === v.id).length;
+                    const countAvailable = onlineDrivers.filter((d) => d.status === 'AVAILABLE' && String(d.vehicleType).toUpperCase() === v.id).length;
 
                     return (
                       <button
