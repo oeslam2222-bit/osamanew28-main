@@ -242,7 +242,7 @@ export const useNotifications = (
   useEffect(() => {
     if (!driverIsLoggedIn || !selectedDriverId || !supabaseConnected) return;
 
-    const pollInterval = dataSaverMode ? 30000 : 10000;
+    const pollInterval = dataSaverMode ? 60000 : 20000;
     const interval = setInterval(async () => {
       if (document.hidden) return;
       try {
