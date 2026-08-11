@@ -1435,7 +1435,7 @@ export default function App() {
           // due to small network delays or polling gaps.
           const staleThreshold = 120000; // 2 minutes — stale driver cutoff by lastSeen
           const availableCount = remoteDrivers.filter(d => {
-            if (d.approvalStatus !== 'APPROVED' || !d.isOnline || d.status !== 'AVAILABLE') return false;
+            if (d.approvalStatus !== 'APPROVED' || !d.isOnline || d.status === 'BUSY' || d.status === 'UNAVAILABLE') return false;
             if (d.lastSeen) {
               const lastSeenMs = new Date(d.lastSeen).getTime();
               if (now - lastSeenMs > staleThreshold) return false;
@@ -1457,13 +1457,13 @@ export default function App() {
                if (ld) {
                  const isActiveTripDriver = currentTrip && currentTrip.driverId === rd.id && (currentTrip.status === 'ACCEPTED' || currentTrip.status === 'STARTED');
                  const isStale = rd.lastSeen ? (now - new Date(rd.lastSeen).getTime() > staleThreshold) : false;
-                 const merged = {
-                   ...rd,
-                   currentX: isActiveTripDriver ? ld.currentX : rd.currentX,
-                   currentY: isActiveTripDriver ? ld.currentY : rd.currentY,
-                   isOnline: isStale ? false : rd.isOnline,
-                    status: isStale ? 'OFFLINE' : (rd.isOnline ? rd.status : 'OFFLINE'),
-                 };
+                  const merged = {
+                    ...rd,
+                    currentX: isActiveTripDriver ? ld.currentX : rd.currentX,
+                    currentY: isActiveTripDriver ? ld.currentY : rd.currentY,
+                    isOnline: isStale ? false : rd.isOnline,
+                     status: isStale ? 'OFFLINE' : (rd.isOnline ? rd.status : 'OFFLINE'),
+                  };
                  return merged;
                }
                return rd;
@@ -3174,7 +3174,13 @@ export default function App() {
   const handleUpdateServiceAreas = async (driverId: string, areas: string[]) => {
     const driver = drivers.find((d) => d.id === driverId);
     if (!driver) return;
-    const updated = { ...driver, serviceAreas: areas };
+    const hasNoAreas = areas.length === 0;
+    const updated = {
+      ...driver,
+      serviceAreas: areas,
+      status: hasNoAreas ? 'UNAVAILABLE' as const : driver.status,
+      isOnline: hasNoAreas ? false : driver.isOnline,
+    };
     if (supabaseConnected) {
       const saved = await saveDriver(updated);
       if (saved) {
