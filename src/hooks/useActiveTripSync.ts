@@ -130,7 +130,7 @@ export const useActiveTripSync = ({
           driverIsLoggedIn ? 'driver' : (riderId ? 'rider' : undefined)
         );
         if (!isMountedRef.current) return;
-        if (!remoteActiveTrip || remoteActiveTrip === 'NO_TABLE') {
+        if (!remoteActiveTrip) {
           setActiveTripWithTracking((prev: Trip | null) => {
             if (prev && prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
               if (!prev.driverRatingToRider) {
