@@ -1333,42 +1333,7 @@
       };
     }, [supabaseConnected]);
 
-    // Realtime subscription for active trips (rider + driver)
-    useEffect(() => {
-      if (!supabaseConnected) return;
-      if (!rider.isLoggedIn && !driverIsLoggedIn) return;
 
-      const tripChannel = supabase
-        .channel('active_trip_channel')
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: 'ezz_active_trip',
-        }, (payload) => {
-          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-            const remoteTrip = payload.new as Trip;
-            const isForRider = rider.isLoggedIn && remoteTrip.riderId === rider.id;
-            const isForDriver = driverIsLoggedIn && selectedDriverId && (
-              remoteTrip.driverId === selectedDriverId ||
-              remoteTrip.currentOfferedDriverId === selectedDriverId ||
-              (remoteTrip.status === 'SEARCHING' && remoteTrip.offeredDriverIds?.includes(selectedDriverId))
-            );
-            if (isForRider || isForDriver) {
-              setActiveTripWithTracking(remoteTrip);
-            }
-          } else if (payload.eventType === 'DELETE') {
-            if (rider.isLoggedIn || driverIsLoggedIn) {
-              setActiveTripWithTracking(null);
-            }
-          }
-        });
-
-      tripChannel.subscribe();
-
-      return () => {
-        supabase.removeChannel(tripChannel);
-      };
-    }, [supabaseConnected, rider.isLoggedIn, driverIsLoggedIn, selectedDriverId]);
 
     // 1e. Polling for live/active trips (admin dashboard)
     useEffect(() => {
@@ -1412,8 +1377,8 @@
         }
       };
 
-      updateLastSeen();
-      const interval = setInterval(updateLastSeen, 60000);
+    updateLastSeen();
+    const interval = setInterval(updateLastSeen, 30000);
 
       // Mark offline immediately when app/tab is closed
       const markOffline = async () => {
@@ -2066,7 +2031,7 @@
     // Handler: Request Ride with dynamic commission rate calculation by mileage (distance-based commission request)
     const fetchEligibleDriversForRegion = async (regionId?: string): Promise<Driver[]> => {
       const now = Date.now();
-      const staleThreshold = 60000;
+      const staleThreshold = 55000;
       let driverList = drivers;
 
       if (supabaseConnected) {
