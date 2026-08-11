@@ -230,6 +230,9 @@ ALTER TABLE ezz_drivers ADD COLUMN IF NOT EXISTS auto_accept BOOLEAN DEFAULT fal
 ALTER TABLE ezz_drivers ADD COLUMN IF NOT EXISTS auto_show_map BOOLEAN DEFAULT false;
 ALTER TABLE ezz_drivers ADD COLUMN IF NOT EXISTS fcm_token TEXT;
 
+-- تفعيل Realtime على جدول السواق (مطلوب لمزامنة حالة السواق مع الراكب فوراً)
+ALTER PUBLICATION supabase_realtime ADD TABLE ezz_drivers;
+
 -- ============================================================
 -- 4. جدول الرحلة الحالية النشطة
 -- ============================================================
@@ -1221,30 +1224,27 @@ export const saveDriver = async (driver: Driver): Promise<boolean> => {
     }
     console.log('[saveDriver] 1. Starting save process for:', driverData.id, 'approval:', driverData.approval_status, 'commission:', driverData.total_commission_paid);
 
-    // Set app role before write to satisfy RLS
-    console.log('[saveDriver] 2. Calling set_app_role...');
-    try {
-      const { error: roleErr } = await supabase.rpc('set_app_role', { role: 'ADMIN' });
-      if (roleErr) {
-        console.warn('[saveDriver] Warning: set_app_role failed or not found:', roleErr);
-      } else {
-        console.log('[saveDriver] 3. set_app_role executed successfully.');
-      }
-    } catch (roleErr) {
-      console.warn('[saveDriver] Warning: set_app_role threw exception:', roleErr);
+    const attemptSave = async (): Promise<{ data: any; error: any }> => {
+      const upsertPromise = supabase
+        .from('ezz_drivers')
+        .upsert(driverData, { onConflict: 'id' })
+        .select();
+
+      const timeoutPromise = new Promise<{ data: null; error: any }>((_, reject) =>
+        setTimeout(() => reject(new Error('Network request timed out after 15 seconds')), 15000)
+      );
+
+      return Promise.race([upsertPromise, timeoutPromise]);
+    };
+
+    let { data, error } = await attemptSave();
+
+    if (error) {
+      console.warn('[saveDriver] First attempt failed, retrying once...');
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      ({ data, error } = await attemptSave());
     }
 
-    console.log('[saveDriver] 4. Executing upsert request...');
-    const upsertPromise = supabase
-      .from('ezz_drivers')
-      .upsert(driverData, { onConflict: 'id' })
-      .select();
-
-    const timeoutPromise = new Promise<{ data: null; error: any }>((_, reject) =>
-      setTimeout(() => reject(new Error('Network request timed out after 5 seconds')), 5000)
-    );
-
-    const { data, error } = await Promise.race([upsertPromise, timeoutPromise]);
     const responseData = data as any[] | null;
     console.log('[saveDriver] 5. Upsert response:', { count: Array.isArray(responseData) ? responseData.length : 0, error: error?.message || null });
 
