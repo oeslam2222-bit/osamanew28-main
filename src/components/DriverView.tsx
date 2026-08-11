@@ -96,43 +96,9 @@ export const DriverView: React.FC<DriverViewProps> = ({
   const [chatText, setChatText] = useState('');
 
    React.useEffect(() => {
+     // Location tracking disabled — drivers choose coverage areas manually.
      if (!currentDriverId || !onUpdateDriverLocationRef.current) return;
-     const trip = activeTripRef.current;
-     if (!trip || trip.driverId !== currentDriverId) return;
-
-     if (!('geolocation' in navigator)) {
-       console.warn('[GPS] Geolocation not supported in this browser');
-       return;
-     }
-
-     geoWatchIdRef.current = navigator.geolocation.watchPosition(
-       (position) => {
-         const lat = position.coords.latitude;
-         const lng = position.coords.longitude;
-         const x = ((lng - 31.2561) / 0.0025) + 50;
-         const y = ((lat - 29.6197) / 0.0025) + 50;
-         try {
-           onUpdateDriverLocationRef.current?.(currentDriverId, lat, lng, x, y);
-         } catch (err) {
-           console.warn('[DriverView] onUpdateDriverLocation error:', err);
-         }
-       },
-       (err) => {
-         console.warn('[GPS] Watch error:', err.message);
-       },
-       {
-         enableHighAccuracy: !lowDataMode,
-         maximumAge: lowDataMode ? 30000 : 10000,
-       }
-     );
-
-     return () => {
-       if (geoWatchIdRef.current !== null) {
-         navigator.geolocation.clearWatch(geoWatchIdRef.current);
-         geoWatchIdRef.current = null;
-       }
-     };
-  }, [currentDriverId, activeTrip?.id, activeTrip?.driverId, lowDataMode]);
+   }, [currentDriverId, activeTrip?.id, activeTrip?.driverId, lowDataMode]);
 
   // PWA Service Worker & Push Notification state
   const [swRegistered, setSwRegistered] = useState(false);
