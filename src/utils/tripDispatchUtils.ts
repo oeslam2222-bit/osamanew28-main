@@ -7,24 +7,26 @@ export const getEligibleDrivers = (
   selectedRegion?: Region | null
 ) => {
   return drivers.filter(d => {
-    if (d.approvalStatus !== 'APPROVED' || !d.isOnline || d.status === 'BUSY') return false;
+    if (d.approvalStatus !== 'APPROVED' || !d.isOnline || d.status === 'BUSY' || d.status === 'UNAVAILABLE') return false;
     if (d.lastSeen) {
       const lastSeenMs = new Date(d.lastSeen).getTime();
       if (now - lastSeenMs > staleThreshold) return false;
     }
-    if (selectedRegion && selectedRegion.id && (d.serviceAreas || []).length > 0) {
-      const regionMatch = (d.serviceAreas || []).some((area: string) => {
+    if (selectedRegion && selectedRegion.id) {
+      const driverAreas = d.serviceAreas || [];
+      if (driverAreas.length === 0) return false;
+      const regionNameLower = String(selectedRegion.nameAr || selectedRegion.nameEn || '').toLowerCase();
+      const regionIdLower = String(selectedRegion.id).toLowerCase();
+      const hasMatch = driverAreas.some((area: string) => {
         const areaLower = String(area || '').toLowerCase();
-        const regionNameLower = String(selectedRegion.nameAr || selectedRegion.nameEn || '').toLowerCase();
-        const regionId = String(selectedRegion.id).toLowerCase();
         return (
           areaLower.includes(regionNameLower) ||
-          areaLower.includes(regionId) ||
+          areaLower.includes(regionIdLower) ||
           areaLower === 'all regions' ||
           areaLower === 'جميع المناطق'
         );
       });
-      if (!regionMatch) return false;
+      if (!hasMatch) return false;
     }
     return true;
   });
@@ -33,14 +35,15 @@ export const getEligibleDrivers = (
 export const filterDriversByRegion = (drivers: any[], region: Region | null) => {
   if (!region || !region.id || !Array.isArray(drivers) || drivers.length === 0) return Array.isArray(drivers) ? drivers : [];
   return drivers.filter(d => {
-    if (!d.serviceAreas || d.serviceAreas.length === 0) return true;
-    return d.serviceAreas.some((area: string) => {
+    const driverAreas = d.serviceAreas || [];
+    if (driverAreas.length === 0) return false;
+    const regionNameLower = String(region.nameAr || region.nameEn || '').toLowerCase();
+    const regionIdLower = String(region.id).toLowerCase();
+    return driverAreas.some((area: string) => {
       const areaLower = String(area || '').toLowerCase();
-      const regionNameLower = String(region.nameAr || region.nameEn || '').toLowerCase();
-      const regionId = String(region.id).toLowerCase();
       return (
         areaLower.includes(regionNameLower) ||
-        areaLower.includes(regionId) ||
+        areaLower.includes(regionIdLower) ||
         areaLower === 'all regions' ||
         areaLower === 'جميع المناطق'
       );
