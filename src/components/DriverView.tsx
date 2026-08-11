@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Driver, Trip, Location, SystemStats, Region } from '../types';
 import { ToggleRight, MapPin, Navigation, DollarSign, Wallet, Check, AlertTriangle, Users, Star, MessageSquare, Bell, ShieldAlert, Loader2, ChevronRight, ChevronLeft, Plus, X } from 'lucide-react';
-import { fetchTripsHistoryPaginated, getDeviceId } from '../supabaseService';
 
 interface DriverViewProps {
   drivers: Driver[];
@@ -31,7 +30,6 @@ interface DriverViewProps {
   driverLat?: number;
   driverLng?: number;
   onOpenGuide?: (tab?: 'rider' | 'driver' | 'about') => void;
-  tripsHistory?: Trip[];
 }
 
 export const DriverView: React.FC<DriverViewProps> = ({
@@ -62,7 +60,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
   driverLat,
   driverLng,
   onOpenGuide,
-  tripsHistory = [],
 }) => {
   const safeSelectedId = selectedDriverId || '';
   const safeDrivers = Array.isArray(drivers) ? drivers : [];
@@ -137,14 +134,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
      };
   }, [currentDriverId, activeTrip?.id, activeTrip?.driverId, lowDataMode]);
 
-  // Driver Trip History (paginated + filtered)
-  const [myTrips, setMyTrips] = useState<Trip[]>([]);
-  const [myTripsPage, setMyTripsPage] = useState(0);
-  const [myTripsHasMore, setMyTripsHasMore] = useState(false);
-  const [myTripDateFrom, setMyTripDateFrom] = useState('');
-  const [myTripDateTo, setMyTripDateTo] = useState('');
-  const [isLoadingMyTrips, setIsLoadingMyTrips] = useState(false);
-
   // PWA Service Worker & Push Notification state
   const [swRegistered, setSwRegistered] = useState(false);
   const [pushStatus, setPushStatus] = useState<'granted' | 'denied' | 'default'>('default');
@@ -212,62 +201,9 @@ export const DriverView: React.FC<DriverViewProps> = ({
     } else {
       alert(lang === 'ar' ? 'يرجى السماح بالتنبيهات أولاً' : 'Please grant notification permissions first');
     }
-  };
+   };
 
-   const loadMyTrips = async (reset = false) => {
-    if (!currentDriver || !currentDriver.id) return;
-    setIsLoadingMyTrips(true);
-    const page = reset ? 0 : myTripsPage;
-    try {
-      let result = await fetchTripsHistoryPaginated({
-        userId: currentDriver.id,
-        role: 'driver',
-        deviceId: getDeviceId(),
-        dateFrom: myTripDateFrom || undefined,
-        dateTo: myTripDateTo || undefined,
-        page,
-        limit: 10,
-      });
-
-      const safeHistory = Array.isArray(tripsHistory) ? tripsHistory : [];
-      if ((!result || result.trips.length === 0) && safeHistory.length > 0) {
-        let filtered = safeHistory.filter((t) => t.driverId === currentDriver.id);
-        if (myTripDateFrom) {
-          const fromTime = new Date(`${myTripDateFrom}T00:00:00`).getTime();
-          filtered = filtered.filter((t) => new Date(t.createdAt).getTime() >= fromTime);
-        }
-        if (myTripDateTo) {
-          const toTime = new Date(`${myTripDateTo}T23:59:59.999`).getTime();
-          filtered = filtered.filter((t) => new Date(t.createdAt).getTime() <= toTime);
-        }
-        const start = reset ? 0 : page * 10;
-        const pageTrips = filtered.slice(start, start + 10);
-        result = {
-          trips: pageTrips,
-          hasMore: start + 10 < filtered.length,
-        };
-      }
-
-      if (reset) {
-        setMyTrips(result.trips);
-        setMyTripsPage(1);
-      } else {
-        setMyTrips((prev) => [...prev, ...result.trips]);
-        setMyTripsPage((prev) => prev + 1);
-      }
-      setMyTripsHasMore(result.hasMore);
-    } catch {
-      // silently fail
-    } finally {
-      setIsLoadingMyTrips(false);
-    }
-  };
-
-  useEffect(() => {
-    loadMyTrips(true);
-  }, [currentDriverId, myTripDateFrom, myTripDateTo, tripsHistory]);
-
-  const isEligibleForRequest =
+   const isEligibleForRequest =
     currentDriver &&
     activeTrip &&
     (activeTrip.driverId === currentDriver.id || activeTrip.offeredDriverIds?.includes(currentDriver.id)) &&
@@ -1115,90 +1051,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
               </span>
             </div>
           </div>
-        </div>
-
-        {/* Driver Trip History (Paginated + Date Filtered) */}
-        <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 space-y-3 text-right">
-          <h3 className="text-[11px] font-black text-slate-800 flex items-center gap-1 justify-end">
-            <span>🕒 {lang === 'ar' ? 'رحلاتي (سجل الرحلات)' : 'My Trips History'}</span>
-            {pendingRequestCount > 0 && (
-              <span className="animate-pulse bg-rose-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full leading-none">
-                {lang === 'ar' ? `📞 ${pendingRequestCount} طلب جديد` : `📞 ${pendingRequestCount} new`}
-              </span>
-            )}
-          </h3>
-          
-          {/* Date Filter */}
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={myTripDateFrom}
-              onChange={(e) => setMyTripDateFrom(e.target.value)}
-              className="flex-1 text-[9px] bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:outline-none focus:border-blue-500 pointer-events-auto"
-            />
-            <span className="text-[9px] text-slate-400">{lang === 'ar' ? 'إلى' : 'to'}</span>
-            <input
-              type="date"
-              value={myTripDateTo}
-              onChange={(e) => setMyTripDateTo(e.target.value)}
-              className="flex-1 text-[9px] bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:outline-none focus:border-blue-500 pointer-events-auto"
-            />
-          </div>
-
-          {myTrips.length > 0 ? (
-            <>
-              <div className="space-y-2 divide-y divide-slate-100/60 pr-1 max-h-[220px] overflow-y-auto">
-                {myTrips.map((trip) => {
-                  const formattedDate = trip.createdAt ? new Date(trip.createdAt).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit'
-                  }) : '';
-                  const pickupLabel = getLocationName(trip.pickup, lang);
-                  const dropoffLabel = getLocationName(trip.dropoff, lang);
-                  return (
-                    <div key={trip.id} className="pt-2 flex justify-between items-center text-[10px] text-slate-600 gap-2">
-                      <div className="text-left font-mono shrink-0">
-                        <p className="font-bold text-slate-950">{trip.fare} {lang === 'ar' ? 'ج.م' : 'EGP'}</p>
-                        <p className="text-[7.5px] text-slate-400 font-sans">{formattedDate}</p>
-                        {trip.commission > 0 && (
-                          <p className="text-[7.5px] text-rose-500 font-sans">
-                            -{trip.commission} {lang === 'ar' ? 'ج.م عمولة' : 'EGP commission'}
-                          </p>
-                        )}
-                      </div>
-                      <div className="text-right flex-1 min-w-0">
-                        <p className="font-bold text-slate-800 truncate" dir="rtl">
-                          🏁 {dropoffLabel}
-                        </p>
-                        <p className="text-[9px] text-slate-400 truncate mt-0.5" dir="rtl">
-                          📍 {pickupLabel}
-                        </p>
-                        <p className="text-[8px] text-slate-500 mt-0.5">
-                          {trip.riderName}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {myTripsHasMore && (
-                <button
-                  type="button"
-                  onClick={() => loadMyTrips(false)}
-                  disabled={isLoadingMyTrips}
-                  className="w-full py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[9px] font-bold rounded-xl transition-colors cursor-pointer pointer-events-auto disabled:opacity-50"
-                >
-                  {isLoadingMyTrips ? (lang === 'ar' ? 'جاري التحميل...' : 'Loading...') : (lang === 'ar' ? 'عرض المزيد' : 'Load More')}
-                </button>
-              )}
-            </>
-          ) : (
-            <p className="text-[10px] text-slate-400 text-center py-2">
-              {isLoadingMyTrips ? (lang === 'ar' ? 'جاري التحميل...' : 'Loading...') : (lang === 'ar' ? 'لا توجد رحلات بعد.' : 'No trips yet.')}
-            </p>
-          )}
         </div>
       </div>
     </div>
