@@ -2579,6 +2579,11 @@ export default function App() {
     try {
       if (supabaseConnected) {
         await saveTripToHistory(cancelledTrip, cancelUserId, cancelRole, getDeviceId());
+        if (cancelRole === 'rider' && driverId) {
+          await saveTripToHistory(cancelledTrip, driverId, 'driver', getDeviceId()).catch(() => {});
+        } else if (cancelRole === 'driver' && activeTrip.riderId) {
+          await saveTripToHistory(cancelledTrip, activeTrip.riderId, 'rider', getDeviceId()).catch(() => {});
+        }
         await saveActiveTrip(null, cancelledTripId);
         console.log('[handleCancelRide] Cleared active trip from DB');
       }
@@ -2617,42 +2622,6 @@ export default function App() {
     setActiveTripWithTracking(null);
     setNoAvailableDrivers(false);
     setPendingRequestCount(0);
-  };
-
-  // Handler: Driver Toggle Online
-  const handleToggleOnline = (driverId: string) => {
-    pendingDriverToggleRef.current = driverId;
-    const now = new Date().toISOString();
-    setDrivers((prev) => {
-      const updated = prev.map((d) => {
-        if (d.id !== driverId) return d;
-        const nextOnline = !d.isOnline;
-        return {
-          ...d,
-          isOnline: nextOnline,
-          status: nextOnline ? 'AVAILABLE' as const : 'OFFLINE' as const,
-          lastSeen: nextOnline ? now : d.lastSeen,
-        };
-      });
-      const driver = updated.find((d) => d.id === driverId);
-      if (driver && supabaseConnected) {
-        saveDriver(driver)
-          .then((ok) => {
-            if (ok) {
-              console.log('[handleToggleOnline] Driver status saved:', driverId, driver.isOnline ? 'online' : 'offline');
-            } else {
-              console.warn('[handleToggleOnline] Failed to save driver status:', driverId);
-            }
-          })
-          .catch(() => {
-            console.warn('[handleToggleOnline] Error saving driver status:', driverId);
-          })
-          .finally(() => {
-            pendingDriverToggleRef.current = null;
-          });
-      }
-      return updated;
-    });
   };
 
   const handleUpdateDriverLocation = (driverId: string, lat: number, lng: number, x: number, y: number) => {
@@ -3065,6 +3034,9 @@ export default function App() {
       if (supabaseConnected) {
         await saveActiveTrip(completed);
         await saveTripToHistory(completed, driverId, 'driver', getDeviceId());
+        if (activeTrip.riderId) {
+          await saveTripToHistory(completed, activeTrip.riderId, 'rider', getDeviceId()).catch(() => {});
+        }
       }
 
       setActiveTripWithTracking(completed);
@@ -4721,7 +4693,6 @@ onRequestRide={handleRequestRide}
                       locations={locations}
                       regions={regions}
                       commissionRate={stats.commissionRate}
-                      onToggleOnline={handleToggleOnline}
                       onUpdateDriverLocation={handleUpdateDriverLocation}
                       onUpdateServiceAreas={handleUpdateServiceAreas}
                       onAcceptTrip={handleAcceptTrip}
