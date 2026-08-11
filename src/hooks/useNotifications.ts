@@ -247,7 +247,7 @@ export const useNotifications = (
       if (document.hidden) return;
       try {
         const remoteActiveTrip = await fetchActiveTrip(selectedDriverId, 'driver');
-        if (!remoteActiveTrip || remoteActiveTrip === 'NO_TABLE') return;
+        if (!remoteActiveTrip) return;
 
         if (remoteActiveTrip.status !== 'SEARCHING') {
           if (lastNotifiedTripIdRef.current !== null) {
