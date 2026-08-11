@@ -4441,13 +4441,13 @@ onTripCompleted={handleTripCompleted}
                      driverLat={drivers.find(d => d.id === selectedDriverId)?.lat}
                       driverLng={drivers.find(d => d.id === selectedDriverId)?.lng}
                       onOpenGuide={openGuideModal}
-                        onLogout={() => {
-                           // Auto-set driver offline in Supabase and clear any active trip
-                           if (supabaseConnected && selectedDriverId) {
-                             saveDriver({ ...drivers.find(d => d.id === selectedDriverId), isOnline: false, status: 'AVAILABLE' } as Driver);
-                             setDrivers(prev => prev.map(d => d.id === selectedDriverId ? { ...d, isOnline: false } : d));
-                           }
-if (activeTrip) {
+                         onLogout={() => {
+                            // Auto-set driver offline in Supabase and clear any active trip
+                            if (supabaseConnected && selectedDriverId) {
+                              saveDriver({ ...drivers.find(d => d.id === selectedDriverId), isOnline: false, status: 'AVAILABLE' } as Driver);
+                              setDrivers(prev => prev.map(d => d.id === selectedDriverId ? { ...d, isOnline: false } : d));
+                            }
+                            if (activeTrip) {
                               dismissedTripIdsRef.current.add(activeTrip.id);
                               lastTripStatusBeforeNullRef.current = null;
                               if (supabaseConnected) {
@@ -4458,8 +4458,8 @@ if (activeTrip) {
                             }
                             setDriverIsLoggedIn(false);
                             clearSession('DRIVER');
-                            setCurrentScreen('DRIVER_DASHBOARD');
-                         }}
+                            setCurrentScreen('HOME');
+                          }}
                     />
                   </ErrorBoundary>
                   )}
@@ -4604,14 +4604,15 @@ if (activeTrip) {
                          onDeleteRider={handleDeleteRider}
                          onClearAllFakeData={handleClearAllFakeData}
                         lang={lang}
-                          onLogout={() => {
-                            setAdminIsLoggedIn(false);
-                            setAdminUserId('');
-                            if (supabaseConnected) {
-                              clearSession('ADMIN');
-                              setAppRole('ANON');
-                            }
-                          }}
+                           onLogout={() => {
+                             setAdminIsLoggedIn(false);
+                             setAdminUserId('');
+                             if (supabaseConnected) {
+                               clearSession('ADMIN');
+                               setAppRole('ANON');
+                             }
+                             setCurrentScreen('HOME');
+                           }}
                          onTriggerToast={triggerToast}
                       />
                         </ErrorBoundary>
