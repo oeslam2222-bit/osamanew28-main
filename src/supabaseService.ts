@@ -2176,6 +2176,7 @@ export const clearSession = async (role: 'RIDER' | 'DRIVER' | 'ADMIN'): Promise<
       localStorage.removeItem('ezz_rider_session');
       localStorage.removeItem('ezz_selected_driver_id');
       localStorage.removeItem('ezz_active_trip_cache');
+      localStorage.removeItem('ezz_driver_logged_in');
       localStorage.removeItem(`ezz_session_${role.toLowerCase()}`);
       localStorage.removeItem('ezz_session_rider');
       localStorage.removeItem('ezz_session_driver');
