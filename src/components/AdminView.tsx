@@ -20,6 +20,7 @@ interface AdminViewProps {
   onUpdatePricingStats: (updated: Partial<SystemStats>) => void;
   onSavePricingStats: (stats: SystemStats) => void;
   onSettleDriverCommissions: (driverId: string) => Promise<void>;
+  onAdjustDriverCommission?: (driverId: string, amount: number) => Promise<void>;
   onUpdateLocations: (newLocs: Location[]) => void;
   onUpdateRegions: (newRegions: Region[]) => void;
   onApproveDriver: (driverId: string) => void;
@@ -51,6 +52,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   onUpdatePricingStats,
   onSavePricingStats,
   onSettleDriverCommissions,
+  onAdjustDriverCommission,
   onUpdateLocations,
   onUpdateRegions,
   onApproveDriver,
@@ -85,6 +87,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [activeTab, setActiveTab] = useState<'overview' | 'drivers' | 'riders' | 'history' | 'analytics' | 'legal' | 'regions' | 'ads'>('overview');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [adminUserId, setAdminUserId] = useState<string>('');
+  const [commissionAdjustment, setCommissionAdjustment] = useState<{ [key: string]: number }>({});
 
   useEffect(() => {
     loadSession().then(session => {
@@ -1764,23 +1767,49 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             </div>
                           )}
 
-                          {/* Actions row */}
-                          <div className="grid grid-cols-2 gap-1.5 text-[9px] font-bold">
-                            {drv.totalCommissionPaid > 0 ? (
-                              <button
-                                type="button"
-                                onClick={() => onSettleDriverCommissions(drv.id)}
-                                className="py-1 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer pointer-events-auto text-center"
-                              >
-                                {lang === 'ar'
-                                  ? `تحصيل ${drv.totalCommissionPaid} ج.م وتصفية`
-                                  : `Collect ${drv.totalCommissionPaid} EGP`}
-                              </button>
-                            ) : (
-                              <div className="py-1 bg-emerald-50 text-emerald-700 rounded-lg text-center font-bold">
-                                {lang === 'ar' ? '✓ الحساب مصفى' : '✓ Settled'}
-                              </div>
-                            )}
+                           {/* Actions row */}
+                           <div className="grid grid-cols-2 gap-1.5 text-[9px] font-bold">
+                             <div className="space-y-1">
+                               {onAdjustDriverCommission && (
+                                 <div className="flex gap-1">
+                                   <input
+                                     type="number"
+                                     min="0"
+                                     value={commissionAdjustment[drv.id] ?? drv.totalCommissionPaid}
+                                     onChange={(e) => setCommissionAdjustment((prev) => ({ ...prev, [drv.id]: Number(e.target.value) }))}
+                                     className="w-full px-1 py-1 border border-slate-200 rounded text-[9px] text-center"
+                                     placeholder={lang === 'ar' ? 'القيمة' : 'Amount'}
+                                   />
+                                   <button
+                                     type="button"
+                                     onClick={() => {
+                                       const val = commissionAdjustment[drv.id];
+                                       if (val !== undefined && onAdjustDriverCommission) {
+                                         onAdjustDriverCommission(drv.id, val);
+                                       }
+                                     }}
+                                     className="px-2 py-1 bg-amber-50 border border-amber-100 hover:bg-amber-100 text-amber-700 rounded-lg transition-colors cursor-pointer pointer-events-auto text-center whitespace-nowrap"
+                                   >
+                                     {lang === 'ar' ? 'ضبط' : 'Set'}
+                                   </button>
+                                 </div>
+                               )}
+                               {drv.totalCommissionPaid > 0 ? (
+                                 <button
+                                   type="button"
+                                   onClick={() => onSettleDriverCommissions(drv.id)}
+                                   className="w-full py-1 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer pointer-events-auto text-center"
+                                 >
+                                   {lang === 'ar'
+                                     ? `تحصيل ${drv.totalCommissionPaid} ج.م وتصفية`
+                                     : `Collect ${drv.totalCommissionPaid} EGP`}
+                                 </button>
+                               ) : (
+                                 <div className="py-1 bg-emerald-50 text-emerald-700 rounded-lg text-center font-bold">
+                                   {lang === 'ar' ? '✓ الحساب مصفى' : '✓ Settled'}
+                                 </div>
+                               )}
+                             </div>
 
                             <a
                               href={`https://wa.me/${drv.phone.replace(/[^0-9]/g, '') || '201015555555'}?text=${encodeURIComponent(
