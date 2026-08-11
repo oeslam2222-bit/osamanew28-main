@@ -2688,10 +2688,10 @@ export default function App() {
             driver_lng: drv?.lng || null,
           })
           .eq('id', activeTrip.id)
+          .eq('status', 'SEARCHING')
           .select('id, status, driver_id');
 
-        if (updateError) {
-          console.warn('[handleAcceptTrip] Update error:', updateError);
+        if (updateError || !updated || updated.length === 0) {
           const { data: currentTrip } = await supabase
             .from('ezz_active_trip')
             .select('status, driver_id')
@@ -2711,7 +2711,7 @@ export default function App() {
             );
             return;
           } else {
-            console.log('[handleAcceptTrip] Retrying update...');
+            console.log('[handleAcceptTrip] Trip state changed, retrying update without status lock...');
             const { data: retryUpdated } = await supabase
               .from('ezz_active_trip')
               .update({
@@ -2725,15 +2725,35 @@ export default function App() {
               .select('id, status');
 
             if (!retryUpdated || retryUpdated.length === 0) {
-              console.log('[handleAcceptTrip] Retry failed, rolling back');
-              setActiveTripWithTracking((prev) => {
-                if (!prev || prev.status !== 'ACCEPTED') return prev;
-                return { ...prev, status: 'SEARCHING' as TripStatus, driverId: undefined, driverName: undefined };
-              });
-              setDrivers((prev) =>
-                prev.map((d) => (d.id === driverId ? { ...d, status: 'AVAILABLE' } : d))
-              );
-              return;
+              const { data: finalTrip } = await supabase
+                .from('ezz_active_trip')
+                .select('status, driver_id')
+                .eq('id', activeTrip.id)
+                .maybeSingle();
+
+              if (finalTrip?.status === 'ACCEPTED' && finalTrip?.driver_id === driverId) {
+                console.log('[handleAcceptTrip] Retry succeeded but we already have it, continuing...');
+              } else if (finalTrip?.status === 'ACCEPTED' && finalTrip?.driver_id && finalTrip?.driver_id !== driverId) {
+                console.log('[handleAcceptTrip] Another driver won in retry, rolling back');
+                setActiveTripWithTracking((prev) => {
+                  if (!prev || prev.status !== 'ACCEPTED') return prev;
+                  return { ...prev, status: 'SEARCHING' as TripStatus, driverId: undefined, driverName: undefined };
+                });
+                setDrivers((prev) =>
+                  prev.map((d) => (d.id === driverId ? { ...d, status: 'AVAILABLE' } : d))
+                );
+                return;
+              } else {
+                console.log('[handleAcceptTrip] Retry failed completely, rolling back');
+                setActiveTripWithTracking((prev) => {
+                  if (!prev || prev.status !== 'ACCEPTED') return prev;
+                  return { ...prev, status: 'SEARCHING' as TripStatus, driverId: undefined, driverName: undefined };
+                });
+                setDrivers((prev) =>
+                  prev.map((d) => (d.id === driverId ? { ...d, status: 'AVAILABLE' } : d))
+                );
+                return;
+              }
             }
           }
         }
