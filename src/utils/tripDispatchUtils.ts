@@ -3,7 +3,7 @@ import { Region } from '../types';
 export const getEligibleDrivers = (
   drivers: any[],
   now: number,
-  staleThreshold = 60000,
+  staleThreshold = 120000,
   selectedRegion?: Region | null
 ) => {
   return drivers.filter(d => {
