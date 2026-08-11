@@ -14,7 +14,7 @@ export const getEligibleDrivers = (
     }
     if (selectedRegion && selectedRegion.id) {
       const driverAreas = d.serviceAreas || [];
-      if (driverAreas.length === 0) return false;
+      if (driverAreas.length === 0) return true;
       const regionNameLower = String(selectedRegion.nameAr || selectedRegion.nameEn || '').toLowerCase();
       const regionIdLower = String(selectedRegion.id).toLowerCase();
       const hasMatch = driverAreas.some((area: string) => {
@@ -36,7 +36,7 @@ export const filterDriversByRegion = (drivers: any[], region: Region | null) => 
   if (!region || !region.id || !Array.isArray(drivers) || drivers.length === 0) return Array.isArray(drivers) ? drivers : [];
   return drivers.filter(d => {
     const driverAreas = d.serviceAreas || [];
-    if (driverAreas.length === 0) return false;
+    if (driverAreas.length === 0) return true;
     const regionNameLower = String(region.nameAr || region.nameEn || '').toLowerCase();
     const regionIdLower = String(region.id).toLowerCase();
     return driverAreas.some((area: string) => {
