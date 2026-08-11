@@ -81,6 +81,14 @@ export const DriverView: React.FC<DriverViewProps> = ({
     if (language === 'ar') return ar || en || 'موقع غير معروف';
     return en || ar || 'Unknown location';
   };
+
+  const getRemainingDispatchTimer = (trip: Trip | null): number => {
+    if (!trip || !trip.createdAt || trip.status !== 'SEARCHING') return 0;
+    const max = trip.dispatchTimerMax || trip.dispatchTimer || 300;
+    const elapsed = Math.floor((Date.now() - new Date(trip.createdAt).getTime()) / 1000);
+    return Math.max(0, max - elapsed);
+  };
+
   const activeTripRef = useRef(activeTrip);
   activeTripRef.current = activeTrip;
   const onUpdateDriverLocationRef = useRef(onUpdateDriverLocation);
@@ -263,7 +271,9 @@ export const DriverView: React.FC<DriverViewProps> = ({
     currentDriver &&
     activeTrip &&
     (activeTrip.driverId === currentDriver.id || activeTrip.offeredDriverIds?.includes(currentDriver.id)) &&
-    activeTrip.status === 'SEARCHING';
+    activeTrip.status === 'SEARCHING' &&
+    currentDriver.isOnline &&
+    currentDriver.status !== 'UNAVAILABLE';
 
    useEffect(() => {
      console.log('[DriverView] activeTrip:', activeTrip?.id || 'null', 'status:', activeTrip?.status || 'null',
@@ -657,13 +667,13 @@ export const DriverView: React.FC<DriverViewProps> = ({
                   {lang === 'ar' ? 'الرد قبل انتهاء الوقت' : 'Respond before timeout'}
                 </span>
                 <span className="font-extrabold text-emerald-950 font-mono">
-                  {activeTrip.dispatchTimer ?? 600}s
+                  {getRemainingDispatchTimer(activeTrip)}s
                 </span>
               </div>
               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200/50">
                 <div
                   className="bg-gradient-to-r from-emerald-400 to-emerald-600 h-full transition-all duration-1000 rounded-full"
-                  style={{ width: `${Math.max(0, Math.min(100, ((activeTrip.dispatchTimer ?? 600) / (activeTrip.dispatchTimerMax ?? 600)) * 100))}%` }}
+                  style={{ width: `${Math.max(0, Math.min(100, (getRemainingDispatchTimer(activeTrip) / (activeTrip.dispatchTimerMax || activeTrip.dispatchTimer || 300)) * 100))}%` }}
                 />
               </div>
               <p className="text-[8px] text-slate-400 leading-none mt-1">
