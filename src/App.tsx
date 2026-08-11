@@ -309,7 +309,11 @@ export default function App() {
       }
     } else {
       // No next driver -> cancel the trip
-      handleCancelRide({ userId: currentDriverId, role: 'driver' });
+      if (currentDriverId) {
+        handleCancelRide({ userId: currentDriverId, role: 'driver' });
+      } else {
+        handleCancelRide();
+      }
     }
   };
 
@@ -1118,7 +1122,7 @@ export default function App() {
         if (dbAds) {
           setAds(dbAds);
         }
-        if (dbActiveTrip && dbActiveTrip !== 'NO_TABLE') {
+        if (dbActiveTrip) {
           setActiveTripWithTracking(dbActiveTrip);
         }
 
@@ -1159,7 +1163,7 @@ export default function App() {
               setDriverIsLoggedIn(true);
               if (supabaseConnected) setAppRole('DRIVER');
               const driverTrip = await fetchActiveTrip(d.id, 'driver');
-              if (driverTrip && driverTrip !== 'NO_TABLE') {
+              if (driverTrip) {
                 setActiveTripWithTracking(driverTrip);
               }
             }
@@ -1314,8 +1318,8 @@ export default function App() {
           return;
         }
 
-        if (remoteActiveTrip === 'NO_TABLE') {
-          console.warn('[Polling] fetchActiveTrip returned NO_TABLE, keeping local active trip');
+        if (!remoteActiveTrip) {
+          console.warn('[Polling] fetchActiveTrip returned no active trip, keeping local active trip');
           return;
         }
 
@@ -1868,7 +1872,7 @@ export default function App() {
       // If it's a new trip notification, update the active trip
       if (rideId && data.status === 'SEARCHING') {
         fetchActiveTrip(selectedDriverId, 'driver').then((trip) => {
-          if (trip && trip !== 'NO_TABLE') {
+          if (trip) {
             setActiveTripWithTracking(trip);
           }
         });
@@ -1929,7 +1933,7 @@ export default function App() {
       if (!isMountedRef.current) return;
       try {
         const remoteActiveTrip = await fetchActiveTrip(selectedDriverId, 'driver');
-        if (!remoteActiveTrip || remoteActiveTrip === 'NO_TABLE') return;
+        if (!remoteActiveTrip) return;
 
         if (remoteActiveTrip.status !== 'SEARCHING') {
           if (lastNotifiedTripIdRef.current !== null) {
