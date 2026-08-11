@@ -42,7 +42,7 @@ export const useBackgroundSync = (
   useEffect(() => {
     if (!supabaseConnected) return;
 
-    const pollInterval = 18000;
+    const pollInterval = 30000;
 
     const interval = setInterval(async () => {
       if (!isMountedRef.current) return;
@@ -83,7 +83,7 @@ export const useBackgroundSync = (
   useEffect(() => {
     if (!supabaseConnected) return;
 
-    let syncInterval = 45000;
+    let syncInterval = 90000;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const scheduleSync = async () => {
