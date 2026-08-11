@@ -13,7 +13,7 @@ import {
   saveTripToHistory,
 } from '../supabaseService';
 
-const STALE_THRESHOLD_MS = 120000;
+const STALE_THRESHOLD_MS = 60000;
 
 export const useBackgroundSync = (
   supabaseConnected: boolean,
@@ -64,7 +64,7 @@ export const useBackgroundSync = (
                   driverLicenseImage: ld.driverLicenseImage || rd.driverLicenseImage,
                   vehicleLicenseImage: ld.vehicleLicenseImage || rd.vehicleLicenseImage,
                   isOnline: isStale ? false : rd.isOnline,
-                  status: isStale ? 'OFFLINE' : (rd.isOnline ? rd.status : 'OFFLINE'),
+                  status: isStale ? 'AVAILABLE' : (rd.isOnline ? rd.status : ld.status),
                 };
               }
               return rd;
