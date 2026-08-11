@@ -2158,6 +2158,17 @@ export const clearSession = async (role: 'RIDER' | 'DRIVER' | 'ADMIN'): Promise<
     try {
       sessionStorage.removeItem('ezz_tab_device_id');
     } catch {}
+    try {
+      localStorage.removeItem('ezz_device_id');
+      localStorage.removeItem('ezz_current_screen');
+      localStorage.removeItem('ezz_rider_session');
+      localStorage.removeItem('ezz_selected_driver_id');
+      localStorage.removeItem('ezz_active_trip_cache');
+      localStorage.removeItem(`ezz_session_${role.toLowerCase()}`);
+      localStorage.removeItem('ezz_session_rider');
+      localStorage.removeItem('ezz_session_driver');
+      localStorage.removeItem('ezz_session_admin');
+    } catch {}
     const { error } = await supabase.from('ezz_sessions').delete().eq('role', role).eq('device_id', deviceId);
     if (error) throw error;
     return true;
