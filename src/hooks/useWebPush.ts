@@ -26,19 +26,23 @@ export const useWebPush = (driverId: string | undefined, supabaseConnected: bool
     let cancelled = false;
 
     const init = async () => {
-      const reg = await ensureRegistration();
-      if (cancelled || !reg) return;
+      try {
+        const reg = await ensureRegistration();
+        if (cancelled || !reg) return;
 
-      const granted = await requestNotificationPermission();
-      if (!granted) return;
+        const granted = await requestNotificationPermission();
+        if (!granted) return;
 
-      const subscription = await subscribeToPush(reg);
-      if (!subscription) return;
+        const subscription = await subscribeToPush(reg);
+        if (!subscription) return;
 
-      const json = subscription.toJSON();
-      if (!supabaseConnected) return;
+        const json = subscription.toJSON();
+        if (!supabaseConnected) return;
 
-      await savePushSubscription(driverId, json, navigator.userAgent);
+        await savePushSubscription(driverId, json, navigator.userAgent);
+      } catch (err) {
+        console.warn('[useWebPush] Initialization failed:', err);
+      }
     };
 
     init();
