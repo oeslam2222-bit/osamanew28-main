@@ -879,16 +879,14 @@ export const RiderView: React.FC<RiderViewProps> = ({
             {/* Driver Details if Assigned */}
             {activeTrip.driverId && (
               <div className="bg-white border border-slate-100 p-3 rounded-xl flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-100 shrink-0">
+                <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-100 shrink-0 flex items-center justify-center text-2xl">
                   {(() => {
                     const drv = drivers.find(d => d.id === activeTrip.driverId);
-                    return drv?.personalPhoto ? (
-                      <img src={drv.personalPhoto} alt={drv.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-base font-black text-slate-500">
-                        {(drv?.name && drv.name.charAt(0)) || 'س'}
-                      </div>
-                    );
+                    if (drv?.vehicleType === 'CAR') return '🚖';
+                    if (drv?.vehicleType === 'MOTORCYCLE') return '🏍️';
+                    if (drv?.vehicleType === 'TOKTOK') return '🛺';
+                    if (drv?.vehicleType === 'TRICYCLE') return '🚲';
+                    return '🚗';
                   })()}
                 </div>
                 <div className="flex-1 min-w-0">
