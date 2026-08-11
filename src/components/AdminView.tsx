@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Driver, Trip, SystemStats, Location, Rider, PromoCode, Region, Ad } from '../types';
 import { DollarSign, ShieldAlert, Award, TrendingUp, Settings, Percent, CheckCircle, Star, Users, MapPin, Database, Sparkles, Search, AlertCircle, HelpCircle, Globe, Loader2, Calendar, Clock, BarChart2, Car, Map, Trash2, Plus, Megaphone, Phone, Eye, EyeOff } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, AreaChart, Area, PieChart, Pie, Cell } from 'recharts';
-import { fetchTripsHistoryFilteredPaginated, fetchTripsHistoryCount, generatePromoCode, fetchPromoCodes, deletePromoCode, fetchRegions, saveRegion, deleteRegionInDB, fetchAds, saveAd, deleteAd, loadSession, getDeviceId } from '../supabaseService';
+import { fetchTripsHistoryFilteredPaginated, fetchTripsHistoryCount, fetchAllTrips, generatePromoCode, fetchPromoCodes, deletePromoCode, fetchRegions, saveRegion, deleteRegionInDB, fetchAds, saveAd, deleteAd, loadSession, getDeviceId } from '../supabaseService';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE, DATA_RETENTION_POLICY } from '../utils/legal';
 import { exportBackup, importBackup } from '../utils/backup';
 import { AVAILABLE_CITIES } from '../constants';
@@ -20,7 +20,6 @@ interface AdminViewProps {
   onUpdatePricingStats: (updated: Partial<SystemStats>) => void;
   onSavePricingStats: (stats: SystemStats) => void;
   onSettleDriverCommissions: (driverId: string) => Promise<void>;
-  onAdjustDriverCommission?: (driverId: string, amount: number) => Promise<void>;
   onUpdateLocations: (newLocs: Location[]) => void;
   onUpdateRegions: (newRegions: Region[]) => void;
   onApproveDriver: (driverId: string) => void;
@@ -52,7 +51,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
   onUpdatePricingStats,
   onSavePricingStats,
   onSettleDriverCommissions,
-  onAdjustDriverCommission,
   onUpdateLocations,
   onUpdateRegions,
   onApproveDriver,
@@ -87,7 +85,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [activeTab, setActiveTab] = useState<'overview' | 'drivers' | 'riders' | 'history' | 'analytics' | 'legal' | 'regions' | 'ads'>('overview');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [adminUserId, setAdminUserId] = useState<string>('');
-  const [commissionAdjustment, setCommissionAdjustment] = useState<{ [key: string]: number }>({});
 
   useEffect(() => {
     loadSession().then(session => {
@@ -255,10 +252,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [adminTripsHasMore, setAdminTripsHasMore] = useState(false);
   const [isLoadingTrips, setIsLoadingTrips] = useState(false);
   const [adminTrips, setAdminTrips] = useState<Trip[]>([]);
+  const [allTrips, setAllTrips] = useState<Trip[]>([]);
+  const [isLoadingAllTrips, setIsLoadingAllTrips] = useState(false);
 
-  const completedCount = adminTrips.filter(t => t.status === 'COMPLETED').length;
-  const cancelledCount = adminTrips.filter(t => t.status === 'CANCELLED').length;
-  const totalRides = adminTrips.length;
+  const completedCount = allTrips.filter(t => t.status === 'COMPLETED').length;
+  const cancelledCount = allTrips.filter(t => t.status === 'CANCELLED').length;
+  const totalRides = allTrips.length;
   const successRate = totalRides > 0 ? Math.round((completedCount / totalRides) * 100) : 0;
   const cancelRate = totalRides > 0 ? Math.round((cancelledCount / totalRides) * 100) : 0;
   const onlineDrivers = drivers.filter(d => d.isOnline).length;
@@ -385,12 +384,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const getActiveDriversData = () => {
     const statsObj: { [key: string]: { name: string; rides: number; revenue: number; commission: number } } = {};
     
-    // Pre-populate so standard drivers are represented
     drivers.forEach(d => {
       statsObj[d.name] = { name: d.name, rides: 0, revenue: 0, commission: 0 };
     });
 
-    adminTrips.filter(t => t.status === 'COMPLETED').forEach(t => {
+    allTrips.filter(t => t.status === 'COMPLETED').forEach(t => {
       const name = t.driverName || (lang === 'ar' ? 'كابتن مجهول' : 'Unknown Captain');
       if (!statsObj[name]) {
         statsObj[name] = { name, rides: 0, revenue: 0, commission: 0 };
@@ -426,7 +424,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       dayCounts[day] = 0;
     });
 
-    adminTrips.filter(t => t.status === 'COMPLETED').forEach(t => {
+    allTrips.filter(t => t.status === 'COMPLETED').forEach(t => {
       const dateStr = t.completedAt || t.createdAt;
       if (!dateStr) return;
       const date = new Date(dateStr);
@@ -457,7 +455,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       STARTED: 0,
     };
 
-    adminTrips.forEach(t => {
+    allTrips.forEach(t => {
       if (statusCounts[t.status] !== undefined) {
         statusCounts[t.status] += 1;
       }
@@ -505,7 +503,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   };
 
   const getFilteredTripsForPeriod = (period: 'all' | 'week' | 'month' | '30days') => {
-    if (period === 'all') return adminTrips;
+    if (period === 'all') return allTrips;
     const now = new Date();
     const from = new Date();
     if (period === 'week') {
@@ -515,7 +513,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
     } else if (period === '30days') {
       from.setDate(now.getDate() - 30);
     }
-    return adminTrips.filter(t => {
+    return allTrips.filter(t => {
       const dateStr = t.completedAt || t.createdAt;
       if (!dateStr) return false;
       const tripDate = new Date(dateStr);
@@ -587,6 +585,20 @@ export const AdminView: React.FC<AdminViewProps> = ({
   useEffect(() => {
     loadAdminTrips(true);
   }, [tripDateFrom, tripDateTo, tripHistoryStatusFilter, tripHistorySearchQuery, adminUserId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingAllTrips(true);
+    fetchAllTrips(1000, adminUserId || undefined, getDeviceId()).then((trips) => {
+      if (!cancelled) {
+        setAllTrips(trips);
+        setIsLoadingAllTrips(false);
+      }
+    }).catch(() => {
+      if (!cancelled) setIsLoadingAllTrips(false);
+    });
+    return () => { cancelled = true; };
+  }, [adminUserId]);
 
   // OpenStreetMap Nominatim Live Search State
   const [osmQuery, setOsmQuery] = useState('');
@@ -1769,47 +1781,21 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
                            {/* Actions row */}
                            <div className="grid grid-cols-2 gap-1.5 text-[9px] font-bold">
-                             <div className="space-y-1">
-                               {onAdjustDriverCommission && (
-                                 <div className="flex gap-1">
-                                   <input
-                                     type="number"
-                                     min="0"
-                                     value={commissionAdjustment[drv.id] ?? drv.totalCommissionPaid}
-                                     onChange={(e) => setCommissionAdjustment((prev) => ({ ...prev, [drv.id]: Number(e.target.value) }))}
-                                     className="w-full px-1 py-1 border border-slate-200 rounded text-[9px] text-center"
-                                     placeholder={lang === 'ar' ? 'القيمة' : 'Amount'}
-                                   />
-                                   <button
-                                     type="button"
-                                     onClick={() => {
-                                       const val = commissionAdjustment[drv.id];
-                                       if (val !== undefined && onAdjustDriverCommission) {
-                                         onAdjustDriverCommission(drv.id, val);
-                                       }
-                                     }}
-                                     className="px-2 py-1 bg-amber-50 border border-amber-100 hover:bg-amber-100 text-amber-700 rounded-lg transition-colors cursor-pointer pointer-events-auto text-center whitespace-nowrap"
-                                   >
-                                     {lang === 'ar' ? 'ضبط' : 'Set'}
-                                   </button>
-                                 </div>
-                               )}
-                               {drv.totalCommissionPaid > 0 ? (
-                                 <button
-                                   type="button"
-                                   onClick={() => onSettleDriverCommissions(drv.id)}
-                                   className="w-full py-1 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer pointer-events-auto text-center"
-                                 >
-                                   {lang === 'ar'
-                                     ? `تحصيل ${drv.totalCommissionPaid} ج.م وتصفية`
-                                     : `Collect ${drv.totalCommissionPaid} EGP`}
-                                 </button>
-                               ) : (
-                                 <div className="py-1 bg-emerald-50 text-emerald-700 rounded-lg text-center font-bold">
-                                   {lang === 'ar' ? '✓ الحساب مصفى' : '✓ Settled'}
-                                 </div>
-                               )}
-                             </div>
+                             {drv.totalCommissionPaid > 0 ? (
+                               <button
+                                 type="button"
+                                 onClick={() => onSettleDriverCommissions(drv.id)}
+                                 className="py-1 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer pointer-events-auto text-center"
+                               >
+                                 {lang === 'ar'
+                                   ? `تحصيل ${drv.totalCommissionPaid} ج.م وتصفية`
+                                   : `Collect ${drv.totalCommissionPaid} EGP`}
+                               </button>
+                             ) : (
+                               <div className="py-1 bg-emerald-50 text-emerald-700 rounded-lg text-center font-bold">
+                                 {lang === 'ar' ? '✓ الحساب مصفى' : '✓ Settled'}
+                               </div>
+                             )}
 
                             <a
                               href={`https://wa.me/${drv.phone.replace(/[^0-9]/g, '') || '201015555555'}?text=${encodeURIComponent(
