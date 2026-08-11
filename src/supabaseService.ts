@@ -1328,7 +1328,7 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
     if (userId && userRole === 'rider') {
       query = query.eq('rider_id', userId).in('status', ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED']);
     } else if (userId && userRole === 'driver') {
-      query = query.or(`driver_id.eq.${userId},current_offered_driver_id.eq.${userId},status.eq.SEARCHING`);
+      query = query.or(`driver_id.eq.${userId},current_offered_driver_id.eq.${userId}`);
       query = query.in('status', ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED']);
     }
 
@@ -1461,6 +1461,8 @@ export const subscribeToActiveTrips = (
   let filter: any = { event: '*', schema: 'public', table: 'ezz_active_trip' };
   if (userId && userRole === 'rider') {
     filter = { ...filter, filter: `rider_id=eq.${userId}` };
+  } else if (userId && userRole === 'driver') {
+    filter = { ...filter, filter: `driver_id=eq.${userId},current_offered_driver_id=eq.${userId}` };
   }
   const channel = supabase
     .channel('ezz_active_trip_changes')
