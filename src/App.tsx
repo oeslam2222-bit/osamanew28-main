@@ -20,7 +20,6 @@ import {
   saveRider, 
   fetchActiveTrip, 
   saveActiveTrip, 
-  fetchTripsHistory, 
   saveTripToHistory,
   clearTripsHistoryInDB,
   clearAllRidersInDB,
@@ -34,9 +33,6 @@ import {
   deleteDriverInDB,
   deleteRiderInDB,
   SQL_SCHEMA,
-  fetchTripsHistoryPaginated,
-  fetchTripsHistoryFilteredPaginated,
-  fetchTripsHistoryCount,
   subscribeToActiveTrips,
   saveSession,
   loadSession,
@@ -185,7 +181,6 @@ export default function App() {
   driversRef.current = drivers;
   const [noAvailableDrivers, setNoAvailableDrivers] = useState(false);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
-  const [tripsHistory, setTripsHistory] = useState<Trip[]>([]);
   const [ads, setAds] = useState<Ad[]>([]);
   const [liveTrips, setLiveTrips] = useState<Trip[]>([]);
   const [stats, setStats] = useState<SystemStats>({
@@ -1172,11 +1167,6 @@ export default function App() {
             if (supabaseConnected) setAppRole('ADMIN');
           }
 
-          const userRole = session.role.toLowerCase() as 'rider' | 'driver';
-          const dbHistory = await fetchTripsHistory({ userId: session.userId, role: userRole, deviceId: getDeviceId() });
-          if (dbHistory && dbHistory.length > 0) {
-            setTripsHistory(dbHistory);
-          }
         }
 
         setSessionLoaded(true);
@@ -2488,7 +2478,6 @@ export default function App() {
         if (currentTimer <= 1) {
           clearInterval(interval);
           const cancelled = { ...prev, status: 'CANCELLED' as TripStatus, completedAt: new Date().toISOString() };
-          setTripsHistory((history) => [cancelled, ...history]);
           if (supabaseConnected) {
             saveTripToHistory(cancelled, rider.id, 'rider', getDeviceId());
             saveActiveTrip(null, prev.id).catch(() => {});
@@ -2579,8 +2568,6 @@ export default function App() {
       status: 'CANCELLED' as TripStatus,
       completedAt: new Date().toISOString(),
     };
-
-    setTripsHistory((prev) => [cancelledTrip, ...prev]);
 
     try {
       if (supabaseConnected) {
@@ -3034,8 +3021,6 @@ export default function App() {
         delete next[key];
         return next;
       });
-
-      setTripsHistory((history) => [completed, ...history]);
 
       if (supabaseConnected) {
         await saveActiveTrip(completed);
@@ -4262,7 +4247,6 @@ export default function App() {
                        locations={locations}
                        regions={regions}
                        drivers={drivers}
-                       tripsHistory={tripsHistory}
                        activeTrip={activeTrip}
                        ads={ads}
                        selectedPickup={selectedPickup}
@@ -4696,10 +4680,9 @@ onRequestRide={handleRequestRide}
                  {/* 5. DRIVER VIEW */}
                  {currentScreen === 'DRIVER_DASHBOARD' && (
                     <ErrorBoundary>
-                        <DriverView
-                      drivers={drivers}
-                      tripsHistory={tripsHistory}
-                      selectedDriverId={selectedDriverId}
+                         <DriverView
+                       drivers={drivers}
+                       selectedDriverId={selectedDriverId}
                        setSelectedDriverId={setSelectedDriverId}
                        activeTrip={activeTrip}
                       locations={locations}
