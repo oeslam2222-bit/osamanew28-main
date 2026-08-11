@@ -1288,190 +1288,44 @@ export default function App() {
     return () => sub.unsubscribe();
   }, [supabaseConnected, driverIsLoggedIn, selectedDriverId, rider.id]);
 
-  // 1c. Dedicated polling for active trip — works even when tab is in background
+  // Polling disabled — using Realtime only to reduce API usage
   useEffect(() => {
     if (!supabaseConnected) return;
 
-    const pollInterval = getAdaptivePollingInterval(120000, dataSaverMode, !!activeTrip);
-
-    const interval = setInterval(async () => {
-      if (!isMountedRef.current) return;
-      try {
-        const remoteActiveTrip = await fetchActiveTrip(driverIsLoggedIn ? selectedDriverId : (rider.id || undefined), driverIsLoggedIn ? 'driver' : (rider.id ? 'rider' : undefined));
-        if (!isMountedRef.current) return;
-        if (!remoteActiveTrip) {
-          setActiveTripWithTracking((prev) => {
-            if (prev && prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
-              if (!prev.driverRatingToRider) {
-                return prev;
+    const channel = supabase
+      .channel('drivers_list_channel')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'ezz_drivers',
+      }, (payload) => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          const remoteDriver = payload.new as Driver;
+          setDrivers((prev) => {
+            const existing = prev.find((d) => d.id === remoteDriver.id);
+            if (existing) {
+              if (pendingDriverToggleRef.current === remoteDriver.id) {
+                const localPending = prev.find((d) => d.id === remoteDriver.id);
+                if (localPending) return prev.map((d) => d.id === remoteDriver.id ? localPending : d);
               }
-              return null;
+              return prev.map((d) => d.id === remoteDriver.id ? { ...d, ...remoteDriver } : d);
             }
-            // If the trip disappeared from the DB, clear the local active trip immediately.
-            return null;
+            return [...prev, remoteDriver];
           });
-          return;
-        }
-
-        if (!remoteActiveTrip) {
-          console.warn('[Polling] fetchActiveTrip returned no active trip, keeping local active trip');
-          return;
-        }
-
-        if (dismissedTripIdsRef.current.has(remoteActiveTrip.id)) {
-          setActiveTripWithTracking((prev) => {
-            if (prev && prev.id === remoteActiveTrip.id) return null;
-            return prev;
-          });
-          return;
-        }
-
-        if (remoteActiveTrip.status === 'CANCELLED') {
-          setActiveTripWithTracking((prev) => {
-            if (prev && prev.id === remoteActiveTrip.id) return null;
-            return prev;
-          });
-          return;
-        }
-
-         setActiveTripWithTracking((prev) => {
-           if (!prev) {
-             if (remoteActiveTrip.status === 'COMPLETED' && dismissedTripIdsRef.current.has(remoteActiveTrip.id)) {
-               return null;
-             }
-             markLocalStatusChange(remoteActiveTrip.status);
-             return remoteActiveTrip;
-           }
-           if (prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
-             return prev;
-           }
-           if (prev.id !== remoteActiveTrip.id) return remoteActiveTrip;
-
-          if (prev.status === 'COMPLETED' || remoteActiveTrip.status === 'COMPLETED') {
-            return {
-              ...prev,
-              ...remoteActiveTrip,
-              riderRatingToDriver: remoteActiveTrip.riderRatingToDriver ?? prev.riderRatingToDriver,
-              riderFeedbackTags: remoteActiveTrip.riderFeedbackTags?.length ? remoteActiveTrip.riderFeedbackTags : prev.riderFeedbackTags,
-              riderFeedbackComment: remoteActiveTrip.riderFeedbackComment || prev.riderFeedbackComment,
-              driverRatingToRider: remoteActiveTrip.driverRatingToRider ?? prev.driverRatingToRider,
-              driverFeedbackTags: remoteActiveTrip.driverFeedbackTags?.length ? remoteActiveTrip.driverFeedbackTags : prev.driverFeedbackTags,
-              driverFeedbackComment: remoteActiveTrip.driverFeedbackComment || prev.driverFeedbackComment,
-            };
+        } else if (payload.eventType === 'DELETE') {
+          const deletedId = (payload.old as any).id;
+          if (deletedId) {
+            setDrivers((prev) => prev.filter((d) => d.id !== deletedId));
           }
-
-          if (prev.status !== remoteActiveTrip.status) {
-            if (shouldSkipPollingUpdate(remoteActiveTrip.status)) {
-              console.log('[Polling] Skipping stale DB update:', remoteActiveTrip.status, 'local is newer:', prev.status);
-              return prev;
-            }
-            const prevOrder = TRIP_STATUS_ORDER[prev.status] ?? 0;
-            const remoteOrder = TRIP_STATUS_ORDER[remoteActiveTrip.status] ?? 0;
-            if (remoteOrder < prevOrder) return prev;
-            markLocalStatusChange(remoteActiveTrip.status);
-          } else {
-            const remoteMsgs = remoteActiveTrip.chatMessages || [];
-            const localMsgs = prev.chatMessages || [];
-            const localMsgIds = new Set(localMsgs.map((m) => m.id));
-            const hasNewMessages = remoteMsgs.some((m) => !localMsgIds.has(m.id));
-            const remoteTimer = remoteActiveTrip.dispatchTimer;
-            const localTimer = prev.dispatchTimer;
-            const timerChanged = typeof remoteTimer === 'number' && typeof localTimer === 'number' && remoteTimer !== localTimer;
-            if (!hasNewMessages && !timerChanged) {
-              return prev;
-            }
-          }
-
-          const remoteMsgs = remoteActiveTrip.chatMessages || [];
-          const localMsgs = prev.chatMessages || [];
-          const localMsgIds = new Set(localMsgs.map(m => m.id));
-          const mergedChatMessages = [...localMsgs];
-          for (const m of remoteMsgs) {
-            if (!localMsgIds.has(m.id)) {
-              mergedChatMessages.push(m);
-            }
-          }
-
-          const remoteTimer = remoteActiveTrip.dispatchTimer;
-          const localTimer = prev.dispatchTimer;
-          const mergedDispatchTimer = (typeof localTimer === 'number' && typeof remoteTimer === 'number' && localTimer < remoteTimer)
-            ? localTimer
-            : (remoteTimer ?? localTimer);
-
-          markLocalStatusChange(remoteActiveTrip.status);
-          return { ...remoteActiveTrip, chatMessages: mergedChatMessages, dispatchTimer: mergedDispatchTimer };
-        });
-      } catch (err) {
-        console.warn('Active trip polling error:', err);
-      }
-    }, pollInterval);
-
-    return () => clearInterval(interval);
-  }, [supabaseConnected, dataSaverMode, !!activeTrip, driverIsLoggedIn, selectedDriverId, rider.id]);
-
-  // 1d. Dedicated polling for drivers list — keeps driver screen updated in background
-  const activeTripRefForPolling = useRef<Trip | null>(null);
-  activeTripRefForPolling.current = activeTrip;
-
-  useEffect(() => {
-    if (!supabaseConnected) return;
-
-    const pollInterval = getAdaptivePollingInterval(120000, dataSaverMode, false);
-
-    const interval = setInterval(async () => {
-      if (!isMountedRef.current) return;
-      try {
-        const remoteDrivers = await fetchDrivers();
-        if (!isMountedRef.current) return;
-        console.log('[Drivers Polling] Fetched', remoteDrivers?.length || 0, 'drivers from DB');
-        if (remoteDrivers && remoteDrivers.length > 0) {
-          const now = Date.now();
-          // Use a slightly more tolerant stale threshold to avoid brief flickers
-          // due to small network delays or polling gaps.
-          const staleThreshold = 120000; // 2 minutes — stale driver cutoff by lastSeen
-          const availableCount = remoteDrivers.filter(d => {
-            if (d.approvalStatus !== 'APPROVED' || !d.isOnline || d.status === 'BUSY' || d.status === 'UNAVAILABLE') return false;
-            if (d.lastSeen) {
-              const lastSeenMs = new Date(d.lastSeen).getTime();
-              if (now - lastSeenMs > staleThreshold) return false;
-            }
-            return true;
-          }).length;
-          console.log('[Drivers Polling] Available drivers:', availableCount);
-          const currentTrip = activeTripRefForPolling.current;
-          setDrivers((localDrivers) => {
-            return remoteDrivers.map((rd) => {
-              if (pendingDriverToggleRef.current === rd.id) {
-                // If a local toggle is in progress prefer the local driver state
-                // to avoid overwriting the user's immediate action with stale remote data.
-                const ldPending = localDrivers.find((l) => l.id === rd.id);
-                if (ldPending) return ldPending;
-                return rd;
-              }
-               const ld = localDrivers.find((l) => l.id === rd.id);
-               if (ld) {
-                 const isActiveTripDriver = currentTrip && currentTrip.driverId === rd.id && (currentTrip.status === 'ACCEPTED' || currentTrip.status === 'STARTED');
-                 const isStale = rd.lastSeen ? (now - new Date(rd.lastSeen).getTime() > staleThreshold) : false;
-                  const merged = {
-                    ...rd,
-                    currentX: isActiveTripDriver ? ld.currentX : rd.currentX,
-                    currentY: isActiveTripDriver ? ld.currentY : rd.currentY,
-                    isOnline: isStale ? false : rd.isOnline,
-                     status: isStale ? 'OFFLINE' : (rd.isOnline ? rd.status : 'OFFLINE'),
-                  };
-                 return merged;
-               }
-               return rd;
-            });
-          });
         }
-      } catch (err) {
-        console.warn('Drivers polling error:', err);
-      }
-    }, pollInterval);
+      });
 
-    return () => clearInterval(interval);
-  }, [supabaseConnected, dataSaverMode]);
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabaseConnected]);
 
   // 1e. Polling for live/active trips (admin dashboard)
   useEffect(() => {
