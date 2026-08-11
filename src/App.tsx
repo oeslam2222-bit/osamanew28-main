@@ -1284,7 +1284,13 @@ export default function App() {
             }
           }
 
-          return { ...trip, chatMessages: mergedChatMessages };
+          const remoteTimer = trip.dispatchTimer;
+          const localTimer = prev.dispatchTimer;
+          const mergedDispatchTimer = (typeof localTimer === 'number' && typeof remoteTimer === 'number' && localTimer < remoteTimer)
+            ? localTimer
+            : (remoteTimer ?? localTimer);
+
+          return { ...trip, chatMessages: mergedChatMessages, dispatchTimer: mergedDispatchTimer };
         });
       },
       userId,
