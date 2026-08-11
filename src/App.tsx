@@ -768,10 +768,11 @@ export default function App() {
 
     const handleSuccess = (position: GeolocationPosition) => {
       const { latitude, longitude } = position.coords;
+      const now = new Date().toISOString();
       setDrivers(prev =>
         prev.map(d =>
           d.id === selectedDriverId
-            ? { ...d, lat: latitude, lng: longitude }
+            ? { ...d, lat: latitude, lng: longitude, lastSeen: now }
             : d
         )
       );
@@ -1369,7 +1370,7 @@ export default function App() {
     };
 
     updateLastSeen();
-    const interval = setInterval(updateLastSeen, 300000);
+    const interval = setInterval(updateLastSeen, 60000);
 
     // Mark offline immediately when app/tab is closed
     const markOffline = async () => {
@@ -1828,6 +1829,7 @@ export default function App() {
         d.totalTrips !== last.totalTrips ||
         d.rating !== last.rating ||
         d.approvalStatus !== last.approvalStatus ||
+        d.lastSeen !== last.lastSeen ||
         JSON.stringify(d.serviceAreas || []) !== JSON.stringify(last.serviceAreas || [])
       );
     });
@@ -1845,6 +1847,7 @@ export default function App() {
         rating: d.rating,
         approvalStatus: d.approvalStatus,
         serviceAreas: d.serviceAreas,
+        lastSeen: d.lastSeen,
       };
     });
   };
