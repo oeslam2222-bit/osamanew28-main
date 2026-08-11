@@ -451,12 +451,22 @@ export const DriverView: React.FC<DriverViewProps> = ({
             </div>
           </div>
 
-           {/* Primary Top Action Controls */}
-           <div className="flex items-center gap-1.5 shrink-0">
-             <span className="flex items-center gap-1 px-2.5 py-1 rounded-full font-black text-xs bg-emerald-500 text-white shadow-xs">
-               <span className="text-[11px]">{lang === 'ar' ? 'متصل' : 'Online'}</span>
-               <ToggleRight className="w-4 h-4 text-white" />
-             </span>
+            {/* Primary Top Action Controls */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className={`flex items-center gap-1 px-2.5 py-1 rounded-full font-black text-xs shadow-xs ${
+                (currentDriver.serviceAreas || []).length === 0
+                  ? 'bg-rose-500 text-white'
+                  : 'bg-emerald-500 text-white'
+              }`}>
+                <span className="text-[11px]">
+                  {(currentDriver.serviceAreas || []).length === 0
+                    ? (lang === 'ar' ? 'غير مستعد' : 'Not Ready')
+                    : (lang === 'ar' ? 'متصل' : 'Online')}
+                </span>
+                <ToggleRight className={`w-4 h-4 ${
+                  (currentDriver.serviceAreas || []).length === 0 ? 'text-white/70' : 'text-white'
+                }`} />
+              </span>
 
              <button
                onClick={onLogout}
@@ -706,14 +716,16 @@ export const DriverView: React.FC<DriverViewProps> = ({
               <button
                 type="button"
                 onClick={() => onAcceptTrip(currentDriver.id)}
-                disabled={!currentDriver.isOnline}
+                disabled={!currentDriver.isOnline || (currentDriver.serviceAreas || []).length === 0}
                 className={`py-2.5 font-black text-xs rounded-xl shadow-md transition-all scale-100 active:scale-95 ${
-                  currentDriver.isOnline
+                  currentDriver.isOnline && (currentDriver.serviceAreas || []).length > 0
                     ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
                     : 'bg-slate-200 text-slate-400 cursor-not-allowed'
                 }`}
               >
-                {lang === 'ar' ? 'قبول وتوصيل ✅' : 'Accept Ride ✅'}
+                {(currentDriver.serviceAreas || []).length === 0
+                  ? (lang === 'ar' ? 'حدد منطقة التغطية أولاً' : 'Select coverage area first')
+                  : (lang === 'ar' ? 'قبول وتوصيل ✅' : 'Accept Ride ✅')}
               </button>
             </div>
           </div>
@@ -939,15 +951,26 @@ export const DriverView: React.FC<DriverViewProps> = ({
             <div className="w-10 h-10 bg-slate-50 border border-slate-200 text-slate-400 rounded-full flex items-center justify-center mx-auto">
               <Navigation className="w-5 h-5 rotate-45" />
             </div>
-            {currentDriver.isOnline ? (
+            {(currentDriver.serviceAreas || []).length === 0 && currentDriver.isOnline ? (
+              <>
+                <p className="text-xs font-bold text-amber-700">
+                  {lang === 'ar' ? 'أنت غير مستعد حالياً' : 'You are currently not ready'}
+                </p>
+                <p className="text-[10px] text-amber-600">
+                  {lang === 'ar'
+                    ? 'يرجى تحديد منطقة تغطية واحدة على الأقل لاستقبال طلبات الركاب.'
+                    : 'Please select at least one coverage area to receive ride requests.'}
+                </p>
+              </>
+            ) : currentDriver.isOnline ? (
               <>
                 <p className="text-xs font-bold text-slate-700">
                   {lang === 'ar' ? 'بانتظار طلبات جديدة...' : 'Waiting for incoming rides...'}
                 </p>
                 <p className="text-[10px] text-slate-400">
                   {lang === 'ar'
-                    ? 'سيظهر هنا فور طلب راكب رحلة مطابقة لموقعك.'
-                    : 'Requests will show here automatically when a passenger books.'}
+                    ? 'سيظهر هنا فور طلب راكب رحلة مطابقة لمناطقك.'
+                    : 'Requests will show here automatically when a passenger books in your area.'}
                 </p>
               </>
             ) : (
@@ -957,7 +980,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 </p>
                 <p className="text-[10px] text-slate-400">
                   {lang === 'ar'
-                    ? 'يرجى تفعيل زر الاتصال من الأعلى لاستلام طلبات الركاب.'
+                    ? 'يرجى تفعيل حالة الاتصال لاستلام طلبات الركاب.'
                     : 'Please turn on your online status to receive rides.'}
                 </p>
               </>
