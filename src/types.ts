@@ -84,7 +84,10 @@ export interface Driver {
   carPlate: string;
   vehicleType: 'CAR' | 'MOTORCYCLE' | 'TOKTOK' | 'TRICYCLE';
   vehicleName: string;
+  vehicleBrand?: string;
+  vehicleLicense?: string;
   nationalId: string;
+  secondaryPhone?: string;
   driverLicense: string;
   personalPhoto?: string;
   nationalIdImage?: string;
