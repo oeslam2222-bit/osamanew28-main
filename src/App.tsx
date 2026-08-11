@@ -1433,7 +1433,7 @@ export default function App() {
           const now = Date.now();
           // Use a slightly more tolerant stale threshold to avoid brief flickers
           // due to small network delays or polling gaps.
-          const staleThreshold = 30000; // 30 seconds — stale driver cutoff by lastSeen
+          const staleThreshold = 120000; // 2 minutes — stale driver cutoff by lastSeen
           const availableCount = remoteDrivers.filter(d => {
             if (d.approvalStatus !== 'APPROVED' || !d.isOnline || d.status !== 'AVAILABLE') return false;
             if (d.lastSeen) {
@@ -1462,7 +1462,7 @@ export default function App() {
                    currentX: isActiveTripDriver ? ld.currentX : rd.currentX,
                    currentY: isActiveTripDriver ? ld.currentY : rd.currentY,
                    isOnline: isStale ? false : rd.isOnline,
-                   status: isStale ? 'AVAILABLE' : (rd.isOnline ? rd.status : 'OFFLINE'),
+                    status: isStale ? 'OFFLINE' : (rd.isOnline ? rd.status : 'OFFLINE'),
                  };
                  return merged;
                }
@@ -1527,29 +1527,21 @@ export default function App() {
       try {
         await supabase
           .from('ezz_drivers')
-          .update({ status: 'OFFLINE' })
+          .update({ status: 'OFFLINE', is_online: false })
           .eq('id', selectedDriverId);
       } catch (e) {
         // best-effort
       }
     };
 
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        markOffline();
-      }
-    };
-
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', markOffline);
-      document.addEventListener('visibilitychange', onVisibilityChange);
     }
 
     return () => {
       clearInterval(interval);
       if (typeof window !== 'undefined') {
         window.removeEventListener('beforeunload', markOffline);
-        document.removeEventListener('visibilitychange', onVisibilityChange);
       }
     };
   }, [supabaseConnected, driverIsLoggedIn, selectedDriverId]);
