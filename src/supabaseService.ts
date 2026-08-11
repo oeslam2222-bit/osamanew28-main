@@ -1225,23 +1225,17 @@ export const saveDriver = async (driver: Driver): Promise<boolean> => {
     console.log('[saveDriver] 1. Starting save process for:', driverData.id, 'approval:', driverData.approval_status, 'commission:', driverData.total_commission_paid);
 
     const attemptSave = async (): Promise<{ data: any; error: any }> => {
-      const upsertPromise = supabase
+      return await supabase
         .from('ezz_drivers')
         .upsert(driverData, { onConflict: 'id' })
         .select();
-
-      const timeoutPromise = new Promise<{ data: null; error: any }>((_, reject) =>
-        setTimeout(() => reject(new Error('Network request timed out after 15 seconds')), 15000)
-      );
-
-      return Promise.race([upsertPromise, timeoutPromise]);
     };
 
     let { data, error } = await attemptSave();
 
     if (error) {
       console.warn('[saveDriver] First attempt failed, retrying once...');
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
       ({ data, error } = await attemptSave());
     }
 
