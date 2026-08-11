@@ -42,10 +42,15 @@ export const subscribeToPush = async (registration: ServiceWorkerRegistration): 
   if (existing) return existing;
 
   const key = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
-  return registration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: key,
-  });
+  try {
+    return await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: key,
+    });
+  } catch (err) {
+    console.warn('[webPush] Push subscription failed:', err);
+    return null;
+  }
 };
 
 export const unsubscribeFromPush = async (registration: ServiceWorkerRegistration): Promise<boolean> => {
