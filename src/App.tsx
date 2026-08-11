@@ -1292,7 +1292,7 @@ export default function App() {
   useEffect(() => {
     if (!supabaseConnected) return;
 
-    const pollInterval = getAdaptivePollingInterval(15000, dataSaverMode, !!activeTrip);
+    const pollInterval = getAdaptivePollingInterval(120000, dataSaverMode, !!activeTrip);
 
     const interval = setInterval(async () => {
       if (!isMountedRef.current) return;
@@ -1416,7 +1416,7 @@ export default function App() {
   useEffect(() => {
     if (!supabaseConnected) return;
 
-    const pollInterval = getAdaptivePollingInterval(20000, dataSaverMode, false);
+    const pollInterval = getAdaptivePollingInterval(120000, dataSaverMode, false);
 
     const interval = setInterval(async () => {
       if (!isMountedRef.current) return;
@@ -1515,7 +1515,7 @@ export default function App() {
     };
 
     updateLastSeen();
-    const interval = setInterval(updateLastSeen, 15000);
+    const interval = setInterval(updateLastSeen, 300000);
 
     // Mark offline immediately when app/tab is closed
     const markOffline = async () => {
