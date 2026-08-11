@@ -2827,26 +2827,35 @@ export default function App() {
 
     try {
       if (driverId) {
-        setDrivers((prev) => {
-          const updated = prev.map((d) => {
-            if (d.id !== driverId) return d;
-            return {
-              ...d,
-              status: 'OFFLINE' as const,
-              isOnline: false,
-              totalTrips: d.totalTrips + 1,
-              totalEarnings: d.totalEarnings + netEarnings,
-              totalCommissionPaid: d.totalCommissionPaid + commission,
-            };
-          });
-          const updatedDriver = updated.find((d) => d.id === driverId);
-          if (updatedDriver && supabaseConnected) {
-            saveDriver(updatedDriver).catch((err) => {
-              console.warn('[handleEndTrip] Failed to save driver stats:', err);
-            });
-          }
-          return updated;
+        const updatedDrivers = drivers.map((d) => {
+          if (d.id !== driverId) return d;
+          return {
+            ...d,
+            status: 'OFFLINE' as const,
+            isOnline: false,
+            totalTrips: d.totalTrips + 1,
+            totalEarnings: d.totalEarnings + netEarnings,
+            totalCommissionPaid: d.totalCommissionPaid + commission,
+          };
         });
+        const updatedDriver = updatedDrivers.find((d) => d.id === driverId);
+        setDrivers(updatedDrivers);
+
+        if (updatedDriver && supabaseConnected) {
+          let saved = await saveDriver(updatedDriver);
+          if (!saved) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            saved = await saveDriver(updatedDriver);
+          }
+          if (!saved) {
+            console.error('[handleEndTrip] Failed to save driver stats after retry');
+            triggerToast(
+              lang === 'ar' ? 'خطأ في حفظ بيانات السائق' : 'Failed to save driver data',
+              lang === 'ar' ? 'تم تحديث البيانات محلياً لكن لم يتم حفظها على السيرفر' : 'Data updated locally but not saved to server',
+              'warning'
+            );
+          }
+        }
       }
 
       setStats((s) => ({
@@ -3002,6 +3011,40 @@ export default function App() {
       }
     } else {
       setDrivers((prev) => prev.map((d) => (d.id === driverId ? cleared : d)));
+    }
+  };
+
+  const handleAdjustDriverCommission = async (driverId: string, newCommission: number) => {
+    const driver = drivers.find((d) => d.id === driverId);
+    if (!driver) return;
+    const updated = { ...driver, totalCommissionPaid: Math.max(0, newCommission) };
+    if (supabaseConnected) {
+      const saved = await saveDriver(updated);
+      if (saved) {
+        setDrivers((prev) => prev.map((d) => (d.id === driverId ? updated : d)));
+        lastSyncedDriversRef.current[driverId] = {
+          ...lastSyncedDriversRef.current[driverId],
+          totalCommissionPaid: updated.totalCommissionPaid,
+        };
+        triggerToast(
+          lang === 'ar' ? 'تم تحديث العمولة' : 'Commission updated',
+          lang === 'ar' ? `تم ضبط عمولة السائق على ${updated.totalCommissionPaid} ج.م` : `Driver commission set to ${updated.totalCommissionPaid} EGP`,
+          'success'
+        );
+      } else {
+        triggerToast(
+          lang === 'ar' ? 'خطأ في الحفظ' : 'Save error',
+          lang === 'ar' ? 'فشل حفظ العمولة في قاعدة البيانات' : 'Failed to save commission to database',
+          'warning'
+        );
+      }
+    } else {
+      setDrivers((prev) => prev.map((d) => (d.id === driverId ? updated : d)));
+      triggerToast(
+        lang === 'ar' ? 'غير متصل' : 'Offline',
+        lang === 'ar' ? 'تم تحديث العمولة محلياً فقط' : 'Commission updated locally only',
+        'warning'
+      );
     }
   };
 
@@ -4589,7 +4632,8 @@ onTripCompleted={handleTripCompleted}
                         onUpdateCommissionRate={handleUpdateCommissionRate}
                         onUpdatePricingStats={handleUpdatePricingStats}
                         onSavePricingStats={handleSavePricingStats}
-                        onSettleDriverCommissions={handleSettleDriverCommissions}
+                         onSettleDriverCommissions={handleSettleDriverCommissions}
+                         onAdjustDriverCommission={handleAdjustDriverCommission}
                         onUpdateLocations={setLocations}
                         onUpdateRegions={setRegions}
                         onApproveDriver={handleApproveDriver}
