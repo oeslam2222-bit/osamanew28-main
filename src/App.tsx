@@ -2616,31 +2616,8 @@ export default function App() {
     setPendingRequestCount(0);
   };
 
-  const handleUpdateDriverLocation = (driverId: string, lat: number, lng: number, x: number, y: number) => {
-    setDrivers((prev) =>
-      prev.map((d) => (d.id === driverId ? { ...d, currentX: x, currentY: y, lat, lng } : d))
-    );
-
-    // Throttled persistence to Supabase to avoid excessive writes
-    try {
-      const now = Date.now();
-      const last = lastLocationSavedAtRef.current[driverId] || 0;
-      const timeSince = now - last;
-      const SHOULD_SAVE_MS = 5000; // at most once every 5s per driver
-      if (supabaseConnected && (timeSince >= SHOULD_SAVE_MS)) {
-        const drv = driversRef.current.find(d => d.id === driverId);
-        if (drv) {
-          const toSave = { ...drv, lat, lng, currentX: x, currentY: y };
-          saveDriver(toSave).then((ok) => {
-            if (ok) {
-              lastLocationSavedAtRef.current[driverId] = Date.now();
-            }
-          }).catch(() => {});
-        }
-      }
-    } catch (err) {
-      console.warn('[handleUpdateDriverLocation] persistence error:', err);
-    }
+  const handleUpdateDriverLocation = (_driverId: string, _lat: number, _lng: number, _x: number, _y: number) => {
+    // Location tracking disabled — no-op.
   };
 
   // Handler: Driver Accepts Trip Manually
