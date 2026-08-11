@@ -643,7 +643,10 @@ export default function App() {
 
   // Driver actively logged in state (persisted locally)
   const [driverIsLoggedIn, setDriverIsLoggedIn] = useState<boolean>(() => {
-    return localStorage.getItem('ezz_driver_logged_in') === 'true';
+    const stored = localStorage.getItem('ezz_driver_logged_in');
+    const screen = localStorage.getItem('ezz_current_screen');
+    const isDriverScreen = screen === 'DRIVER_AUTH' || screen === 'DRIVER_DASHBOARD';
+    return stored === 'true' && isDriverScreen;
   });
 
   const { sendPushToDriver } = useWebPush(driverIsLoggedIn ? selectedDriverId : undefined, supabaseConnected);
@@ -808,6 +811,7 @@ export default function App() {
   // Reset driver to AVAILABLE when driver session is restored or login occurs
   useEffect(() => {
     if (!driverIsLoggedIn || !selectedDriverId || !supabaseConnected) return;
+    if (currentScreen !== 'DRIVER_AUTH' && currentScreen !== 'DRIVER_DASHBOARD') return;
     if (resetDriverStatusOnceRef.current[selectedDriverId]) return;
 
     const resetDriverToAvailable = async () => {
@@ -852,6 +856,7 @@ export default function App() {
   // Notify Service Worker when driver logs in/out for background polling
   useEffect(() => {
     if (!('serviceWorker' in navigator) || !navigator.serviceWorker?.ready) return;
+    if (currentScreen !== 'DRIVER_AUTH' && currentScreen !== 'DRIVER_DASHBOARD') return;
 
     const notifySW = async () => {
       try {
@@ -1352,6 +1357,7 @@ export default function App() {
   // Heartbeat: update driver lastSeen every 10s so stale drivers can be detected quickly
   useEffect(() => {
     if (!supabaseConnected || !driverIsLoggedIn || !selectedDriverId) return;
+    if (currentScreen !== 'DRIVER_AUTH' && currentScreen !== 'DRIVER_DASHBOARD') return;
 
     const updateLastSeen = async () => {
       if (!isMountedRef.current) return;
@@ -1691,6 +1697,7 @@ export default function App() {
   // FCM foreground message listener
   useEffect(() => {
     if (!driverIsLoggedIn) return;
+    if (currentScreen !== 'DRIVER_AUTH' && currentScreen !== 'DRIVER_DASHBOARD') return;
 
     const unsubscribe = onFCMForegroundMessage((payload) => {
       console.log('[FCM] Received foreground message:', payload);
@@ -1728,9 +1735,10 @@ export default function App() {
     };
   }, [driverIsLoggedIn, selectedDriverId, lang]);
 
-   // 3. Background notification poller — keeps driver alerts alive even when tab is hidden
+    // 3. Background notification poller — keeps driver alerts alive even when tab is hidden
   useEffect(() => {
     if (!supabaseConnected || !driverIsLoggedIn) return;
+    if (currentScreen !== 'DRIVER_AUTH' && currentScreen !== 'DRIVER_DASHBOARD') return;
 
     // Auto-request notification permission when driver logs in
     if ('Notification' in window && Notification.permission === 'default') {
@@ -1806,7 +1814,7 @@ export default function App() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       resetNotified();
     };
-  }, [supabaseConnected, driverIsLoggedIn, selectedDriverId, lang, dataSaverMode, activeTrip?.id, activeTrip?.status]);
+  }, [supabaseConnected, driverIsLoggedIn, selectedDriverId, lang, dataSaverMode, activeTrip?.id, activeTrip?.status, currentScreen]);
 
   // 4. Reactive Push Sync to Supabase upon state updates (debounced)
   const driversSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1854,6 +1862,7 @@ export default function App() {
 
   useEffect(() => {
     if (!supabaseConnected || drivers.length === 0) return;
+    if (currentScreen !== 'DRIVER_AUTH' && currentScreen !== 'DRIVER_DASHBOARD') return;
     if (driversSyncTimerRef.current) clearTimeout(driversSyncTimerRef.current);
     driversSyncTimerRef.current = setTimeout(() => {
       syncDriversToSupabase(drivers);
@@ -1861,7 +1870,7 @@ export default function App() {
     return () => {
       if (driversSyncTimerRef.current) clearTimeout(driversSyncTimerRef.current);
     };
-  }, [drivers, supabaseConnected]);
+  }, [drivers, supabaseConnected, currentScreen]);
 
   const lastSavedTripRef = useRef<string | null>(null);
   const lastSavedActiveTripIdRef = useRef<string | null>(null);
