@@ -3178,8 +3178,8 @@ export default function App() {
     const updated = {
       ...driver,
       serviceAreas: areas,
-      status: hasNoAreas ? 'UNAVAILABLE' as const : driver.status,
-      isOnline: hasNoAreas ? false : driver.isOnline,
+      status: hasNoAreas ? 'UNAVAILABLE' as const : 'AVAILABLE' as const,
+      isOnline: !hasNoAreas,
     };
     if (supabaseConnected) {
       const saved = await saveDriver(updated);
