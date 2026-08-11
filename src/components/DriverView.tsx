@@ -370,17 +370,16 @@ export const DriverView: React.FC<DriverViewProps> = ({
           {/* Driver Avatar & Details */}
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-sm font-black ring-1 ring-white/30 shrink-0 overflow-hidden bg-white/20">
-              {currentDriver.personalPhoto ? (
-                <img src={currentDriver.personalPhoto} alt={currentDriver.name} className="w-full h-full object-cover" />
-              ) : (
-                <span className="select-none">{(currentDriver.name && currentDriver.name.charAt(0)) || 'س'}</span>
-              )}
+              {currentDriver.vehicleType === 'CAR' && '🚖'}
+              {currentDriver.vehicleType === 'MOTORCYCLE' && '🏍️'}
+              {currentDriver.vehicleType === 'TOKTOK' && '🛺'}
+              {currentDriver.vehicleType === 'TRICYCLE' && '🚲'}
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <h2 className="text-xs sm:text-sm font-extrabold truncate">{currentDriver.name}</h2>
                 {pendingRequestCount > 0 && (
-<span className="animate-pulse bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full leading-none shrink-0">
+                  <span className="animate-pulse bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full leading-none shrink-0">
                     📞 {pendingRequestCount}
                   </span>
                 )}
@@ -392,7 +391,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                   <span className="font-bold text-white">{currentDriver.rating}</span>
                   <span className="text-[9px] opacity-80">({currentDriver.totalTrips})</span>
                 </div>
-<div className="bg-white/15 px-1.5 py-0.5 rounded-full text-[9px] font-semibold">{currentDriver.vehicleName}</div>
+                <div className="bg-white/15 px-1.5 py-0.5 rounded-full text-[9px] font-semibold">{currentDriver.vehicleName}</div>
               </div>
             </div>
           </div>
@@ -571,14 +570,11 @@ export const DriverView: React.FC<DriverViewProps> = ({
 
             {/* Driver identity block */}
             <div className="bg-white border border-emerald-200/60 rounded-xl p-2.5 flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-100 shrink-0">
-                {currentDriver.personalPhoto ? (
-                  <img src={currentDriver.personalPhoto} alt={currentDriver.name} className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-sm font-black text-slate-500">
-                    {(currentDriver.name && currentDriver.name.charAt(0)) || 'س'}
-                  </div>
-                )}
+              <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-100 shrink-0 flex items-center justify-center text-lg">
+                {currentDriver.vehicleType === 'CAR' && '🚖'}
+                {currentDriver.vehicleType === 'MOTORCYCLE' && '🏍️'}
+                {currentDriver.vehicleType === 'TOKTOK' && '🛺'}
+                {currentDriver.vehicleType === 'TRICYCLE' && '🚲'}
               </div>
               <div className="text-right flex-1 min-w-0">
                 <p className="text-[10px] text-slate-400">{lang === 'ar' ? 'السائق الحالي' : 'Current Driver'}</p>
