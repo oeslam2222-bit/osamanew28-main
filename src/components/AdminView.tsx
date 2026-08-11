@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Driver, Trip, SystemStats, Location, Rider, PromoCode, Region, Ad } from '../types';
-import { DollarSign, ShieldAlert, Award, TrendingUp, Settings, Percent, CheckCircle, Star, Users, MapPin, Database, Sparkles, Search, Upload, AlertCircle, HelpCircle, Globe, Loader2, Calendar, Clock, BarChart2, Car, Map, Trash2, Plus, Megaphone, Phone, Eye, EyeOff } from 'lucide-react';
+import { DollarSign, ShieldAlert, Award, TrendingUp, Settings, Percent, CheckCircle, Star, Users, MapPin, Database, Sparkles, Search, AlertCircle, HelpCircle, Globe, Loader2, Calendar, Clock, BarChart2, Car, Map, Trash2, Plus, Megaphone, Phone, Eye, EyeOff } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, AreaChart, Area, PieChart, Pie, Cell } from 'recharts';
 import { fetchTripsHistoryFilteredPaginated, fetchTripsHistoryCount, generatePromoCode, fetchPromoCodes, deletePromoCode, fetchRegions, saveRegion, deleteRegionInDB, fetchAds, saveAd, deleteAd, loadSession, getDeviceId } from '../supabaseService';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE, DATA_RETENTION_POLICY } from '../utils/legal';
@@ -1499,70 +1499,22 @@ export const AdminView: React.FC<AdminViewProps> = ({
                               <p>✓ <strong>{lang === 'ar' ? 'موافق على الشروط:' : 'Terms agreed:'}</strong> {drv.agreedToTerms ? <span className="text-emerald-600 font-bold">✓ نعم</span> : <span className="text-rose-500 font-bold">✕ لا</span>}</p>
                             </div>
 
-                            {/* Verification Documents Gallery */}
-                            <div className="border-t border-slate-100 pt-2">
-                              <span className="text-[8px] font-black text-slate-500 block mb-1.5">{lang === 'ar' ? 'الأوراق والمستندات المرفقة (اضغط للتكبير):' : 'Attached Documents (click to expand):'}</span>
-                              <div className="grid grid-cols-4 gap-1.5" dir="rtl">
-                                {/* 1. Personal photo */}
-                                <div className="space-y-1 text-center">
-                                  <span className="text-[7px] font-bold text-slate-500 block truncate">{lang === 'ar' ? 'الشخصية' : 'Photo'}</span>
-                                  <div 
-                                    onClick={() => drv.personalPhoto && setSelectedPreviewPhoto({ src: drv.personalPhoto, title: lang === 'ar' ? 'الصورة الشخصية' : 'Personal Photo' })}
-                                    className="h-10 border border-slate-200 rounded-md overflow-hidden bg-slate-100 cursor-zoom-in transition-all hover:border-indigo-500 pointer-events-auto flex items-center justify-center"
-                                  >
-                                    {drv.personalPhoto ? (
-                                      <img src={drv.personalPhoto} alt="Personal" className="w-full h-full object-cover" />
-                                    ) : (
-                                      <span className="text-[7px] text-slate-400">🚫</span>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* 2. National ID */}
-                                <div className="space-y-1 text-center">
-                                  <span className="text-[7px] font-bold text-slate-500 block truncate">{lang === 'ar' ? 'البطاقة' : 'National ID'}</span>
-                                  <div 
-                                    onClick={() => drv.nationalIdImage && setSelectedPreviewPhoto({ src: drv.nationalIdImage, title: lang === 'ar' ? 'صورة بطاقة الرقم القومي' : 'National ID Card' })}
-                                    className="h-10 border border-slate-200 rounded-md overflow-hidden bg-slate-100 cursor-zoom-in transition-all hover:border-indigo-500 pointer-events-auto flex items-center justify-center"
-                                  >
-                                    {drv.nationalIdImage ? (
-                                      <img src={drv.nationalIdImage} alt="National ID" className="w-full h-full object-cover" />
-                                    ) : (
-                                      <span className="text-[7px] text-slate-400">🚫</span>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* 3. Driver License */}
-                                <div className="space-y-1 text-center">
-                                  <span className="text-[7px] font-bold text-slate-500 block truncate">{lang === 'ar' ? 'القيادة' : 'Driver Lic'}</span>
-                                  <div 
-                                    onClick={() => drv.driverLicenseImage && setSelectedPreviewPhoto({ src: drv.driverLicenseImage, title: lang === 'ar' ? 'صورة رخصة القيادة' : 'Driving License' })}
-                                    className="h-10 border border-slate-200 rounded-md overflow-hidden bg-slate-100 cursor-zoom-in transition-all hover:border-indigo-500 pointer-events-auto flex items-center justify-center"
-                                  >
-                                    {drv.driverLicenseImage ? (
-                                      <img src={drv.driverLicenseImage} alt="License" className="w-full h-full object-cover" />
-                                    ) : (
-                                      <span className="text-[7px] text-slate-400">🚫</span>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* 4. Vehicle License */}
-                                <div className="space-y-1 text-center">
-                                  <span className="text-[7px] font-bold text-slate-500 block truncate">{lang === 'ar' ? 'السيارة' : 'Vehicle Lic'}</span>
-                                  <div 
-                                    onClick={() => drv.vehicleLicenseImage && setSelectedPreviewPhoto({ src: drv.vehicleLicenseImage, title: lang === 'ar' ? 'صورة رخصة السيارة' : 'Vehicle License' })}
-                                    className="h-10 border border-slate-200 rounded-md overflow-hidden bg-slate-100 cursor-zoom-in transition-all hover:border-indigo-500 pointer-events-auto flex items-center justify-center"
-                                  >
-                                    {drv.vehicleLicenseImage ? (
-                                      <img src={drv.vehicleLicenseImage} alt="Vehicle License" className="w-full h-full object-cover" />
-                                    ) : (
-                                      <span className="text-[7px] text-slate-400">🚫</span>
-                                    )}
-                                  </div>
-                                </div>
+                            {/* Driver Details */}
+                            <div className="border-t border-slate-100 pt-2 space-y-1.5 text-[10px]">
+                              <span className="text-[8px] font-black text-slate-500 block">{lang === 'ar' ? 'بيانات السائق:' : 'Driver Details:'}</span>
+                              <div className="grid grid-cols-2 gap-1 text-[9px] text-slate-600">
+                                <p>📞 {drv.phone} {drv.secondaryPhone && <span className="text-slate-400">({drv.secondaryPhone})</span>}</p>
+                                <p>🪪 {drv.nationalId}</p>
+                                <p>📄 {drv.driverLicense}</p>
+                                <p>🚗 {drv.vehicleType === 'CAR' ? (lang === 'ar' ? 'سيارة' : 'Car') : drv.vehicleType === 'MOTORCYCLE' ? (lang === 'ar' ? 'موتوسيكل' : 'Motorcycle') : drv.vehicleType === 'TOKTOK' ? (lang === 'ar' ? 'توكتوك' : 'TukTuk') : (lang === 'ar' ? 'تروسيكل' : 'Tricycle')}</p>
+                                <p>🏎️ {drv.vehicleName} {drv.vehicleBrand && <span className="text-slate-400">({drv.vehicleBrand})</span>}</p>
+                                <p>🔢 {drv.vehicleLicense || '-'}</p>
                               </div>
+                              {(!drv.personalPhoto && !drv.nationalIdImage && !drv.driverLicenseImage && !drv.vehicleLicenseImage) && (
+                                <p className="text-[8px] text-amber-600 font-bold mt-1">
+                                  {lang === 'ar' ? '⚠️ لم يتم إرسال المستندات بعد - يرجى التواصل مع السائق لاستلامها' : '⚠️ Documents not submitted yet - please contact driver to receive them'}
+                                </p>
+                              )}
                             </div>
                           </div>
 
@@ -1585,14 +1537,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             <a
                               href={`https://wa.me/${drv.phone.replace(/[^0-9]/g, '') || '201015555555'}?text=${encodeURIComponent(
                                 lang === 'ar'
-                                  ? `مرحباً كابتن ${drv.name}، معك إدارة تطبيق كابتن عز. لقد تلقينا طلب انضمامك والبيانات المرفقة (البطاقة: ${drv.nationalId}). نود استكمال مراجعة رخصتك معك.`
-                                  : `Hello Captain ${drv.name}, this is Ezz Admin contacting you regarding your driver profile validation.`
+                                  ? `مرحباً كابتن ${drv.name}، معك إدارة تطبيق كابتن عز. لقد تلقينا طلب انضمامك.\n\nنحتاج منك إرسال المستندات التالية:\n1. صورة بطاقة الرقم القومي\n2. صورة رخصة القيادة\n3. صورة رخصة المركبة\n4. صورة شخصية\n\nبمجرد استلام المستندات سيتم مراجعة طلبك والرد عليك.`
+                                  : `Hello Captain ${drv.name}, this is Ezz Admin. We received your driver application.\n\nPlease send the following documents:\n1. National ID card photo\n2. Driving license photo\n3. Vehicle license photo\n4. Personal photo\n\nWe will review and reply once received.`
                               )}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg transition-colors text-center cursor-pointer pointer-events-auto flex items-center justify-center gap-1"
                             >
-                              <span>💬 {lang === 'ar' ? 'واتساب' : 'WhatsApp'}</span>
+                              <span>💬 {lang === 'ar' ? 'واتساب للمستندات' : 'WhatsApp Docs'}</span>
                             </a>
                           </div>
                         </div>
