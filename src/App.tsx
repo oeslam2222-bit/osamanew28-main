@@ -8,7 +8,7 @@ import { Location, Driver, Trip, Rider, SystemStats, TripStatus, Region, Ad } fr
 import { RiderView } from './components/RiderView';
 import { DriverView } from './components/DriverView';
 import { AdminView } from './components/AdminView';
-import { Smartphone, Globe, RotateCcw, Award, Shield, Car, Check, ChevronDown, MessageSquare, Upload, Lock, User, Bell, X } from 'lucide-react';
+import { Smartphone, Globe, RotateCcw, Award, Shield, Car, Check, ChevronDown, MessageSquare, Lock, User, Bell, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { calculateHaversineDistance, estimateDrivingDistance, calculateDynamicFare, getVehiclePricing, calculateVehicleFare, calculateFullTripFare, RouteResult, RouteStep } from './utils/haversine';
 import { getEligibleDrivers, getCoordsFromXY } from './utils/tripDispatchUtils';
@@ -627,12 +627,11 @@ export default function App() {
   const [drvFormPassword, setDrvFormPassword] = useState('');
   const [drvFormVehicleType, setDrvFormVehicleType] = useState<'CAR' | 'MOTORCYCLE' | 'TOKTOK' | 'TRICYCLE'>('CAR');
   const [drvFormVehicleName, setDrvFormVehicleName] = useState('');
+  const [drvFormVehicleBrand, setDrvFormVehicleBrand] = useState('');
+  const [drvFormVehicleLicense, setDrvFormVehicleLicense] = useState('');
   const [drvFormNationalId, setDrvFormNationalId] = useState('');
   const [drvFormLicense, setDrvFormLicense] = useState('');
-  const [drvFormPersonalPhoto, setDrvFormPersonalPhoto] = useState<string>('');
-  const [drvFormNationalIdImage, setDrvFormNationalIdImage] = useState<string>('');
-  const [drvFormLicenseImage, setDrvFormLicenseImage] = useState<string>('');
-  const [drvFormVehicleLicenseImage, setDrvFormVehicleLicenseImage] = useState<string>('');
+  const [drvFormSecondaryPhone, setDrvFormSecondaryPhone] = useState('');
   const [drvFormAgreed, setDrvFormAgreed] = useState(false);
   const [drvFormError, setDrvFormError] = useState('');
   const [drvLoginPhone, setDrvLoginPhone] = useState('');
@@ -3607,7 +3606,7 @@ export default function App() {
     } else {
       // SIGNUP mode
       if (!drvFormName.trim() || !drvFormPhone.trim() || !drvFormPassword.trim() || !drvFormVehicleName.trim() || !drvFormNationalId.trim() || !drvFormLicense.trim()) {
-        setDrvFormError(lang === 'ar' ? 'الرجاء ملء جميع الحقول وتقديم المستندات' : 'Please provide all driver documents');
+        setDrvFormError(lang === 'ar' ? 'الرجاء ملء جميع الحقول الأساسية' : 'Please fill all required fields');
         return;
       }
 
@@ -3642,20 +3641,7 @@ export default function App() {
 
       const newId = `drv_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
       
-      // Default placeholder images if none were uploaded
-      const defaultPersonal = 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop';
-      const defaultNational = 'https://images.unsplash.com/photo-1554774853-aae0a22c8aa4?w=400';
-      const defaultLicense = 'https://images.unsplash.com/photo-1554774853-aae0a22c8aa4?w=400';
-      const defaultVehicle = 'https://images.unsplash.com/photo-1554774853-aae0a22c8aa4?w=400';
-
       const hashedPassword = await hashPassword(drvFormPassword.trim());
-
-      const [personalPhoto, nationalIdImage, driverLicenseImage, vehicleLicenseImage] = await Promise.all([
-        uploadDriverImageFromBase64(drvFormPersonalPhoto || '', newId, 'personal'),
-        uploadDriverImageFromBase64(drvFormNationalIdImage || '', newId, 'national'),
-        uploadDriverImageFromBase64(drvFormLicenseImage || '', newId, 'license'),
-        uploadDriverImageFromBase64(drvFormVehicleLicenseImage || '', newId, 'vehicle'),
-      ]);
 
       const newDriver: Driver = {
         id: newId,
@@ -3666,15 +3652,18 @@ export default function App() {
         carPlate: `ع ز ${Math.round(1000 + Math.random() * 8999)}`,
         vehicleType: drvFormVehicleType,
         vehicleName: drvFormVehicleName.trim(),
+        vehicleBrand: drvFormVehicleBrand.trim() || undefined,
+        vehicleLicense: drvFormVehicleLicense.trim() || undefined,
         nationalId: drvFormNationalId.trim(),
         driverLicense: drvFormLicense.trim(),
-        personalPhoto: personalPhoto || defaultPersonal,
-        nationalIdImage: nationalIdImage || defaultNational,
-        driverLicenseImage: driverLicenseImage || defaultLicense,
-        vehicleLicenseImage: vehicleLicenseImage || defaultVehicle,
+        secondaryPhone: drvFormSecondaryPhone.trim() || undefined,
+        personalPhoto: undefined,
+        nationalIdImage: undefined,
+        driverLicenseImage: undefined,
+        vehicleLicenseImage: undefined,
         isOnline: true,
         status: 'AVAILABLE',
-        approvalStatus: 'PENDING', // Saved as PENDING for admin approval request!
+        approvalStatus: 'PENDING',
         rating: 5.0,
         totalTrips: 0,
         totalEarnings: 0,
@@ -3686,7 +3675,6 @@ export default function App() {
       };
 
       setDrivers(prev => [newDriver, ...prev]);
-      // Persist to Supabase immediately so the admin panel can review the application
       if (supabaseConnected) {
         const saved = await saveDriver(newDriver);
         if (!saved) console.warn('Driver signup saved locally but Supabase sync failed');
@@ -4411,6 +4399,18 @@ onRequestRide={handleRequestRide}
                                   />
                                 </div>
 
+                                {/* Secondary Phone */}
+                                <div className="space-y-1">
+                                  <label className="text-[10px] font-bold text-slate-600 block text-right">رقم موبايل آخر <span className="text-slate-400">(اختياري)</span></label>
+                                  <input
+                                    type="tel"
+                                    placeholder="012..."
+                                    value={drvFormSecondaryPhone}
+                                    onChange={(e) => setDrvFormSecondaryPhone(e.target.value)}
+                                    className="w-full p-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:border-amber-400 pointer-events-auto"
+                                  />
+                                </div>
+
                                 {/* Password */}
                                 <div className="space-y-1">
                                   <label className="text-[10px] font-bold text-slate-600 block text-right">كلمة المرور</label>
@@ -4422,45 +4422,25 @@ onRequestRide={handleRequestRide}
                                     className="w-full p-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:border-amber-400 pointer-events-auto"
                                   />
                                 </div>
-                              </div>
 
-                              {/* Vehicle Type Selection */}
-                              <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-600 block text-right">نوع المركبة</label>
-                                <div className="grid grid-cols-2 gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => setDrvFormVehicleType('CAR')}
-                                    className={`py-1.5 text-[10px] font-bold rounded-lg border transition-all pointer-events-auto ${drvFormVehicleType === 'CAR' ? 'bg-slate-900 text-amber-400 border-slate-950 shadow-xs' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+                                {/* Vehicle Type */}
+                                <div className="space-y-1">
+                                  <label className="text-[10px] font-bold text-slate-600 block text-right">نوع المركبة</label>
+                                  <select
+                                    value={drvFormVehicleType}
+                                    onChange={(e) => setDrvFormVehicleType(e.target.value as any)}
+                                    className="w-full p-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:border-amber-400 pointer-events-auto"
                                   >
-                                    🚖 سيارة
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setDrvFormVehicleType('TOKTOK')}
-                                    className={`py-1.5 text-[10px] font-bold rounded-lg border transition-all pointer-events-auto ${drvFormVehicleType === 'TOKTOK' ? 'bg-slate-900 text-amber-400 border-slate-950 shadow-xs' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
-                                  >
-                                    🛺 توكتوك
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setDrvFormVehicleType('MOTORCYCLE')}
-                                    className={`py-1.5 text-[10px] font-bold rounded-lg border transition-all pointer-events-auto ${drvFormVehicleType === 'MOTORCYCLE' ? 'bg-slate-900 text-amber-400 border-slate-950 shadow-xs' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
-                                  >
-                                    🏍️ موتوسيكل
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setDrvFormVehicleType('TRICYCLE')}
-                                    className={`py-1.5 text-[10px] font-bold rounded-lg border transition-all pointer-events-auto ${drvFormVehicleType === 'TRICYCLE' ? 'bg-slate-900 text-amber-400 border-slate-950 shadow-xs' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
-                                  >
-                                    🚲 تروسيكل
-                                  </button>
+                                    <option value="CAR">🚖 سيارة</option>
+                                    <option value="TOKTOK">🛺 توكتوك</option>
+                                    <option value="MOTORCYCLE">🏍️ موتوسيكل</option>
+                                    <option value="TRICYCLE">🚲 تروسيكل</option>
+                                  </select>
                                 </div>
                               </div>
 
                               <div className="grid grid-cols-2 gap-2">
-                                {/* Vehicle Name */}
+                                {/* Vehicle Name/Brand */}
                                 <div className="space-y-1">
                                   <label className="text-[10px] font-bold text-slate-600 block text-right">ماركة واسم المركبة</label>
                                   <input
@@ -4472,9 +4452,36 @@ onRequestRide={handleRequestRide}
                                   />
                                 </div>
 
-                                {/* License plate */}
+                                {/* Vehicle License */}
                                 <div className="space-y-1">
-                                  <label className="text-[10px] font-bold text-slate-600 block text-right">رقم رخصة السيارة</label>
+                                  <label className="text-[10px] font-bold text-slate-600 block text-right">رقم رخصة المركبة</label>
+                                  <input
+                                    type="text"
+                                    placeholder="أرقام وحروف"
+                                    value={drvFormVehicleLicense}
+                                    onChange={(e) => setDrvFormVehicleLicense(e.target.value)}
+                                    className="w-full p-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:border-amber-400 pointer-events-auto"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2">
+                                {/* National ID */}
+                                <div className="space-y-1">
+                                  <label className="text-[10px] font-bold text-slate-600 block text-right">رقم البطاقة الشخصية</label>
+                                  <input
+                                    type="text"
+                                    maxLength={14}
+                                    placeholder="مثال: 29812231234567"
+                                    value={drvFormNationalId}
+                                    onChange={(e) => setDrvFormNationalId(e.target.value)}
+                                    className="w-full p-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-800 focus:outline-none focus:border-amber-400 pointer-events-auto"
+                                  />
+                                </div>
+
+                                {/* Driver License */}
+                                <div className="space-y-1">
+                                  <label className="text-[10px] font-bold text-slate-600 block text-right">رقم رخصة القيادة</label>
                                   <input
                                     type="text"
                                     placeholder="أرقام وحروف"
@@ -4485,154 +4492,7 @@ onRequestRide={handleRequestRide}
                                 </div>
                               </div>
 
-                              {/* National ID */}
-                              <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-600 block text-right">رقم البطاقة الشخصية (14 رقماً)</label>
-                                <input
-                                  type="text"
-                                  maxLength={14}
-                                  placeholder="مثال: 29812231234567"
-                                  value={drvFormNationalId}
-                                  onChange={(e) => setDrvFormNationalId(e.target.value)}
-                                  className="w-full p-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-800 focus:outline-none focus:border-amber-400 pointer-events-auto"
-                                />
-                              </div>
-
-                              {/* Document Uploads Header */}
-                              <div className="pt-2 border-t border-slate-200">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-[10px] font-black text-slate-700">المستندات المطلوبة (صورة واضحة):</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setDrvFormPersonalPhoto('https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&auto=format&fit=crop');
-                                      setDrvFormNationalIdImage('https://images.unsplash.com/photo-1554774853-aae0a22c8aa4?w=400');
-                                      setDrvFormLicenseImage('https://images.unsplash.com/photo-1554774853-aae0a22c8aa4?w=400');
-                                      setDrvFormVehicleLicenseImage('https://images.unsplash.com/photo-1554774853-aae0a22c8aa4?w=400');
-                                    }}
-                                    className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 rounded text-[8px] font-bold transition-colors pointer-events-auto cursor-pointer"
-                                  >
-                                    ✨ تعبئة مستندات تجريبية
-                                  </button>
-                                </div>
-
-                                {/* Files Grid */}
-                                <div className="grid grid-cols-2 gap-2 mt-2" dir="rtl">
-                                  {/* Personal photo */}
-                                  <div className="space-y-1">
-                                    <span className="text-[8px] font-bold text-slate-500 block text-right">صورة شخصية للبروفايل</span>
-                                    <label className="border border-dashed border-slate-300 hover:border-emerald-500 rounded-lg p-1.5 text-center flex flex-col items-center justify-center bg-white cursor-pointer transition-colors text-[9px] pointer-events-auto min-h-[48px]">
-                                      <input
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={(e) => {
-                                          const file = e.target.files?.[0];
-                                          if (file) {
-                                            const r = new FileReader();
-                                            r.onload = () => setDrvFormPersonalPhoto(r.result as string);
-                                            r.readAsDataURL(file);
-                                          }
-                                        }}
-                                        className="hidden"
-                                      />
-                                      {drvFormPersonalPhoto ? (
-                                        <img src={drvFormPersonalPhoto} alt="Personal" className="w-8 h-8 rounded-full object-cover" />
-                                      ) : (
-                                        <>
-                                          <Upload className="w-3.5 h-3.5 text-slate-400 mb-0.5" />
-                                          <span className="text-[8px] text-slate-500 font-bold">ارفع صورة</span>
-                                        </>
-                                      )}
-                                    </label>
-                                  </div>
-
-                                  {/* National ID image */}
-                                  <div className="space-y-1">
-                                    <span className="text-[8px] font-bold text-slate-500 block text-right">صورة بطاقة الرقم القومي</span>
-                                    <label className="border border-dashed border-slate-300 hover:border-emerald-500 rounded-lg p-1.5 text-center flex flex-col items-center justify-center bg-white cursor-pointer transition-colors text-[9px] pointer-events-auto min-h-[48px]">
-                                      <input
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={(e) => {
-                                          const file = e.target.files?.[0];
-                                          if (file) {
-                                            const r = new FileReader();
-                                            r.onload = () => setDrvFormNationalIdImage(r.result as string);
-                                            r.readAsDataURL(file);
-                                          }
-                                        }}
-                                        className="hidden"
-                                      />
-                                      {drvFormNationalIdImage ? (
-                                        <div className="text-emerald-600 font-extrabold flex items-center gap-0.5 text-[8px]"><Check className="w-3 h-3" /> تم الرفع</div>
-                                      ) : (
-                                        <>
-                                          <Upload className="w-3.5 h-3.5 text-slate-400 mb-0.5" />
-                                          <span className="text-[8px] text-slate-500 font-bold">ارفع صورة</span>
-                                        </>
-                                      )}
-                                    </label>
-                                  </div>
-
-                                  {/* Driving license */}
-                                  <div className="space-y-1">
-                                    <span className="text-[8px] font-bold text-slate-500 block text-right">صورة رخصة القيادة</span>
-                                    <label className="border border-dashed border-slate-300 hover:border-emerald-500 rounded-lg p-1.5 text-center flex flex-col items-center justify-center bg-white cursor-pointer transition-colors text-[9px] pointer-events-auto min-h-[48px]">
-                                      <input
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={(e) => {
-                                          const file = e.target.files?.[0];
-                                          if (file) {
-                                            const r = new FileReader();
-                                            r.onload = () => setDrvFormLicenseImage(r.result as string);
-                                            r.readAsDataURL(file);
-                                          }
-                                        }}
-                                        className="hidden"
-                                      />
-                                      {drvFormLicenseImage ? (
-                                        <div className="text-emerald-600 font-extrabold flex items-center gap-0.5 text-[8px]"><Check className="w-3 h-3" /> تم الرفع</div>
-                                      ) : (
-                                        <>
-                                          <Upload className="w-3.5 h-3.5 text-slate-400 mb-0.5" />
-                                          <span className="text-[8px] text-slate-500 font-bold">ارفع صورة</span>
-                                        </>
-                                      )}
-                                    </label>
-                                  </div>
-
-                                  {/* Vehicle license */}
-                                  <div className="space-y-1">
-                                    <span className="text-[8px] font-bold text-slate-500 block text-right">صورة رخصة العربية</span>
-                                    <label className="border border-dashed border-slate-300 hover:border-emerald-500 rounded-lg p-1.5 text-center flex flex-col items-center justify-center bg-white cursor-pointer transition-colors text-[9px] pointer-events-auto min-h-[48px]">
-                                      <input
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={(e) => {
-                                          const file = e.target.files?.[0];
-                                          if (file) {
-                                            const r = new FileReader();
-                                            r.onload = () => setDrvFormVehicleLicenseImage(r.result as string);
-                                            r.readAsDataURL(file);
-                                          }
-                                        }}
-                                        className="hidden"
-                                      />
-                                      {drvFormVehicleLicenseImage ? (
-                                        <div className="text-emerald-600 font-extrabold flex items-center gap-0.5 text-[8px]"><Check className="w-3 h-3" /> تم الرفع</div>
-                                      ) : (
-                                        <>
-                                          <Upload className="w-3.5 h-3.5 text-slate-400 mb-0.5" />
-                                          <span className="text-[8px] text-slate-500 font-bold">ارفع صورة</span>
-                                        </>
-                                      )}
-                                    </label>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Driver Terms Box with precise statement from user */}
+                              {/* Driver Terms Box */}
                               <div className="p-2.5 bg-slate-100 rounded-xl border border-slate-200 text-[8px] text-slate-600 space-y-1.5 leading-relaxed font-medium">
                                 <div className="flex items-center justify-between font-extrabold text-slate-800 text-[9px]">
                                   <span>⚖️ الشروط والأحكام الخاصة بالكباتن:</span>
@@ -4668,6 +4528,32 @@ onRequestRide={handleRequestRide}
                                     أوافق على جميع الشروط وأتعهد بالالتزام التام بالأمانة والمهنية
                                   </label>
                                 </div>
+                              </div>
+
+                              {/* WhatsApp Contact for Documents */}
+                              <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-[9px] text-right space-y-1">
+                                <p className="font-black text-emerald-800">
+                                  📱 بعد إرسال الطلب، تواصل معنا على واتساب لإرسال المستندات:
+                                </p>
+                                <p className="text-emerald-700">
+                                  📸 المستندات المطلوبة:<br/>
+                                  1. صورة بطاقة الرقم القومي<br/>
+                                  2. صورة رخصة القيادة<br/>
+                                  3. صورة رخصة المركبة<br/>
+                                  4. صورة شخصية (أفاتار)
+                                </p>
+                                <a
+                                  href={`https://wa.me/201015555555?text=${encodeURIComponent(
+                                    lang === 'ar'
+                                      ? `مرحباً، لقد قمت بتسجيل طلب انضمام جديد:\nالاسم: ${drvFormName}\nرقم الموبايل: ${drvFormPhone}\nنوع المركبة: ${drvFormVehicleType}\nأريد إرسال المستندات المطلوبة`
+                                      : `Hello, I have submitted a new driver application:\nName: ${drvFormName}\nPhone: ${drvFormPhone}\nVehicle: ${drvFormVehicleType}\nI want to submit the required documents`
+                                  )}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg transition-colors cursor-pointer pointer-events-auto mt-1"
+                                >
+                                  💬 {lang === 'ar' ? 'تواصل واتساب لإرسال المستندات' : 'WhatsApp to send documents'}
+                                </a>
                               </div>
                             </div>
                           </>
