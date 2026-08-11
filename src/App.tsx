@@ -3014,40 +3014,6 @@ export default function App() {
     }
   };
 
-  const handleAdjustDriverCommission = async (driverId: string, newCommission: number) => {
-    const driver = drivers.find((d) => d.id === driverId);
-    if (!driver) return;
-    const updated = { ...driver, totalCommissionPaid: Math.max(0, newCommission) };
-    if (supabaseConnected) {
-      const saved = await saveDriver(updated);
-      if (saved) {
-        setDrivers((prev) => prev.map((d) => (d.id === driverId ? updated : d)));
-        lastSyncedDriversRef.current[driverId] = {
-          ...lastSyncedDriversRef.current[driverId],
-          totalCommissionPaid: updated.totalCommissionPaid,
-        };
-        triggerToast(
-          lang === 'ar' ? 'تم تحديث العمولة' : 'Commission updated',
-          lang === 'ar' ? `تم ضبط عمولة السائق على ${updated.totalCommissionPaid} ج.م` : `Driver commission set to ${updated.totalCommissionPaid} EGP`,
-          'success'
-        );
-      } else {
-        triggerToast(
-          lang === 'ar' ? 'خطأ في الحفظ' : 'Save error',
-          lang === 'ar' ? 'فشل حفظ العمولة في قاعدة البيانات' : 'Failed to save commission to database',
-          'warning'
-        );
-      }
-    } else {
-      setDrivers((prev) => prev.map((d) => (d.id === driverId ? updated : d)));
-      triggerToast(
-        lang === 'ar' ? 'غير متصل' : 'Offline',
-        lang === 'ar' ? 'تم تحديث العمولة محلياً فقط' : 'Commission updated locally only',
-        'warning'
-      );
-    }
-  };
-
   // Handler: Update Regions (admin areas management)
   const handleUpdateRegions = (newRegions: Region[]) => {
     setRegions(newRegions);
@@ -4633,7 +4599,6 @@ onTripCompleted={handleTripCompleted}
                         onUpdatePricingStats={handleUpdatePricingStats}
                         onSavePricingStats={handleSavePricingStats}
                          onSettleDriverCommissions={handleSettleDriverCommissions}
-                         onAdjustDriverCommission={handleAdjustDriverCommission}
                         onUpdateLocations={setLocations}
                         onUpdateRegions={setRegions}
                         onApproveDriver={handleApproveDriver}
