@@ -102,7 +102,7 @@ export const useInitialLoad = ({
             driverIsLoggedIn ? selectedDriverId : (rider?.id || undefined),
             driverIsLoggedIn ? 'driver' : (rider?.id ? 'rider' : undefined)
           );
-          if (dbActiveTrip && dbActiveTrip !== 'NO_TABLE') {
+          if (dbActiveTrip) {
             setActiveTripWithTracking(dbActiveTrip);
           }
 
@@ -151,7 +151,7 @@ export const useInitialLoad = ({
                 setDriverIsLoggedIn(true);
                 (async () => {
                   const driverTrip = await fetchActiveTrip(d.id, 'driver');
-                  if (driverTrip && driverTrip !== 'NO_TABLE') {
+                  if (driverTrip) {
                     setActiveTripWithTracking(driverTrip);
                   }
                 })();
