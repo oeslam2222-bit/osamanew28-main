@@ -1297,7 +1297,7 @@ export default function App() {
   useEffect(() => {
     if (!supabaseConnected) return;
 
-    const pollInterval = getAdaptivePollingInterval(8000, dataSaverMode, !!activeTrip);
+    const pollInterval = getAdaptivePollingInterval(15000, dataSaverMode, !!activeTrip);
 
     const interval = setInterval(async () => {
       if (!isMountedRef.current) return;
@@ -1421,7 +1421,7 @@ export default function App() {
   useEffect(() => {
     if (!supabaseConnected) return;
 
-    const pollInterval = getAdaptivePollingInterval(8000, dataSaverMode, false);
+    const pollInterval = getAdaptivePollingInterval(20000, dataSaverMode, false);
 
     const interval = setInterval(async () => {
       if (!isMountedRef.current) return;
@@ -1482,7 +1482,7 @@ export default function App() {
   useEffect(() => {
     if (!supabaseConnected || !adminIsLoggedIn) return;
 
-    const pollInterval = 8000;
+    const pollInterval = 20000;
 
     const interval = setInterval(async () => {
       if (!isMountedRef.current) return;
@@ -2156,9 +2156,9 @@ export default function App() {
           clearInterval(interval);
         }
 
-        // Save driver location to DB every 6 ticks (~1.2s) for live tracking
+        // Save driver location to DB every 25 ticks (~5s) for live tracking
         saveCounter++;
-        if (saveCounter % 6 === 0 && supabaseConnected) {
+        if (saveCounter % 25 === 0 && supabaseConnected) {
           const updatedDriver = next.find((d) => d.id === activeTrip.driverId);
           if (updatedDriver && updatedDriver.lat && updatedDriver.lng) {
             saveDriver(updatedDriver);
