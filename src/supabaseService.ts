@@ -1573,6 +1573,24 @@ export const fetchTripsHistoryCount = async ({
   }
 };
 
+export const fetchAdminTripsCount = async (adminUserId?: string, deviceId?: string): Promise<number> => {
+  try {
+    const { data, error } = await supabase.rpc('count_admin_trips', {
+      p_admin_user_id: adminUserId || '',
+      p_device_id: deviceId || '',
+      p_date_from: null,
+      p_date_to: null,
+      p_status_filter: 'all',
+      p_search: null,
+    });
+    if (error) throw error;
+    return Number(data) || 0;
+  } catch (err: any) {
+    console.warn('Could not count admin trips from Supabase:', err.message);
+    return 0;
+  }
+};
+
 export const fetchTripsHistoryPaginated = async ({
   userId,
   role,
