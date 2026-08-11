@@ -562,7 +562,17 @@ export const RiderView: React.FC<RiderViewProps> = ({
   const onlineDrivers = drivers.filter((d) => {
     if (!d.isOnline || d.approvalStatus !== 'APPROVED') return false;
     if (selectedRegionName && (d.serviceAreas || []).length > 0) {
-      return (d.serviceAreas || []).some(sa => sa === selectedRegionName || sa === selectedRegion?.nameEn);
+      const regionNameLower = String(selectedRegionName || '').toLowerCase();
+      const regionIdLower = String(selectedRegion?.id || '').toLowerCase();
+      return (d.serviceAreas || []).some((sa) => {
+        const areaLower = String(sa || '').toLowerCase();
+        return (
+          areaLower.includes(regionNameLower) ||
+          areaLower.includes(regionIdLower) ||
+          areaLower === 'all regions' ||
+          areaLower === 'جميع المناطق'
+        );
+      });
     }
     return true;
   });
