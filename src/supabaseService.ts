@@ -959,7 +959,7 @@ export const mapDriverFromDB = (row: any): Driver => ({
   password: row.password,
   carModel: row.car_model || '',
   carPlate: row.car_plate || '',
-  vehicleType: row.vehicle_type || 'CAR',
+  vehicleType: (row.vehicle_type || 'CAR').toUpperCase(),
   vehicleName: row.vehicle_name || '',
   nationalId: row.national_id || '',
   driverLicense: row.driver_license || '',
