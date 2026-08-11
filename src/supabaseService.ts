@@ -1435,7 +1435,7 @@ export const saveActiveTrip = async (trip: Trip | null, clearTripId?: string): P
     }
 
     // ── All statuses (including ACCEPTED) use upsert ────
-    const tripData = mapTripToDB(trip);
+    const tripData = mapTripToDB(trip) as any;
     if (!trip.chatMessages || trip.chatMessages.length === 0) {
       delete tripData.chat_messages;
     }
