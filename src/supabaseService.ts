@@ -1455,8 +1455,6 @@ export const subscribeToActiveTrips = (
   let filter: any = { event: '*', schema: 'public', table: 'ezz_active_trip' };
   if (userId && userRole === 'rider') {
     filter = { ...filter, filter: `rider_id=eq.${userId}` };
-  } else if (userId && userRole === 'driver') {
-    filter = { ...filter, filter: `driver_id=eq.${userId},current_offered_driver_id=eq.${userId}` };
   }
   const channel = supabase
     .channel('ezz_active_trip_changes')
