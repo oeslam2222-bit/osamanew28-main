@@ -1343,12 +1343,12 @@
     useEffect(() => {
       if (!supabaseConnected) return;
 
-      const pollInterval = 15000;
+      const pollInterval = 60000;
 
       const interval = setInterval(async () => {
         if (!isMountedRef.current) return;
         try {
-          const remoteDrivers = await fetchDrivers();
+          const remoteDrivers = await fetchDriversPolling();
           if (isMountedRef.current && remoteDrivers) {
             setDrivers(prev => {
               const remoteMap = new Map(remoteDrivers.map(d => [d.id, d]));
@@ -1372,7 +1372,7 @@
     useEffect(() => {
       if (!supabaseConnected || !adminIsLoggedIn) return;
 
-      const pollInterval = 20000;
+      const pollInterval = 60000;
 
       const interval = setInterval(async () => {
         if (!isMountedRef.current) return;
