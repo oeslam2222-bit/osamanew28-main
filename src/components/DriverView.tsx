@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Driver, Trip, Location, SystemStats, Region } from '../types';
-import { ToggleLeft, ToggleRight, MapPin, Navigation, DollarSign, Wallet, Check, AlertTriangle, Users, Star, MessageSquare, Bell, ShieldAlert, Loader2, ChevronRight, ChevronLeft, Plus, X } from 'lucide-react';
-import { fetchTripsHistoryPaginated, getDeviceId } from '../supabaseService';
+import { ToggleRight, MapPin, Navigation, DollarSign, Wallet, Check, AlertTriangle, Users, Star, MessageSquare, Bell, ShieldAlert, Loader2, ChevronRight, ChevronLeft, Plus, X } from 'lucide-react';
 
 interface DriverViewProps {
   drivers: Driver[];
@@ -11,7 +10,6 @@ interface DriverViewProps {
   locations: Location[];
   regions: Region[];
   commissionRate: number;
-  onToggleOnline: (driverId: string) => void;
   onUpdateDriverLocation?: (driverId: string, lat: number, lng: number, x: number, y: number) => void;
   onUpdateServiceAreas?: (driverId: string, areas: string[]) => void;
   onAcceptTrip: (driverId: string) => void;
@@ -32,7 +30,6 @@ interface DriverViewProps {
   driverLat?: number;
   driverLng?: number;
   onOpenGuide?: (tab?: 'rider' | 'driver' | 'about') => void;
-  tripsHistory?: Trip[];
 }
 
 export const DriverView: React.FC<DriverViewProps> = ({
@@ -43,7 +40,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
   locations,
   regions,
   commissionRate,
-  onToggleOnline,
   onUpdateDriverLocation,
   onUpdateServiceAreas,
   onAcceptTrip,
@@ -64,7 +60,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
   driverLat,
   driverLng,
   onOpenGuide,
-  tripsHistory = [],
 }) => {
   const safeSelectedId = selectedDriverId || '';
   const safeDrivers = Array.isArray(drivers) ? drivers : [];
@@ -83,6 +78,14 @@ export const DriverView: React.FC<DriverViewProps> = ({
     if (language === 'ar') return ar || en || 'موقع غير معروف';
     return en || ar || 'Unknown location';
   };
+
+  const getRemainingDispatchTimer = (trip: Trip | null): number => {
+    if (!trip || !trip.createdAt || trip.status !== 'SEARCHING') return 0;
+    const max = trip.dispatchTimerMax || trip.dispatchTimer || 300;
+    const elapsed = Math.floor((Date.now() - new Date(trip.createdAt).getTime()) / 1000);
+    return Math.max(0, max - elapsed);
+  };
+
   const activeTripRef = useRef(activeTrip);
   activeTripRef.current = activeTrip;
   const onUpdateDriverLocationRef = useRef(onUpdateDriverLocation);
@@ -93,51 +96,9 @@ export const DriverView: React.FC<DriverViewProps> = ({
   const [chatText, setChatText] = useState('');
 
    React.useEffect(() => {
+     // Location tracking disabled — drivers choose coverage areas manually.
      if (!currentDriverId || !onUpdateDriverLocationRef.current) return;
-     const trip = activeTripRef.current;
-     if (!trip || trip.driverId !== currentDriverId) return;
-
-     if (!('geolocation' in navigator)) {
-       console.warn('[GPS] Geolocation not supported in this browser');
-       return;
-     }
-
-     geoWatchIdRef.current = navigator.geolocation.watchPosition(
-       (position) => {
-         const lat = position.coords.latitude;
-         const lng = position.coords.longitude;
-         const x = ((lng - 31.2561) / 0.0025) + 50;
-         const y = ((lat - 29.6197) / 0.0025) + 50;
-         try {
-           onUpdateDriverLocationRef.current?.(currentDriverId, lat, lng, x, y);
-         } catch (err) {
-           console.warn('[DriverView] onUpdateDriverLocation error:', err);
-         }
-       },
-       (err) => {
-         console.warn('[GPS] Watch error:', err.message);
-       },
-       {
-         enableHighAccuracy: !lowDataMode,
-         maximumAge: lowDataMode ? 30000 : 10000,
-       }
-     );
-
-     return () => {
-       if (geoWatchIdRef.current !== null) {
-         navigator.geolocation.clearWatch(geoWatchIdRef.current);
-         geoWatchIdRef.current = null;
-       }
-     };
-  }, [currentDriverId, activeTrip?.id, activeTrip?.driverId, lowDataMode]);
-
-  // Driver Trip History (paginated + filtered)
-  const [myTrips, setMyTrips] = useState<Trip[]>([]);
-  const [myTripsPage, setMyTripsPage] = useState(0);
-  const [myTripsHasMore, setMyTripsHasMore] = useState(false);
-  const [myTripDateFrom, setMyTripDateFrom] = useState('');
-  const [myTripDateTo, setMyTripDateTo] = useState('');
-  const [isLoadingMyTrips, setIsLoadingMyTrips] = useState(false);
+   }, [currentDriverId, activeTrip?.id, activeTrip?.driverId, lowDataMode]);
 
   // PWA Service Worker & Push Notification state
   const [swRegistered, setSwRegistered] = useState(false);
@@ -206,71 +167,15 @@ export const DriverView: React.FC<DriverViewProps> = ({
     } else {
       alert(lang === 'ar' ? 'يرجى السماح بالتنبيهات أولاً' : 'Please grant notification permissions first');
     }
-  };
+   };
 
-   const handleOnlineToggle = () => {
-    if (!currentDriver || !currentDriver.id) return;
-    onToggleOnline(currentDriver.id);
-  };
-
-  const loadMyTrips = async (reset = false) => {
-    if (!currentDriver || !currentDriver.id) return;
-    setIsLoadingMyTrips(true);
-    const page = reset ? 0 : myTripsPage;
-    try {
-      let result = await fetchTripsHistoryPaginated({
-        userId: currentDriver.id,
-        role: 'driver',
-        deviceId: getDeviceId(),
-        dateFrom: myTripDateFrom || undefined,
-        dateTo: myTripDateTo || undefined,
-        page,
-        limit: 10,
-      });
-
-      const safeHistory = Array.isArray(tripsHistory) ? tripsHistory : [];
-      if ((!result || result.trips.length === 0) && safeHistory.length > 0) {
-        let filtered = safeHistory.filter((t) => t.driverId === currentDriver.id);
-        if (myTripDateFrom) {
-          const fromTime = new Date(`${myTripDateFrom}T00:00:00`).getTime();
-          filtered = filtered.filter((t) => new Date(t.createdAt).getTime() >= fromTime);
-        }
-        if (myTripDateTo) {
-          const toTime = new Date(`${myTripDateTo}T23:59:59.999`).getTime();
-          filtered = filtered.filter((t) => new Date(t.createdAt).getTime() <= toTime);
-        }
-        const start = reset ? 0 : page * 10;
-        const pageTrips = filtered.slice(start, start + 10);
-        result = {
-          trips: pageTrips,
-          hasMore: start + 10 < filtered.length,
-        };
-      }
-
-      if (reset) {
-        setMyTrips(result.trips);
-        setMyTripsPage(1);
-      } else {
-        setMyTrips((prev) => [...prev, ...result.trips]);
-        setMyTripsPage((prev) => prev + 1);
-      }
-      setMyTripsHasMore(result.hasMore);
-    } catch {
-      // silently fail
-    } finally {
-      setIsLoadingMyTrips(false);
-    }
-  };
-
-  useEffect(() => {
-    loadMyTrips(true);
-  }, [currentDriverId, myTripDateFrom, myTripDateTo, tripsHistory]);
-
-  const isEligibleForRequest =
+   const isEligibleForRequest =
     currentDriver &&
     activeTrip &&
     (activeTrip.driverId === currentDriver.id || activeTrip.offeredDriverIds?.includes(currentDriver.id)) &&
-    activeTrip.status === 'SEARCHING';
+    activeTrip.status === 'SEARCHING' &&
+    currentDriver.isOnline &&
+    currentDriver.status !== 'UNAVAILABLE';
 
    useEffect(() => {
      console.log('[DriverView] activeTrip:', activeTrip?.id || 'null', 'status:', activeTrip?.status || 'null',
@@ -431,17 +336,16 @@ export const DriverView: React.FC<DriverViewProps> = ({
           {/* Driver Avatar & Details */}
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-sm font-black ring-1 ring-white/30 shrink-0 overflow-hidden bg-white/20">
-              {currentDriver.personalPhoto ? (
-                <img src={currentDriver.personalPhoto} alt={currentDriver.name} className="w-full h-full object-cover" />
-              ) : (
-                <span className="select-none">{(currentDriver.name && currentDriver.name.charAt(0)) || 'س'}</span>
-              )}
+              {currentDriver.vehicleType === 'CAR' && '🚖'}
+              {currentDriver.vehicleType === 'MOTORCYCLE' && '🏍️'}
+              {currentDriver.vehicleType === 'TOKTOK' && '🛺'}
+              {currentDriver.vehicleType === 'TRICYCLE' && '🚲'}
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <h2 className="text-xs sm:text-sm font-extrabold truncate">{currentDriver.name}</h2>
                 {pendingRequestCount > 0 && (
-<span className="animate-pulse bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full leading-none shrink-0">
+                  <span className="animate-pulse bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full leading-none shrink-0">
                     📞 {pendingRequestCount}
                   </span>
                 )}
@@ -453,34 +357,38 @@ export const DriverView: React.FC<DriverViewProps> = ({
                   <span className="font-bold text-white">{currentDriver.rating}</span>
                   <span className="text-[9px] opacity-80">({currentDriver.totalTrips})</span>
                 </div>
-<div className="bg-white/15 px-1.5 py-0.5 rounded-full text-[9px] font-semibold">{currentDriver.vehicleName}</div>
+                <div className="bg-white/15 px-1.5 py-0.5 rounded-full text-[9px] font-semibold">{currentDriver.vehicleName}</div>
               </div>
             </div>
           </div>
 
-          {/* Primary Top Action Controls (Online Toggle & Logout) */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => onToggleOnline(currentDriver.id)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full font-black text-xs transition-all shadow-xs cursor-pointer pointer-events-auto ${
-                currentDriver.isOnline ? 'bg-white text-emerald-700' : 'bg-white/20 text-white/90 border border-white/20'
-              }`}
-            >
-              <span className="text-[11px]">{currentDriver.isOnline ? (lang === 'ar' ? 'متصل' : 'Online') : (lang === 'ar' ? 'غير متصل' : 'Offline')}</span>
-              {currentDriver.isOnline ? <ToggleRight className="w-4 h-4 text-emerald-600" /> : <ToggleLeft className="w-4 h-4 text-white/80" />}
-            </button>
+            {/* Primary Top Action Controls */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className={`flex items-center gap-1 px-2.5 py-1 rounded-full font-black text-xs shadow-xs ${
+                (currentDriver.serviceAreas || []).length === 0
+                  ? 'bg-rose-500 text-white'
+                  : 'bg-emerald-500 text-white'
+              }`}>
+                <span className="text-[11px]">
+                  {(currentDriver.serviceAreas || []).length === 0
+                    ? (lang === 'ar' ? 'غير مستعد' : 'Not Ready')
+                    : (lang === 'ar' ? 'متصل' : 'Online')}
+                </span>
+                <ToggleRight className={`w-4 h-4 ${
+                  (currentDriver.serviceAreas || []).length === 0 ? 'text-white/70' : 'text-white'
+                }`} />
+              </span>
 
-            <button
-              onClick={onLogout}
-              type="button"
-              className="px-2 py-0.5 rounded-full bg-rose-500/90 hover:bg-rose-600 text-white text-[10px] font-bold shadow-xs flex items-center gap-0.5 transition-transform active:scale-95 cursor-pointer pointer-events-auto shrink-0"
-              title={lang === 'ar' ? 'تسجيل الخروج' : 'Logout'}
-            >
-              <span>🚪</span>
-              <span>{lang === 'ar' ? 'خروج' : 'Logout'}</span>
-            </button>
-          </div>
+             <button
+               onClick={onLogout}
+               type="button"
+               className="px-2 py-0.5 rounded-full bg-rose-500/90 hover:bg-rose-600 text-white text-[10px] font-bold shadow-xs flex items-center gap-0.5 transition-transform active:scale-95 cursor-pointer pointer-events-auto shrink-0"
+               title={lang === 'ar' ? 'تسجيل الخروج' : 'Logout'}
+             >
+               <span>🚪</span>
+               <span>{lang === 'ar' ? 'خروج' : 'Logout'}</span>
+             </button>
+           </div>
         </div>
 
         {/* Secondary Quick Toggles Bar */}
@@ -628,14 +536,11 @@ export const DriverView: React.FC<DriverViewProps> = ({
 
             {/* Driver identity block */}
             <div className="bg-white border border-emerald-200/60 rounded-xl p-2.5 flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-100 shrink-0">
-                {currentDriver.personalPhoto ? (
-                  <img src={currentDriver.personalPhoto} alt={currentDriver.name} className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-sm font-black text-slate-500">
-                    {(currentDriver.name && currentDriver.name.charAt(0)) || 'س'}
-                  </div>
-                )}
+              <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-100 shrink-0 flex items-center justify-center text-lg">
+                {currentDriver.vehicleType === 'CAR' && '🚖'}
+                {currentDriver.vehicleType === 'MOTORCYCLE' && '🏍️'}
+                {currentDriver.vehicleType === 'TOKTOK' && '🛺'}
+                {currentDriver.vehicleType === 'TRICYCLE' && '🚲'}
               </div>
               <div className="text-right flex-1 min-w-0">
                 <p className="text-[10px] text-slate-400">{lang === 'ar' ? 'السائق الحالي' : 'Current Driver'}</p>
@@ -660,13 +565,13 @@ export const DriverView: React.FC<DriverViewProps> = ({
                   {lang === 'ar' ? 'الرد قبل انتهاء الوقت' : 'Respond before timeout'}
                 </span>
                 <span className="font-extrabold text-emerald-950 font-mono">
-                  {activeTrip.dispatchTimer ?? 600}s
+                  {getRemainingDispatchTimer(activeTrip)}s
                 </span>
               </div>
               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200/50">
                 <div
                   className="bg-gradient-to-r from-emerald-400 to-emerald-600 h-full transition-all duration-1000 rounded-full"
-                  style={{ width: `${Math.max(0, Math.min(100, ((activeTrip.dispatchTimer ?? 600) / (activeTrip.dispatchTimerMax ?? 600)) * 100))}%` }}
+                  style={{ width: `${Math.max(0, Math.min(100, (getRemainingDispatchTimer(activeTrip) / (activeTrip.dispatchTimerMax || activeTrip.dispatchTimer || 300)) * 100))}%` }}
                 />
               </div>
               <p className="text-[8px] text-slate-400 leading-none mt-1">
@@ -719,14 +624,16 @@ export const DriverView: React.FC<DriverViewProps> = ({
               <button
                 type="button"
                 onClick={() => onAcceptTrip(currentDriver.id)}
-                disabled={!currentDriver.isOnline}
+                disabled={!currentDriver.isOnline || (currentDriver.serviceAreas || []).length === 0}
                 className={`py-2.5 font-black text-xs rounded-xl shadow-md transition-all scale-100 active:scale-95 ${
-                  currentDriver.isOnline
+                  currentDriver.isOnline && (currentDriver.serviceAreas || []).length > 0
                     ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
                     : 'bg-slate-200 text-slate-400 cursor-not-allowed'
                 }`}
               >
-                {lang === 'ar' ? 'قبول وتوصيل ✅' : 'Accept Ride ✅'}
+                {(currentDriver.serviceAreas || []).length === 0
+                  ? (lang === 'ar' ? 'حدد منطقة التغطية أولاً' : 'Select coverage area first')
+                  : (lang === 'ar' ? 'قبول وتوصيل ✅' : 'Accept Ride ✅')}
               </button>
             </div>
           </div>
@@ -952,15 +859,26 @@ export const DriverView: React.FC<DriverViewProps> = ({
             <div className="w-10 h-10 bg-slate-50 border border-slate-200 text-slate-400 rounded-full flex items-center justify-center mx-auto">
               <Navigation className="w-5 h-5 rotate-45" />
             </div>
-            {currentDriver.isOnline ? (
+            {(currentDriver.serviceAreas || []).length === 0 && currentDriver.isOnline ? (
+              <>
+                <p className="text-xs font-bold text-amber-700">
+                  {lang === 'ar' ? 'أنت غير مستعد حالياً' : 'You are currently not ready'}
+                </p>
+                <p className="text-[10px] text-amber-600">
+                  {lang === 'ar'
+                    ? 'يرجى تحديد منطقة تغطية واحدة على الأقل لاستقبال طلبات الركاب.'
+                    : 'Please select at least one coverage area to receive ride requests.'}
+                </p>
+              </>
+            ) : currentDriver.isOnline ? (
               <>
                 <p className="text-xs font-bold text-slate-700">
                   {lang === 'ar' ? 'بانتظار طلبات جديدة...' : 'Waiting for incoming rides...'}
                 </p>
                 <p className="text-[10px] text-slate-400">
                   {lang === 'ar'
-                    ? 'سيظهر هنا فور طلب راكب رحلة مطابقة لموقعك.'
-                    : 'Requests will show here automatically when a passenger books.'}
+                    ? 'سيظهر هنا فور طلب راكب رحلة مطابقة لمناطقك.'
+                    : 'Requests will show here automatically when a passenger books in your area.'}
                 </p>
               </>
             ) : (
@@ -970,7 +888,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 </p>
                 <p className="text-[10px] text-slate-400">
                   {lang === 'ar'
-                    ? 'يرجى تفعيل زر الاتصال من الأعلى لاستلام طلبات الركاب.'
+                    ? 'يرجى تفعيل حالة الاتصال لاستلام طلبات الركاب.'
                     : 'Please turn on your online status to receive rides.'}
                 </p>
               </>
@@ -1095,90 +1013,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
               </span>
             </div>
           </div>
-        </div>
-
-        {/* Driver Trip History (Paginated + Date Filtered) */}
-        <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 space-y-3 text-right">
-          <h3 className="text-[11px] font-black text-slate-800 flex items-center gap-1 justify-end">
-            <span>🕒 {lang === 'ar' ? 'رحلاتي (سجل الرحلات)' : 'My Trips History'}</span>
-            {pendingRequestCount > 0 && (
-              <span className="animate-pulse bg-rose-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full leading-none">
-                {lang === 'ar' ? `📞 ${pendingRequestCount} طلب جديد` : `📞 ${pendingRequestCount} new`}
-              </span>
-            )}
-          </h3>
-          
-          {/* Date Filter */}
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={myTripDateFrom}
-              onChange={(e) => setMyTripDateFrom(e.target.value)}
-              className="flex-1 text-[9px] bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:outline-none focus:border-blue-500 pointer-events-auto"
-            />
-            <span className="text-[9px] text-slate-400">{lang === 'ar' ? 'إلى' : 'to'}</span>
-            <input
-              type="date"
-              value={myTripDateTo}
-              onChange={(e) => setMyTripDateTo(e.target.value)}
-              className="flex-1 text-[9px] bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:outline-none focus:border-blue-500 pointer-events-auto"
-            />
-          </div>
-
-          {myTrips.length > 0 ? (
-            <>
-              <div className="space-y-2 divide-y divide-slate-100/60 pr-1 max-h-[220px] overflow-y-auto">
-                {myTrips.map((trip) => {
-                  const formattedDate = trip.createdAt ? new Date(trip.createdAt).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit'
-                  }) : '';
-                  const pickupLabel = getLocationName(trip.pickup, lang);
-                  const dropoffLabel = getLocationName(trip.dropoff, lang);
-                  return (
-                    <div key={trip.id} className="pt-2 flex justify-between items-center text-[10px] text-slate-600 gap-2">
-                      <div className="text-left font-mono shrink-0">
-                        <p className="font-bold text-slate-950">{trip.fare} {lang === 'ar' ? 'ج.م' : 'EGP'}</p>
-                        <p className="text-[7.5px] text-slate-400 font-sans">{formattedDate}</p>
-                        {trip.commission > 0 && (
-                          <p className="text-[7.5px] text-rose-500 font-sans">
-                            -{trip.commission} {lang === 'ar' ? 'ج.م عمولة' : 'EGP commission'}
-                          </p>
-                        )}
-                      </div>
-                      <div className="text-right flex-1 min-w-0">
-                        <p className="font-bold text-slate-800 truncate" dir="rtl">
-                          🏁 {dropoffLabel}
-                        </p>
-                        <p className="text-[9px] text-slate-400 truncate mt-0.5" dir="rtl">
-                          📍 {pickupLabel}
-                        </p>
-                        <p className="text-[8px] text-slate-500 mt-0.5">
-                          {trip.riderName}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {myTripsHasMore && (
-                <button
-                  type="button"
-                  onClick={() => loadMyTrips(false)}
-                  disabled={isLoadingMyTrips}
-                  className="w-full py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[9px] font-bold rounded-xl transition-colors cursor-pointer pointer-events-auto disabled:opacity-50"
-                >
-                  {isLoadingMyTrips ? (lang === 'ar' ? 'جاري التحميل...' : 'Loading...') : (lang === 'ar' ? 'عرض المزيد' : 'Load More')}
-                </button>
-              )}
-            </>
-          ) : (
-            <p className="text-[10px] text-slate-400 text-center py-2">
-              {isLoadingMyTrips ? (lang === 'ar' ? 'جاري التحميل...' : 'Loading...') : (lang === 'ar' ? 'لا توجد رحلات بعد.' : 'No trips yet.')}
-            </p>
-          )}
         </div>
       </div>
     </div>

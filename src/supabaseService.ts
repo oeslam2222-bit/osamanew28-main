@@ -230,6 +230,9 @@ ALTER TABLE ezz_drivers ADD COLUMN IF NOT EXISTS auto_accept BOOLEAN DEFAULT fal
 ALTER TABLE ezz_drivers ADD COLUMN IF NOT EXISTS auto_show_map BOOLEAN DEFAULT false;
 ALTER TABLE ezz_drivers ADD COLUMN IF NOT EXISTS fcm_token TEXT;
 
+-- تفعيل Realtime على جدول السواق (مطلوب لمزامنة حالة السواق مع الراكب فوراً)
+ALTER PUBLICATION supabase_realtime ADD TABLE ezz_drivers;
+
 -- ============================================================
 -- 4. جدول الرحلة الحالية النشطة
 -- ============================================================
@@ -581,12 +584,95 @@ CREATE POLICY "admin_delete_drivers" ON ezz_drivers FOR DELETE TO anon USING (
   EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
 );
 
--- Active Trip: القراءة للجميع (مطلوب لـ Realtime)، الكتابة للجميع
+-- Active Trip: قراءة للرحلة/السائق/أدمن، تعديل للرحلة/السائق المعين/أدمن
 DROP POLICY IF EXISTS "Deny anon read active_trip" ON ezz_active_trip;
 DROP POLICY IF EXISTS "Allow anon read active_trip" ON ezz_active_trip;
-CREATE POLICY "anon_read_active_trip" ON ezz_active_trip FOR SELECT USING (true);
-DROP POLICY IF EXISTS "Allow public write active_trip" ON ezz_active_trip;
-CREATE POLICY "anon_write_active_trip" ON ezz_active_trip FOR ALL TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "anon_read_active_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "anon_write_active_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "rider_read_own_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "driver_read_assigned_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "admin_read_all_trips" ON ezz_active_trip;
+DROP POLICY IF EXISTS "driver_accept_searching_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "driver_update_assigned_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "rider_update_own_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "admin_update_all_trips" ON ezz_active_trip;
+DROP POLICY IF EXISTS "rider_insert_own_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "rider_delete_own_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "admin_delete_all_trips" ON ezz_active_trip;
+
+CREATE POLICY "rider_read_own_trip" ON ezz_active_trip
+  FOR SELECT TO anon
+  USING (
+    rider_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'RIDER')
+  );
+
+CREATE POLICY "driver_read_assigned_trip" ON ezz_active_trip
+  FOR SELECT TO anon
+  USING (
+    driver_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'DRIVER')
+  );
+
+CREATE POLICY "admin_read_all_trips" ON ezz_active_trip
+  FOR SELECT TO anon
+  USING (
+    EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+  );
+
+CREATE POLICY "driver_accept_searching_trip" ON ezz_active_trip
+  FOR UPDATE TO anon
+  USING (
+    status = 'SEARCHING'
+    AND EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'DRIVER')
+  )
+  WITH CHECK (
+    driver_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'DRIVER')
+    AND status IN ('ACCEPTED', 'ARRIVED', 'STARTED', 'COMPLETED', 'CANCELLED')
+  );
+
+CREATE POLICY "driver_update_assigned_trip" ON ezz_active_trip
+  FOR UPDATE TO anon
+  USING (
+    driver_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'DRIVER')
+  )
+  WITH CHECK (
+    driver_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'DRIVER')
+  );
+
+CREATE POLICY "rider_update_own_trip" ON ezz_active_trip
+  FOR UPDATE TO anon
+  USING (
+    rider_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'RIDER')
+  )
+  WITH CHECK (
+    rider_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'RIDER')
+  );
+
+CREATE POLICY "admin_update_all_trips" ON ezz_active_trip
+  FOR UPDATE TO anon
+  USING (
+    EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+  )
+  WITH CHECK (
+    EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+  );
+
+CREATE POLICY "rider_insert_own_trip" ON ezz_active_trip
+  FOR INSERT TO anon
+  WITH CHECK (
+    rider_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'RIDER')
+  );
+
+CREATE POLICY "rider_delete_own_trip" ON ezz_active_trip
+  FOR DELETE TO anon
+  USING (
+    rider_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'RIDER')
+  );
+
+CREATE POLICY "admin_delete_all_trips" ON ezz_active_trip
+  FOR DELETE TO anon
+  USING (
+    EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+  );
 
 -- تفعيل Realtime على جدول الرحلة النشطة (مطلوب لوصول الطلب للسائق فوراً)
 ALTER PUBLICATION supabase_realtime ADD TABLE ezz_active_trip;
@@ -618,6 +704,7 @@ CREATE POLICY "admin_delete_trips" ON ezz_trips_history
 CREATE OR REPLACE FUNCTION get_my_trips(
   p_user_id TEXT,
   p_role TEXT,
+  p_device_id TEXT DEFAULT NULL,
   p_page INTEGER DEFAULT 0,
   p_limit INTEGER DEFAULT 10,
   p_date_from TEXT DEFAULT NULL,
@@ -657,6 +744,7 @@ $$;
 CREATE OR REPLACE FUNCTION count_my_trips(
   p_user_id TEXT,
   p_role TEXT,
+  p_device_id TEXT DEFAULT NULL,
   p_date_from TEXT DEFAULT NULL,
   p_date_to TEXT DEFAULT NULL,
   p_status_filter TEXT DEFAULT 'all',
@@ -689,7 +777,10 @@ AS $$
 $$;
 
 -- RPC: Get paginated trips for admin (all trips with filtering)
+-- SECURITY: requires valid admin session via verify_session
 CREATE OR REPLACE FUNCTION get_admin_trips(
+  p_admin_user_id TEXT DEFAULT NULL,
+  p_device_id TEXT DEFAULT NULL,
   p_page INTEGER DEFAULT 0,
   p_limit INTEGER DEFAULT 20,
   p_date_from TEXT DEFAULT NULL,
@@ -698,68 +789,209 @@ CREATE OR REPLACE FUNCTION get_admin_trips(
   p_search TEXT DEFAULT NULL
 )
 RETURNS SETOF ezz_trips_history
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
+BEGIN
+  IF NOT verify_session(p_admin_user_id, 'ADMIN', p_device_id) THEN
+    RAISE EXCEPTION 'Unauthorized: admin access required';
+  END IF;
+
+  RETURN QUERY
   SELECT * FROM ezz_trips_history
   WHERE (p_date_from IS NULL OR created_at >= p_date_from)
-  AND (p_date_to IS NULL OR created_at <= p_date_to)
-  AND (
-    p_status_filter = 'all' 
-    OR (p_status_filter = 'ACTIVE' AND status IN ('ACCEPTED', 'ARRIVED', 'STARTED'))
-    OR status = p_status_filter
-  )
-  AND (
-    p_search IS NULL OR p_search = '' OR
-    LOWER(rider_name) LIKE LOWER('%' || p_search || '%')
-    OR LOWER(COALESCE(driver_name, '')) LIKE LOWER('%' || p_search || '%')
-    OR LOWER(COALESCE(pickup->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
-    OR LOWER(COALESCE(pickup->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
-    OR LOWER(COALESCE(dropoff->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
-    OR LOWER(COALESCE(dropoff->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
-  )
+    AND (p_date_to IS NULL OR created_at <= p_date_to)
+    AND (
+      p_status_filter = 'all'
+      OR (p_status_filter = 'ACTIVE' AND status IN ('ACCEPTED', 'ARRIVED', 'STARTED'))
+      OR status = p_status_filter
+    )
+    AND (
+      p_search IS NULL OR p_search = '' OR
+      LOWER(rider_name) LIKE LOWER('%' || p_search || '%')
+      OR LOWER(COALESCE(driver_name, '')) LIKE LOWER('%' || p_search || '%')
+      OR LOWER(COALESCE(pickup->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+      OR LOWER(COALESCE(pickup->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+      OR LOWER(COALESCE(dropoff->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+      OR LOWER(COALESCE(dropoff->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+    )
   ORDER BY created_at DESC
   LIMIT p_limit OFFSET (p_page * p_limit);
+END;
 $$;
 
 -- RPC: Count all trips for admin
+-- SECURITY: requires valid admin session via verify_session
 CREATE OR REPLACE FUNCTION count_admin_trips(
+  p_admin_user_id TEXT DEFAULT NULL,
+  p_device_id TEXT DEFAULT NULL,
   p_date_from TEXT DEFAULT NULL,
   p_date_to TEXT DEFAULT NULL,
   p_status_filter TEXT DEFAULT 'all',
   p_search TEXT DEFAULT NULL
 )
 RETURNS BIGINT
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
-  SELECT COUNT(*) FROM ezz_trips_history
+DECLARE
+  v_count BIGINT;
+BEGIN
+  IF NOT verify_session(p_admin_user_id, 'ADMIN', p_device_id) THEN
+    RAISE EXCEPTION 'Unauthorized: admin access required';
+  END IF;
+
+  SELECT COUNT(*) INTO v_count FROM ezz_trips_history
   WHERE (p_date_from IS NULL OR created_at >= p_date_from)
-  AND (p_date_to IS NULL OR created_at <= p_date_to)
-  AND (
-    p_status_filter = 'all' 
-    OR (p_status_filter = 'ACTIVE' AND status IN ('ACCEPTED', 'ARRIVED', 'STARTED'))
-    OR status = p_status_filter
-  )
-  AND (
-    p_search IS NULL OR p_search = '' OR
-    LOWER(rider_name) LIKE LOWER('%' || p_search || '%')
-    OR LOWER(COALESCE(driver_name, '')) LIKE LOWER('%' || p_search || '%')
-    OR LOWER(COALESCE(pickup->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
-    OR LOWER(COALESCE(pickup->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
-    OR LOWER(COALESCE(dropoff->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
-    OR LOWER(COALESCE(dropoff->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
-  );
+    AND (p_date_to IS NULL OR created_at <= p_date_to)
+    AND (
+      p_status_filter = 'all'
+      OR (p_status_filter = 'ACTIVE' AND status IN ('ACCEPTED', 'ARRIVED', 'STARTED'))
+      OR status = p_status_filter
+    )
+    AND (
+      p_search IS NULL OR p_search = '' OR
+      LOWER(rider_name) LIKE LOWER('%' || p_search || '%')
+      OR LOWER(COALESCE(driver_name, '')) LIKE LOWER('%' || p_search || '%')
+      OR LOWER(COALESCE(pickup->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+      OR LOWER(COALESCE(pickup->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+      OR LOWER(COALESCE(dropoff->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
+      OR LOWER(COALESCE(dropoff->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
+    );
+
+  RETURN v_count;
+END;
 $$;
 
 -- RPC: Admin clear all trips
-CREATE OR REPLACE FUNCTION admin_clear_all_trips()
+-- SECURITY: requires valid admin session via verify_session
+CREATE OR REPLACE FUNCTION admin_clear_all_trips(
+  p_admin_user_id TEXT DEFAULT NULL,
+  p_device_id TEXT DEFAULT NULL
+)
 RETURNS VOID
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
+BEGIN
+  IF NOT verify_session(p_admin_user_id, 'ADMIN', p_device_id) THEN
+    RAISE EXCEPTION 'Unauthorized: admin access required';
+  END IF;
+
   DELETE FROM ezz_trips_history;
+END;
 $$;
+
+-- Helper: verify session exists
+CREATE OR REPLACE FUNCTION verify_session(
+  p_user_id TEXT,
+  p_role TEXT,
+  p_device_id TEXT
+)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM ezz_sessions
+    WHERE user_id = p_user_id
+      AND role = upper(p_role)
+      AND device_id = p_device_id
+  );
+$$;
+
+-- Save trip to history (single entry point for writes)
+CREATE OR REPLACE FUNCTION save_trip_to_history(
+  p_user_id TEXT,
+  p_role TEXT,
+  p_device_id TEXT,
+  p_trip JSONB
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_rider_id TEXT := (p_trip->>'rider_id')::TEXT;
+  v_driver_id TEXT := (p_trip->>'driver_id')::TEXT;
+BEGIN
+  IF NOT verify_session(p_user_id, p_role, p_device_id) THEN
+    RAISE EXCEPTION 'Unauthorized: invalid session';
+  END IF;
+
+  IF upper(p_role) != 'ADMIN' AND p_user_id != v_rider_id AND p_user_id != COALESCE(v_driver_id, '') THEN
+    RAISE EXCEPTION 'Unauthorized: you can only modify your own trips';
+  END IF;
+
+  INSERT INTO ezz_trips_history (id, rider_id, rider_name, rider_phone, driver_id, driver_name, pickup, dropoff, pickup_landmark, status, fare, commission, distance, eta_minutes, requested_vehicle_type, created_at, completed_at, chat_messages, rider_rating_to_driver, rider_feedback_tags, rider_feedback_comment, driver_rating_to_rider, driver_feedback_tags, driver_feedback_comment, route_geometry, offered_driver_ids, current_offered_driver_id, dispatch_timer, dispatch_timer_max, applied_promo_code, applied_promo_discount)
+  VALUES (
+    (p_trip->>'id')::TEXT,
+    v_rider_id,
+    (p_trip->>'rider_name')::TEXT,
+    (p_trip->>'rider_phone')::TEXT,
+    v_driver_id,
+    (p_trip->>'driver_name')::TEXT,
+    (p_trip->'pickup')::JSONB,
+    (p_trip->'dropoff')::JSONB,
+    (p_trip->>'pickup_landmark')::TEXT,
+    (p_trip->>'status')::TEXT,
+    (p_trip->>'fare')::DOUBLE PRECISION,
+    (p_trip->>'commission')::DOUBLE PRECISION,
+    (p_trip->>'distance')::DOUBLE PRECISION,
+    (p_trip->>'eta_minutes')::INTEGER,
+    (p_trip->>'requested_vehicle_type')::TEXT,
+    (p_trip->>'created_at')::TEXT,
+    (p_trip->>'completed_at')::TEXT,
+    (p_trip->'chat_messages')::JSONB,
+    (p_trip->>'rider_rating_to_driver')::DOUBLE PRECISION,
+    (p_trip->>'rider_feedback_tags')::JSONB,
+    (p_trip->>'rider_feedback_comment')::TEXT,
+    (p_trip->>'driver_rating_to_rider')::DOUBLE PRECISION,
+    (p_trip->>'driver_feedback_tags')::JSONB,
+    (p_trip->>'driver_feedback_comment')::TEXT,
+    (p_trip->>'route_geometry')::JSONB,
+    (p_trip->>'offered_driver_ids')::JSONB,
+    (p_trip->>'current_offered_driver_id')::TEXT,
+    (p_trip->>'dispatch_timer')::INTEGER,
+    (p_trip->>'dispatch_timer_max')::INTEGER,
+    (p_trip->>'applied_promo_code')::TEXT,
+    (p_trip->>'applied_promo_discount')::DOUBLE PRECISION
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    status = EXCLUDED.status,
+    driver_id = EXCLUDED.driver_id,
+    driver_name = EXCLUDED.driver_name,
+    completed_at = EXCLUDED.completed_at,
+    fare = EXCLUDED.fare,
+    commission = EXCLUDED.commission,
+    distance = EXCLUDED.distance,
+    chat_messages = EXCLUDED.chat_messages,
+    rider_rating_to_driver = EXCLUDED.rider_rating_to_driver,
+    rider_feedback_tags = EXCLUDED.rider_feedback_tags,
+    rider_feedback_comment = EXCLUDED.rider_feedback_comment,
+    driver_rating_to_rider = EXCLUDED.driver_rating_to_rider,
+    driver_feedback_tags = EXCLUDED.driver_feedback_tags,
+    driver_feedback_comment = EXCLUDED.driver_feedback_comment,
+    route_geometry = EXCLUDED.route_geometry,
+    offered_driver_ids = EXCLUDED.offered_driver_ids,
+    current_offered_driver_id = EXCLUDED.current_offered_driver_id,
+    dispatch_timer = EXCLUDED.dispatch_timer,
+    dispatch_timer_max = EXCLUDED.dispatch_timer_max,
+    applied_promo_code = EXCLUDED.applied_promo_code,
+    applied_promo_discount = EXCLUDED.applied_promo_discount;
+
+  RETURN TRUE;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION verify_session(TEXT, TEXT, TEXT) TO anon;
+GRANT EXECUTE ON FUNCTION verify_session(TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION verify_session(TEXT, TEXT, TEXT) TO service_role;
+
+GRANT EXECUTE ON FUNCTION save_trip_to_history(TEXT, TEXT, TEXT, JSONB) TO anon;
+GRANT EXECUTE ON FUNCTION save_trip_to_history(TEXT, TEXT, TEXT, JSONB) TO authenticated;
+GRANT EXECUTE ON FUNCTION save_trip_to_history(TEXT, TEXT, TEXT, JSONB) TO service_role;
 
 -- Stats: القراءة للجميع، التعديل للإدمن فقط
 DROP POLICY IF EXISTS "Allow public read stats" ON ezz_stats;
@@ -887,8 +1119,10 @@ $$;
 -- ============================================================
 -- SECURITY DEFINER functions for driver admin operations
 -- (bypasses RLS to avoid connection pooling issues)
--- ============================================================
+-- SECURITY: requires valid admin session via verify_session
 CREATE OR REPLACE FUNCTION admin_update_driver(
+  p_admin_user_id TEXT DEFAULT NULL,
+  p_device_id TEXT DEFAULT NULL,
   p_driver_id TEXT,
   p_data JSONB
 )
@@ -898,6 +1132,10 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+  IF NOT verify_session(p_admin_user_id, 'ADMIN', p_device_id) THEN
+    RAISE EXCEPTION 'Unauthorized: admin access required';
+  END IF;
+
   UPDATE ezz_drivers
   SET
     approval_status = COALESCE(p_data->>'approval_status', approval_status),
@@ -909,6 +1147,8 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION admin_set_driver_approval(
+  p_admin_user_id TEXT DEFAULT NULL,
+  p_device_id TEXT DEFAULT NULL,
   p_driver_id TEXT,
   p_approval_status TEXT
 )
@@ -918,6 +1158,10 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+  IF NOT verify_session(p_admin_user_id, 'ADMIN', p_device_id) THEN
+    RAISE EXCEPTION 'Unauthorized: admin access required';
+  END IF;
+
   UPDATE ezz_drivers
   SET approval_status = p_approval_status
   WHERE id = p_driver_id;
@@ -926,12 +1170,12 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, JSONB) TO anon;
-GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT) TO anon;
-GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, JSONB) TO authenticated;
-GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, JSONB) TO service_role;
-GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, TEXT, TEXT, JSONB) TO anon;
+GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT, TEXT, TEXT) TO anon;
+GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, TEXT, TEXT, JSONB) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, TEXT, TEXT, JSONB) TO service_role;
+GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT, TEXT, TEXT) TO service_role;
 
 -- ============================================================
 -- Storage bucket setup:
@@ -959,7 +1203,7 @@ export const mapDriverFromDB = (row: any): Driver => ({
   password: row.password,
   carModel: row.car_model || '',
   carPlate: row.car_plate || '',
-  vehicleType: row.vehicle_type || 'CAR',
+  vehicleType: (row.vehicle_type || 'CAR').toUpperCase(),
   vehicleName: row.vehicle_name || '',
   nationalId: row.national_id || '',
   driverLicense: row.driver_license || '',
@@ -1111,8 +1355,8 @@ export const mapTripFromDB = (row: any): Trip => ({
   riderPhone: row.rider_phone || '',
   driverId: row.driver_id || undefined,
   driverName: row.driver_name || undefined,
-  pickup: row.pickup,
-  dropoff: row.dropoff,
+  pickup: row.pickup || { lat: 0, lng: 0, nameAr: '', nameEn: '' },
+  dropoff: row.dropoff || { lat: 0, lng: 0, nameAr: '', nameEn: '' },
   pickupLandmark: row.pickup_landmark || undefined,
   status: row.status || 'IDLE',
   fare: row.fare || 0,
@@ -1178,13 +1422,29 @@ export const mapTripToDB = (trip: Trip) => ({
 
 // --- API METHODS ---
 
-// Fetch Drivers (lightweight for polling — excludes heavy image columns)
+// Ultra-lightweight polling: only essential fields for map/display
+export const fetchDriversPolling = async (): Promise<Driver[] | null> => {
+  try {
+    const result = await withRetry<Driver[]>(() =>
+      supabase
+        .from('ezz_drivers')
+        .select('id,name,status,is_online,approval_status,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen,service_areas')
+    );
+    if (result.error) throw result.error;
+    return (result.data || []).map(mapDriverFromDB);
+  } catch (err: any) {
+    console.warn('Could not fetch drivers (polling) from Supabase:', err.message);
+    return null;
+  }
+};
+
+// Lightweight driver fetch for dispatch (excludes heavy image columns)
 export const fetchDriversBasic = async (): Promise<Driver[] | null> => {
   try {
     const result = await withRetry<Driver[]>(() =>
       supabase
         .from('ezz_drivers')
-        .select('id,name,phone,car_model,car_plate,vehicle_type,vehicle_name,national_id,driver_license,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,agreed_to_terms,service_areas,last_seen,auto_accept,auto_show_map,fcm_token')
+        .select('id,name,status,is_online,approval_status,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen,service_areas')
     );
     if (result.error) throw result.error;
     return (result.data || []).map(mapDriverFromDB);
@@ -1194,7 +1454,7 @@ export const fetchDriversBasic = async (): Promise<Driver[] | null> => {
   }
 };
 
-// Fetch Drivers
+// Fetch Drivers (full data - for admin/profile screens only)
 export const fetchDrivers = async (): Promise<Driver[] | null> => {
   try {
     const result = await withRetry<Driver[]>(() =>
@@ -1221,30 +1481,21 @@ export const saveDriver = async (driver: Driver): Promise<boolean> => {
     }
     console.log('[saveDriver] 1. Starting save process for:', driverData.id, 'approval:', driverData.approval_status, 'commission:', driverData.total_commission_paid);
 
-    // Set app role before write to satisfy RLS
-    console.log('[saveDriver] 2. Calling set_app_role...');
-    try {
-      const { error: roleErr } = await supabase.rpc('set_app_role', { role: 'ADMIN' });
-      if (roleErr) {
-        console.warn('[saveDriver] Warning: set_app_role failed or not found:', roleErr);
-      } else {
-        console.log('[saveDriver] 3. set_app_role executed successfully.');
-      }
-    } catch (roleErr) {
-      console.warn('[saveDriver] Warning: set_app_role threw exception:', roleErr);
+    const attemptSave = async (): Promise<{ data: any; error: any }> => {
+      return await supabase
+        .from('ezz_drivers')
+        .upsert(driverData, { onConflict: 'id' })
+        .select();
+    };
+
+    let { data, error } = await attemptSave();
+
+    if (error) {
+      console.warn('[saveDriver] First attempt failed, retrying once...');
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      ({ data, error } = await attemptSave());
     }
 
-    console.log('[saveDriver] 4. Executing upsert request...');
-    const upsertPromise = supabase
-      .from('ezz_drivers')
-      .upsert(driverData, { onConflict: 'id' })
-      .select();
-
-    const timeoutPromise = new Promise<{ data: null; error: any }>((_, reject) =>
-      setTimeout(() => reject(new Error('Network request timed out after 5 seconds')), 5000)
-    );
-
-    const { data, error } = await Promise.race([upsertPromise, timeoutPromise]);
     const responseData = data as any[] | null;
     console.log('[saveDriver] 5. Upsert response:', { count: Array.isArray(responseData) ? responseData.length : 0, error: error?.message || null });
 
@@ -1321,20 +1572,16 @@ export const deleteRiderInDB = async (riderId: string): Promise<boolean> => {
 };
 
 // Fetch Active Trip
-export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'driver' | 'admin'): Promise<Trip | null | 'NO_TABLE'> => {
+export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'driver' | 'admin'): Promise<Trip | null> => {
   try {
     let query = supabase.from('ezz_active_trip').select('*').order('created_at', { ascending: false });
 
     if (userId && userRole === 'rider') {
       query = query.eq('rider_id', userId).in('status', ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED']);
     } else if (userId && userRole === 'driver') {
-      // Fetch trips where this driver is assigned, current offered, OR in the offered list.
-      // PostgREST .or() can't check JSONB containment, so we fetch by driver_id/current_offered
-      // and also fetch recent SEARCHING trips to check offeredDriverIds client-side.
-      query = query.or(`driver_id.eq.${userId},current_offered_driver_id.eq.${userId},status.eq.SEARCHING`);
+      query = query.or(`driver_id.eq.${userId},current_offered_driver_id.eq.${userId}`);
       query = query.in('status', ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED']);
     }
-    // admin gets all
 
     const isDriverQuery = userId && userRole === 'driver';
     const result = await withRetry<any[]>(() => query.limit(isDriverQuery ? 5 : 1));
@@ -1351,8 +1598,6 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
       return null;
     }
 
-    // For drivers, filter SEARCHING trips to only those where this driver is in offeredDriverIds.
-    // The .or() query fetches all SEARCHING trips, so we narrow down client-side.
     if (userId && userRole === 'driver') {
       const relevant = data.find((row: any) => {
         const trip = mapTripFromDB(row);
@@ -1373,7 +1618,7 @@ export const fetchActiveTrip = async (userId?: string, userRole?: 'rider' | 'dri
     return mapTripFromDB(data[0]);
   } catch (err: any) {
     console.warn('Could not fetch active trip from Supabase:', err.message);
-    return 'NO_TABLE';
+    return null;
   }
 };
 
@@ -1441,9 +1686,13 @@ export const saveActiveTrip = async (trip: Trip | null, clearTripId?: string): P
     }
 
     // ── All statuses (including ACCEPTED) use upsert ────
+    const tripData = mapTripToDB(trip) as any;
+    if (!trip.chatMessages || trip.chatMessages.length === 0) {
+      delete tripData.chat_messages;
+    }
     const { error: insertError } = await supabase
       .from('ezz_active_trip')
-      .upsert(mapTripToDB(trip), { onConflict: 'id' });
+      .upsert(tripData, { onConflict: 'id' });
     if (insertError) throw insertError;
     console.log('[saveActiveTrip] Trip saved successfully, chatMessages count after merge:', trip.chatMessages?.length || 0);
 
@@ -1503,6 +1752,7 @@ export const fetchTripsHistory = async ({ userId, role, deviceId }: { userId?: s
     const { data, error } = await supabase.rpc('get_my_trips', {
       p_user_id: userId,
       p_role: role,
+      p_device_id: deviceId || null,
       p_page: 0,
       p_limit: 50,
       p_date_from: null,
@@ -1526,17 +1776,55 @@ export const saveTripToHistory = async (
   deviceId?: string
 ): Promise<boolean> => {
   try {
-    const { error } = await supabase.rpc('save_trip_to_history', {
+    const payload = {
       p_user_id: userId || '',
       p_role: role || 'rider',
       p_device_id: deviceId || '',
       p_trip: mapTripToDB(trip),
-    });
-    if (error) throw error;
+    };
+    console.log('[saveTripToHistory] Attempting to save trip:', trip.id, 'role:', role, 'userId:', userId, 'deviceId:', deviceId);
+    const { error } = await supabase.rpc('save_trip_to_history', payload);
+    if (error) {
+      console.error('[saveTripToHistory] RPC error:', error);
+      throw error;
+    }
+    console.log('[saveTripToHistory] Trip saved successfully:', trip.id);
     return true;
   } catch (err: any) {
-    console.warn('Could not save trip to history in Supabase:', err.message);
+    console.error('[saveTripToHistory] Failed to save trip:', err.message);
     return false;
+  }
+};
+
+export const debugTripsHistory = async (): Promise<{
+  rpcExists: boolean;
+  sessionCount: number;
+  tripsCount: number;
+  sampleSession: any;
+  error?: string;
+}> => {
+  try {
+    const [rpcCheck, sessionCheck, tripsCheck] = await Promise.all([
+      supabase.from('pg_proc').select('proname').eq('proname', 'save_trip_to_history').maybeSingle(),
+      supabase.from('ezz_sessions').select('*').limit(1).maybeSingle(),
+      supabase.from('ezz_trips_history').select('*', { count: 'exact', head: true }),
+    ]);
+
+    return {
+      rpcExists: !!rpcCheck.data,
+      sessionCount: sessionCheck.data ? 1 : 0,
+      tripsCount: tripsCheck.count || 0,
+      sampleSession: sessionCheck.data || null,
+      error: rpcCheck.error?.message || sessionCheck.error?.message || tripsCheck.error?.message,
+    };
+  } catch (err: any) {
+    return {
+      rpcExists: false,
+      sessionCount: 0,
+      tripsCount: 0,
+      sampleSession: null,
+      error: err.message,
+    };
   }
 };
 
@@ -1558,6 +1846,7 @@ export const fetchTripsHistoryCount = async ({
     const { data, error } = await supabase.rpc('count_my_trips', {
       p_user_id: userId,
       p_role: role,
+      p_device_id: deviceId || null,
       p_date_from: dateFrom || null,
       p_date_to: dateTo || null,
       p_status_filter: 'all',
@@ -1567,6 +1856,24 @@ export const fetchTripsHistoryCount = async ({
     return Number(data) || 0;
   } catch (err: any) {
     console.warn('Could not count trips history from Supabase:', err.message);
+    return 0;
+  }
+};
+
+export const fetchAdminTripsCount = async (adminUserId?: string, deviceId?: string): Promise<number> => {
+  try {
+    const { data, error } = await supabase.rpc('count_admin_trips', {
+      p_admin_user_id: adminUserId || '',
+      p_device_id: deviceId || '',
+      p_date_from: null,
+      p_date_to: null,
+      p_status_filter: 'all',
+      p_search: null,
+    });
+    if (error) throw error;
+    return Number(data) || 0;
+  } catch (err: any) {
+    console.warn('Could not count admin trips from Supabase:', err.message);
     return 0;
   }
 };
@@ -1599,6 +1906,7 @@ export const fetchTripsHistoryPaginated = async ({
     const { data, error } = await supabase.rpc('get_my_trips', {
       p_user_id: userId,
       p_role: role,
+      p_device_id: deviceId || null,
       p_page: page,
       p_limit: limit,
       p_date_from: dateFrom || null,
@@ -1640,6 +1948,8 @@ export const fetchTripsHistoryFilteredPaginated = async ({
   try {
     const adminId = role === 'admin' ? userId : undefined;
     const { data, error } = await supabase.rpc('get_admin_trips', {
+      p_admin_user_id: adminId || userId,
+      p_device_id: deviceId || null,
       p_page: page,
       p_limit: limit,
       p_date_from: dateFrom || null,
@@ -1661,6 +1971,8 @@ export const fetchTripsHistoryFilteredPaginated = async ({
 export const fetchAllTrips = async (limit: number = 1000, adminUserId?: string, deviceId?: string): Promise<Trip[]> => {
   try {
     const { data, error } = await supabase.rpc('get_admin_trips', {
+      p_admin_user_id: adminUserId || '',
+      p_device_id: deviceId || null,
       p_page: 0,
       p_limit: limit,
       p_date_from: null,
@@ -1679,7 +1991,10 @@ export const fetchAllTrips = async (limit: number = 1000, adminUserId?: string, 
 // Clear Trips History (admin only - uses secure RPC)
 export const clearTripsHistoryInDB = async (adminUserId?: string, deviceId?: string): Promise<boolean> => {
   try {
-    const { error } = await supabase.rpc('admin_clear_all_trips', {});
+    const { error } = await supabase.rpc('admin_clear_all_trips', {
+      p_admin_user_id: adminUserId || '',
+      p_device_id: deviceId || '',
+    });
     if (error) throw error;
     return true;
   } catch (err: any) {
@@ -2147,6 +2462,18 @@ export const clearSession = async (role: 'RIDER' | 'DRIVER' | 'ADMIN'): Promise<
     const deviceId = getDeviceId();
     try {
       sessionStorage.removeItem('ezz_tab_device_id');
+    } catch {}
+    try {
+      localStorage.removeItem('ezz_device_id');
+      localStorage.removeItem('ezz_current_screen');
+      localStorage.removeItem('ezz_rider_session');
+      localStorage.removeItem('ezz_selected_driver_id');
+      localStorage.removeItem('ezz_active_trip_cache');
+      localStorage.removeItem('ezz_driver_logged_in');
+      localStorage.removeItem(`ezz_session_${role.toLowerCase()}`);
+      localStorage.removeItem('ezz_session_rider');
+      localStorage.removeItem('ezz_session_driver');
+      localStorage.removeItem('ezz_session_admin');
     } catch {}
     const { error } = await supabase.from('ezz_sessions').delete().eq('role', role).eq('device_id', deviceId);
     if (error) throw error;

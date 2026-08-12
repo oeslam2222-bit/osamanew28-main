@@ -2,7 +2,7 @@ import React, { useState, useEffect, lazy, Suspense, Dispatch, SetStateAction } 
 import { Location, Driver, Trip, Rider, Region, Ad } from '../types';
 import { MapPin, ArrowRightLeft, Navigation, Phone, Star, DollarSign, Loader2, Sparkles, AlertCircle, Car, HelpCircle, MessageSquare, Search, Check, X, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { calculateHaversineDistance, estimateDrivingDistance, calculateDynamicFare, getVehiclePricing, calculateVehicleFare, calculateFullTripFare } from '../utils/haversine';
-import { fetchTripsHistoryPaginated, saveRiderPreferences, validatePromoCode, getDeviceId } from '../supabaseService';
+import { saveRiderPreferences, validatePromoCode } from '../supabaseService';
 import { RiderPreferences } from '../types';
 import { AdBanner } from './AdBanner';
 
@@ -17,7 +17,6 @@ interface RiderViewProps {
   locations: Location[];
   regions: Region[];
   drivers: Driver[];
-  tripsHistory: Trip[];
   activeTrip: Trip | null;
   ads?: Ad[];
   selectedPickup: string;
@@ -48,7 +47,6 @@ export const RiderView: React.FC<RiderViewProps> = ({
   locations,
   regions,
   drivers,
-  tripsHistory = [],
   activeTrip,
   ads,
   selectedPickup,
@@ -82,15 +80,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
     if (!selectedPickupRegion) return ads;
     return ads.filter(ad => !ad.regionId || ad.regionId === selectedPickupRegion);
   };
-  
-  // Rider Trip History (paginated + filtered)
-  const [myTrips, setMyTrips] = useState<Trip[]>([]);
-  const [myTripsPage, setMyTripsPage] = useState(0);
-  const [myTripsHasMore, setMyTripsHasMore] = useState(false);
-  const [myTripDateFrom, setMyTripDateFrom] = useState('');
-  const [myTripDateTo, setMyTripDateTo] = useState('');
-  const [isLoadingMyTrips, setIsLoadingMyTrips] = useState(false);
-  
+   
   // Promo code states
   const [promoInput, setPromoInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discount: number; promoCodeId?: string } | null>(null);
@@ -437,75 +427,6 @@ export const RiderView: React.FC<RiderViewProps> = ({
     });
   }, [pickupLoc?.id, dropoffLoc?.id, onCalculateRoute, lowDataMode]);
 
-  const safeTripsHistory = Array.isArray(tripsHistory) ? tripsHistory : [];
-
-  const recentDropoffs = safeTripsHistory
-    .filter(t => t.riderId === rider.id && t.status === 'COMPLETED')
-    .slice(0, 3)
-    .map(t => ({
-      id: t.id,
-      name: t.dropoff?.nameAr || t.dropoff?.nameEn || '',
-      lat: t.dropoff?.lat || 0,
-      lng: t.dropoff?.lng || 0,
-    }));
-
-  const loadMyTrips = async (reset = false) => {
-    const page = reset ? 0 : myTripsPage;
-    setIsLoadingMyTrips(true);
-    try {
-      const result = await fetchTripsHistoryPaginated({
-        userId: rider.id,
-        role: 'rider',
-        deviceId: getDeviceId(),
-        dateFrom: myTripDateFrom || undefined,
-        dateTo: myTripDateTo || undefined,
-        page,
-        limit: 10,
-      });
-      if (result && result.trips.length > 0) {
-        if (reset) {
-          setMyTrips(result.trips);
-          setMyTripsPage(1);
-        } else {
-          setMyTrips((prev) => [...prev, ...result.trips]);
-          setMyTripsPage((prev) => prev + 1);
-        }
-        setMyTripsHasMore(result.hasMore);
-        return;
-      }
-
-      // Local fallback filtering of tripsHistory prop
-      let allTrips = safeTripsHistory.filter(t => t.riderId === rider.id);
-      if (myTripDateFrom) {
-        const fromTime = new Date(`${myTripDateFrom}T00:00:00`).getTime();
-        allTrips = allTrips.filter(t => new Date(t.createdAt).getTime() >= fromTime);
-      }
-      if (myTripDateTo) {
-        const toTime = new Date(`${myTripDateTo}T23:59:59.999`).getTime();
-        allTrips = allTrips.filter(t => new Date(t.createdAt).getTime() <= toTime);
-      }
-
-      const start = reset ? 0 : page * 10;
-      const pageTrips = allTrips.slice(start, start + 10);
-      if (reset) {
-        setMyTrips(pageTrips);
-        setMyTripsPage(1);
-      } else {
-        setMyTrips((prev) => [...prev, ...pageTrips]);
-        setMyTripsPage((prev) => prev + 1);
-      }
-      setMyTripsHasMore(start + 10 < allTrips.length);
-    } catch {
-      // silently fail
-    } finally {
-      setIsLoadingMyTrips(false);
-    }
-  };
-
-  useEffect(() => {
-    loadMyTrips(true);
-  }, [rider.id, myTripDateFrom, myTripDateTo, tripsHistory]);
-
   // Cleanup debounce timer on unmount
   useEffect(() => {
     return () => {
@@ -562,7 +483,17 @@ export const RiderView: React.FC<RiderViewProps> = ({
   const onlineDrivers = drivers.filter((d) => {
     if (!d.isOnline || d.approvalStatus !== 'APPROVED') return false;
     if (selectedRegionName && (d.serviceAreas || []).length > 0) {
-      return (d.serviceAreas || []).some(sa => sa === selectedRegionName || sa === selectedRegion?.nameEn);
+      const regionNameLower = String(selectedRegionName || '').toLowerCase();
+      const regionIdLower = String(selectedRegion?.id || '').toLowerCase();
+      return (d.serviceAreas || []).some((sa) => {
+        const areaLower = String(sa || '').toLowerCase();
+        return (
+          areaLower.includes(regionNameLower) ||
+          areaLower.includes(regionIdLower) ||
+          areaLower === 'all regions' ||
+          areaLower === 'جميع المناطق'
+        );
+      });
     }
     return true;
   });
@@ -948,16 +879,14 @@ export const RiderView: React.FC<RiderViewProps> = ({
             {/* Driver Details if Assigned */}
             {activeTrip.driverId && (
               <div className="bg-white border border-slate-100 p-3 rounded-xl flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-100 shrink-0">
+                <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-100 shrink-0 flex items-center justify-center text-2xl">
                   {(() => {
                     const drv = drivers.find(d => d.id === activeTrip.driverId);
-                    return drv?.personalPhoto ? (
-                      <img src={drv.personalPhoto} alt={drv.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-base font-black text-slate-500">
-                        {(drv?.name && drv.name.charAt(0)) || 'س'}
-                      </div>
-                    );
+                    if (drv?.vehicleType === 'CAR') return '🚖';
+                    if (drv?.vehicleType === 'MOTORCYCLE') return '🏍️';
+                    if (drv?.vehicleType === 'TOKTOK') return '🛺';
+                    if (drv?.vehicleType === 'TRICYCLE') return '🚲';
+                    return '🚗';
                   })()}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -1492,7 +1421,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
                   ].map((v) => {
                     const vFare = computeTripFare(distance, v.id, discountAmount);
                     const isSelected = requestedVehicleType === v.id;
-                    const countAvailable = onlineDrivers.filter((d) => d.status === 'AVAILABLE' && d.vehicleType === v.id).length;
+                    const countAvailable = onlineDrivers.filter((d) => d.status === 'AVAILABLE' && String(d.vehicleType).toUpperCase() === v.id).length;
 
                     return (
                       <button
@@ -1827,76 +1756,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
               </div>
             )}
 
-            {/* Rider Recent Trips (Paginated + Date Filtered) */}
-            <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3.5 space-y-2.5 text-right">
-              <h3 className="text-[11px] font-black text-slate-800 flex items-center gap-1 justify-end">
-                <span>🕒 {lang === 'ar' ? 'سجل رحلاتي' : 'My Trip History'}</span>
-              </h3>
-              
-              {/* Date Filter */}
-              <div className="flex items-center gap-2 text-right">
-                <input
-                  type="date"
-                  value={myTripDateFrom}
-                  onChange={(e) => setMyTripDateFrom(e.target.value)}
-                  className="flex-1 text-[9px] bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:outline-none focus:border-blue-500 pointer-events-auto"
-                />
-                <span className="text-[9px] text-slate-400">{lang === 'ar' ? 'إلى' : 'to'}</span>
-                <input
-                  type="date"
-                  value={myTripDateTo}
-                  onChange={(e) => setMyTripDateTo(e.target.value)}
-                  className="flex-1 text-[9px] bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:outline-none focus:border-blue-500 pointer-events-auto"
-                />
-              </div>
-
-              {myTrips.length > 0 ? (
-                <>
-                  <div className="space-y-2 divide-y divide-slate-100/60 pr-1 max-h-[220px] overflow-y-auto">
-                    {myTrips.map((trip) => {
-                      const formattedDate = trip.createdAt ? new Date(trip.createdAt).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: 'numeric',
-                        minute: '2-digit'
-                      }) : '';
-                      return (
-                        <div key={trip.id} className="pt-2 flex justify-between items-center text-[10px] text-slate-600 gap-2">
-                      <div className="text-left font-mono shrink-0">
-                        <p className="font-bold text-slate-950">{trip.fare} {lang === 'ar' ? 'ج.م' : 'EGP'}</p>
-                        <p className="text-[7.5px] text-slate-400 font-sans">{formattedDate}</p>
-                      </div>
-                          <div className="text-right flex-1 min-w-0">
-                            <p className="font-bold text-slate-800 truncate" dir="rtl">
-                              🏁 {lang === 'ar' ? trip.dropoff?.nameAr || trip.dropoff?.nameEn || '' : trip.dropoff?.nameEn || trip.dropoff?.nameAr || ''}
-                            </p>
-                            <p className="text-[9px] text-slate-400 truncate mt-0.5" dir="rtl">
-                              📍 {lang === 'ar' ? trip.pickup?.nameAr || trip.pickup?.nameEn || '' : trip.pickup?.nameEn || trip.pickup?.nameAr || ''}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {myTripsHasMore && (
-                    <button
-                      type="button"
-                      onClick={() => loadMyTrips(false)}
-                      disabled={isLoadingMyTrips}
-                      className="w-full py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[9px] font-bold rounded-xl transition-colors cursor-pointer pointer-events-auto disabled:opacity-50"
-                    >
-                      {isLoadingMyTrips ? (lang === 'ar' ? 'جاري التحميل...' : 'Loading...') : (lang === 'ar' ? 'عرض المزيد' : 'Load More')}
-                    </button>
-                  )}
-                </>
-              ) : (
-                <p className="text-[10px] text-slate-400 text-center py-2">
-                  {isLoadingMyTrips ? (lang === 'ar' ? 'جاري التحميل...' : 'Loading...') : (lang === 'ar' ? 'لم تقم بأي رحلات بعد.' : 'No trips taken yet.')}
-                </p>
-              )}
-            </div>
-
-{/* Trip Completed — Return Home */}
+            {/* Trip Completed — Return Home */}
              {activeTrip && activeTrip.status === 'COMPLETED' && activeTrip.driverId && (
                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-3 mt-3 text-center">
                  <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-lg font-black">

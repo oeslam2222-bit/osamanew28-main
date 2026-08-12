@@ -84,14 +84,17 @@ export interface Driver {
   carPlate: string;
   vehicleType: 'CAR' | 'MOTORCYCLE' | 'TOKTOK' | 'TRICYCLE';
   vehicleName: string;
+  vehicleBrand?: string;
+  vehicleLicense?: string;
   nationalId: string;
+  secondaryPhone?: string;
   driverLicense: string;
   personalPhoto?: string;
   nationalIdImage?: string;
   driverLicenseImage?: string;
   vehicleLicenseImage?: string;
   isOnline: boolean;
-  status: 'AVAILABLE' | 'BUSY' | 'OFFLINE';
+  status: 'AVAILABLE' | 'BUSY' | 'OFFLINE' | 'UNAVAILABLE';
   approvalStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'FROZEN';
   rating: number;
   totalTrips: number;

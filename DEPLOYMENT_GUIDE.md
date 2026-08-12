@@ -50,8 +50,8 @@ This will:
 
 In your `.env` file, ensure you have:
 ```
-VITE_SUPABASE_URL=https://siqsougaberroesupskl.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNpcXNvdWdhYmVycm9lc3Vwc2tsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNDI3NTcsImV4cCI6MjEwMTkxODc1N30.QRhYApZAfpR4BghjiR8RaK8KS28pgpz6WANuSjid8bY
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key_here
 ```
 
 ### Step 3: Test the Application

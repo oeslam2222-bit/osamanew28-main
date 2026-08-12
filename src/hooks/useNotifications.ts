@@ -52,6 +52,11 @@ export const useNotifications = (
         lastTripStatusBeforeNullRef.current = null;
         return;
       }
+      if (prevStatus === 'ACCEPTED' || prevStatus === 'ARRIVED' || prevStatus === 'STARTED') {
+        notifiedEventsRef.current.add('cancelled_notified');
+        lastTripStatusBeforeNullRef.current = null;
+        return;
+      }
       if (notifiedEventsRef.current.has('had_trip') && !notifiedEventsRef.current.has('cancelled_notified')) {
         notifiedEventsRef.current.add('cancelled_notified');
         if (lastTripCompletedRef.current) {
@@ -62,7 +67,7 @@ export const useNotifications = (
           lastTripCancelledRef.current = false;
           return;
         }
-        if (!['COMPLETED', 'SEARCHING'].includes(prevStatus || '')) {
+        if (!['COMPLETED', 'SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'].includes(prevStatus || '')) {
           playNotificationSound('alert');
           sendNativeNotification('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', '❌');
           triggerToast('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', 'warning');
@@ -242,12 +247,12 @@ export const useNotifications = (
   useEffect(() => {
     if (!driverIsLoggedIn || !selectedDriverId || !supabaseConnected) return;
 
-    const pollInterval = dataSaverMode ? 30000 : 10000;
+    const pollInterval = dataSaverMode ? 300000 : 60000;
     const interval = setInterval(async () => {
       if (document.hidden) return;
       try {
         const remoteActiveTrip = await fetchActiveTrip(selectedDriverId, 'driver');
-        if (!remoteActiveTrip || remoteActiveTrip === 'NO_TABLE') return;
+        if (!remoteActiveTrip) return;
 
         if (remoteActiveTrip.status !== 'SEARCHING') {
           if (lastNotifiedTripIdRef.current !== null) {

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Driver, Trip, SystemStats, Location, Rider, PromoCode, Region, Ad } from '../types';
-import { DollarSign, ShieldAlert, Award, TrendingUp, Settings, Percent, CheckCircle, Star, Users, MapPin, Database, Sparkles, Search, Upload, AlertCircle, HelpCircle, Globe, Loader2, Calendar, Clock, BarChart2, Car, Map, Trash2, Plus, Megaphone, Phone, Eye, EyeOff } from 'lucide-react';
+import { DollarSign, ShieldAlert, Award, TrendingUp, Settings, Percent, CheckCircle, Star, Users, MapPin, Database, Sparkles, Search, AlertCircle, HelpCircle, Globe, Loader2, Calendar, Clock, BarChart2, Car, Map, Trash2, Plus, Megaphone, Phone, Eye, EyeOff } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, AreaChart, Area, PieChart, Pie, Cell } from 'recharts';
-import { fetchTripsHistoryFilteredPaginated, fetchTripsHistoryCount, generatePromoCode, fetchPromoCodes, deletePromoCode, fetchRegions, saveRegion, deleteRegionInDB, fetchAds, saveAd, deleteAd, loadSession, getDeviceId } from '../supabaseService';
+import { fetchTripsHistoryFilteredPaginated, fetchTripsHistoryCount, fetchAllTrips, generatePromoCode, fetchPromoCodes, deletePromoCode, fetchRegions, saveRegion, deleteRegionInDB, fetchAds, saveAd, deleteAd, loadSession, getDeviceId } from '../supabaseService';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE, DATA_RETENTION_POLICY } from '../utils/legal';
 import { exportBackup, importBackup } from '../utils/backup';
 import { AVAILABLE_CITIES } from '../constants';
@@ -34,6 +34,8 @@ interface AdminViewProps {
   onUnblockRider: (riderId: string) => void;
   onDeleteRider: (riderId: string) => void;
   onClearAllFakeData: () => void;
+  onAdminForceCancelTrip?: (tripId: string) => void;
+  onAdminForceEndTrip?: (tripId: string) => void;
   lang: 'ar' | 'en';
   onLogout: () => void;
   onTriggerToast?: (title: string, message: string, type?: 'info' | 'success' | 'warning' | 'new_trip') => void;
@@ -65,6 +67,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
   onUnblockRider,
   onDeleteRider,
   onClearAllFakeData,
+  onAdminForceCancelTrip,
+  onAdminForceEndTrip,
   lang,
   onLogout,
   onTriggerToast,
@@ -252,10 +256,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [adminTripsHasMore, setAdminTripsHasMore] = useState(false);
   const [isLoadingTrips, setIsLoadingTrips] = useState(false);
   const [adminTrips, setAdminTrips] = useState<Trip[]>([]);
+  const [allTrips, setAllTrips] = useState<Trip[]>([]);
+  const [isLoadingAllTrips, setIsLoadingAllTrips] = useState(false);
 
-  const completedCount = adminTrips.filter(t => t.status === 'COMPLETED').length;
-  const cancelledCount = adminTrips.filter(t => t.status === 'CANCELLED').length;
-  const totalRides = adminTrips.length;
+  const completedCount = allTrips.filter(t => t.status === 'COMPLETED').length;
+  const cancelledCount = allTrips.filter(t => t.status === 'CANCELLED').length;
+  const totalRides = allTrips.length;
   const successRate = totalRides > 0 ? Math.round((completedCount / totalRides) * 100) : 0;
   const cancelRate = totalRides > 0 ? Math.round((cancelledCount / totalRides) * 100) : 0;
   const onlineDrivers = drivers.filter(d => d.isOnline).length;
@@ -382,12 +388,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const getActiveDriversData = () => {
     const statsObj: { [key: string]: { name: string; rides: number; revenue: number; commission: number } } = {};
     
-    // Pre-populate so standard drivers are represented
     drivers.forEach(d => {
       statsObj[d.name] = { name: d.name, rides: 0, revenue: 0, commission: 0 };
     });
 
-    adminTrips.filter(t => t.status === 'COMPLETED').forEach(t => {
+    allTrips.filter(t => t.status === 'COMPLETED').forEach(t => {
       const name = t.driverName || (lang === 'ar' ? 'كابتن مجهول' : 'Unknown Captain');
       if (!statsObj[name]) {
         statsObj[name] = { name, rides: 0, revenue: 0, commission: 0 };
@@ -423,7 +428,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       dayCounts[day] = 0;
     });
 
-    adminTrips.filter(t => t.status === 'COMPLETED').forEach(t => {
+    allTrips.filter(t => t.status === 'COMPLETED').forEach(t => {
       const dateStr = t.completedAt || t.createdAt;
       if (!dateStr) return;
       const date = new Date(dateStr);
@@ -454,7 +459,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       STARTED: 0,
     };
 
-    adminTrips.forEach(t => {
+    allTrips.forEach(t => {
       if (statusCounts[t.status] !== undefined) {
         statusCounts[t.status] += 1;
       }
@@ -502,7 +507,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   };
 
   const getFilteredTripsForPeriod = (period: 'all' | 'week' | 'month' | '30days') => {
-    if (period === 'all') return adminTrips;
+    if (period === 'all') return allTrips;
     const now = new Date();
     const from = new Date();
     if (period === 'week') {
@@ -512,7 +517,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
     } else if (period === '30days') {
       from.setDate(now.getDate() - 30);
     }
-    return adminTrips.filter(t => {
+    return allTrips.filter(t => {
       const dateStr = t.completedAt || t.createdAt;
       if (!dateStr) return false;
       const tripDate = new Date(dateStr);
@@ -584,6 +589,20 @@ export const AdminView: React.FC<AdminViewProps> = ({
   useEffect(() => {
     loadAdminTrips(true);
   }, [tripDateFrom, tripDateTo, tripHistoryStatusFilter, tripHistorySearchQuery, adminUserId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingAllTrips(true);
+    fetchAllTrips(1000, adminUserId || undefined, getDeviceId()).then((trips) => {
+      if (!cancelled) {
+        setAllTrips(trips);
+        setIsLoadingAllTrips(false);
+      }
+    }).catch(() => {
+      if (!cancelled) setIsLoadingAllTrips(false);
+    });
+    return () => { cancelled = true; };
+  }, [adminUserId]);
 
   // OpenStreetMap Nominatim Live Search State
   const [osmQuery, setOsmQuery] = useState('');
@@ -1499,70 +1518,22 @@ export const AdminView: React.FC<AdminViewProps> = ({
                               <p>✓ <strong>{lang === 'ar' ? 'موافق على الشروط:' : 'Terms agreed:'}</strong> {drv.agreedToTerms ? <span className="text-emerald-600 font-bold">✓ نعم</span> : <span className="text-rose-500 font-bold">✕ لا</span>}</p>
                             </div>
 
-                            {/* Verification Documents Gallery */}
-                            <div className="border-t border-slate-100 pt-2">
-                              <span className="text-[8px] font-black text-slate-500 block mb-1.5">{lang === 'ar' ? 'الأوراق والمستندات المرفقة (اضغط للتكبير):' : 'Attached Documents (click to expand):'}</span>
-                              <div className="grid grid-cols-4 gap-1.5" dir="rtl">
-                                {/* 1. Personal photo */}
-                                <div className="space-y-1 text-center">
-                                  <span className="text-[7px] font-bold text-slate-500 block truncate">{lang === 'ar' ? 'الشخصية' : 'Photo'}</span>
-                                  <div 
-                                    onClick={() => drv.personalPhoto && setSelectedPreviewPhoto({ src: drv.personalPhoto, title: lang === 'ar' ? 'الصورة الشخصية' : 'Personal Photo' })}
-                                    className="h-10 border border-slate-200 rounded-md overflow-hidden bg-slate-100 cursor-zoom-in transition-all hover:border-indigo-500 pointer-events-auto flex items-center justify-center"
-                                  >
-                                    {drv.personalPhoto ? (
-                                      <img src={drv.personalPhoto} alt="Personal" className="w-full h-full object-cover" />
-                                    ) : (
-                                      <span className="text-[7px] text-slate-400">🚫</span>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* 2. National ID */}
-                                <div className="space-y-1 text-center">
-                                  <span className="text-[7px] font-bold text-slate-500 block truncate">{lang === 'ar' ? 'البطاقة' : 'National ID'}</span>
-                                  <div 
-                                    onClick={() => drv.nationalIdImage && setSelectedPreviewPhoto({ src: drv.nationalIdImage, title: lang === 'ar' ? 'صورة بطاقة الرقم القومي' : 'National ID Card' })}
-                                    className="h-10 border border-slate-200 rounded-md overflow-hidden bg-slate-100 cursor-zoom-in transition-all hover:border-indigo-500 pointer-events-auto flex items-center justify-center"
-                                  >
-                                    {drv.nationalIdImage ? (
-                                      <img src={drv.nationalIdImage} alt="National ID" className="w-full h-full object-cover" />
-                                    ) : (
-                                      <span className="text-[7px] text-slate-400">🚫</span>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* 3. Driver License */}
-                                <div className="space-y-1 text-center">
-                                  <span className="text-[7px] font-bold text-slate-500 block truncate">{lang === 'ar' ? 'القيادة' : 'Driver Lic'}</span>
-                                  <div 
-                                    onClick={() => drv.driverLicenseImage && setSelectedPreviewPhoto({ src: drv.driverLicenseImage, title: lang === 'ar' ? 'صورة رخصة القيادة' : 'Driving License' })}
-                                    className="h-10 border border-slate-200 rounded-md overflow-hidden bg-slate-100 cursor-zoom-in transition-all hover:border-indigo-500 pointer-events-auto flex items-center justify-center"
-                                  >
-                                    {drv.driverLicenseImage ? (
-                                      <img src={drv.driverLicenseImage} alt="License" className="w-full h-full object-cover" />
-                                    ) : (
-                                      <span className="text-[7px] text-slate-400">🚫</span>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* 4. Vehicle License */}
-                                <div className="space-y-1 text-center">
-                                  <span className="text-[7px] font-bold text-slate-500 block truncate">{lang === 'ar' ? 'السيارة' : 'Vehicle Lic'}</span>
-                                  <div 
-                                    onClick={() => drv.vehicleLicenseImage && setSelectedPreviewPhoto({ src: drv.vehicleLicenseImage, title: lang === 'ar' ? 'صورة رخصة السيارة' : 'Vehicle License' })}
-                                    className="h-10 border border-slate-200 rounded-md overflow-hidden bg-slate-100 cursor-zoom-in transition-all hover:border-indigo-500 pointer-events-auto flex items-center justify-center"
-                                  >
-                                    {drv.vehicleLicenseImage ? (
-                                      <img src={drv.vehicleLicenseImage} alt="Vehicle License" className="w-full h-full object-cover" />
-                                    ) : (
-                                      <span className="text-[7px] text-slate-400">🚫</span>
-                                    )}
-                                  </div>
-                                </div>
+                            {/* Driver Details */}
+                            <div className="border-t border-slate-100 pt-2 space-y-1.5 text-[10px]">
+                              <span className="text-[8px] font-black text-slate-500 block">{lang === 'ar' ? 'بيانات السائق:' : 'Driver Details:'}</span>
+                              <div className="grid grid-cols-2 gap-1 text-[9px] text-slate-600">
+                                <p>📞 {drv.phone} {drv.secondaryPhone && <span className="text-slate-400">({drv.secondaryPhone})</span>}</p>
+                                <p>🪪 {drv.nationalId}</p>
+                                <p>📄 {drv.driverLicense}</p>
+                                <p>🚗 {drv.vehicleType === 'CAR' ? (lang === 'ar' ? 'سيارة' : 'Car') : drv.vehicleType === 'MOTORCYCLE' ? (lang === 'ar' ? 'موتوسيكل' : 'Motorcycle') : drv.vehicleType === 'TOKTOK' ? (lang === 'ar' ? 'توكتوك' : 'TukTuk') : (lang === 'ar' ? 'تروسيكل' : 'Tricycle')}</p>
+                                <p>🏎️ {drv.vehicleName} {drv.vehicleBrand && <span className="text-slate-400">({drv.vehicleBrand})</span>}</p>
+                                <p>🔢 {drv.vehicleLicense || '-'}</p>
                               </div>
+                              {(!drv.personalPhoto && !drv.nationalIdImage && !drv.driverLicenseImage && !drv.vehicleLicenseImage) && (
+                                <p className="text-[8px] text-amber-600 font-bold mt-1">
+                                  {lang === 'ar' ? '⚠️ لم يتم إرسال المستندات بعد - يرجى التواصل مع السائق لاستلامها' : '⚠️ Documents not submitted yet - please contact driver to receive them'}
+                                </p>
+                              )}
                             </div>
                           </div>
 
@@ -1585,14 +1556,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             <a
                               href={`https://wa.me/${drv.phone.replace(/[^0-9]/g, '') || '201015555555'}?text=${encodeURIComponent(
                                 lang === 'ar'
-                                  ? `مرحباً كابتن ${drv.name}، معك إدارة تطبيق كابتن عز. لقد تلقينا طلب انضمامك والبيانات المرفقة (البطاقة: ${drv.nationalId}). نود استكمال مراجعة رخصتك معك.`
-                                  : `Hello Captain ${drv.name}, this is Ezz Admin contacting you regarding your driver profile validation.`
+                                  ? `مرحباً كابتن ${drv.name}، معك إدارة تطبيق كابتن عز. لقد تلقينا طلب انضمامك.\n\nنحتاج منك إرسال المستندات التالية:\n1. صورة بطاقة الرقم القومي\n2. صورة رخصة القيادة\n3. صورة رخصة المركبة\n4. صورة شخصية\n\nبمجرد استلام المستندات سيتم مراجعة طلبك والرد عليك.`
+                                  : `Hello Captain ${drv.name}, this is Ezz Admin. We received your driver application.\n\nPlease send the following documents:\n1. National ID card photo\n2. Driving license photo\n3. Vehicle license photo\n4. Personal photo\n\nWe will review and reply once received.`
                               )}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg transition-colors text-center cursor-pointer pointer-events-auto flex items-center justify-center gap-1"
                             >
-                              <span>💬 {lang === 'ar' ? 'واتساب' : 'WhatsApp'}</span>
+                              <span>💬 {lang === 'ar' ? 'واتساب للمستندات' : 'WhatsApp Docs'}</span>
                             </a>
                           </div>
                         </div>
@@ -1812,23 +1783,23 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             </div>
                           )}
 
-                          {/* Actions row */}
-                          <div className="grid grid-cols-2 gap-1.5 text-[9px] font-bold">
-                            {drv.totalCommissionPaid > 0 ? (
-                              <button
-                                type="button"
-                                onClick={() => onSettleDriverCommissions(drv.id)}
-                                className="py-1 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer pointer-events-auto text-center"
-                              >
-                                {lang === 'ar'
-                                  ? `تحصيل ${drv.totalCommissionPaid} ج.م وتصفية`
-                                  : `Collect ${drv.totalCommissionPaid} EGP`}
-                              </button>
-                            ) : (
-                              <div className="py-1 bg-emerald-50 text-emerald-700 rounded-lg text-center font-bold">
-                                {lang === 'ar' ? '✓ الحساب مصفى' : '✓ Settled'}
-                              </div>
-                            )}
+                           {/* Actions row */}
+                           <div className="grid grid-cols-2 gap-1.5 text-[9px] font-bold">
+                             {drv.totalCommissionPaid > 0 ? (
+                               <button
+                                 type="button"
+                                 onClick={() => onSettleDriverCommissions(drv.id)}
+                                 className="py-1 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer pointer-events-auto text-center"
+                               >
+                                 {lang === 'ar'
+                                   ? `تحصيل ${drv.totalCommissionPaid} ج.م وتصفية`
+                                   : `Collect ${drv.totalCommissionPaid} EGP`}
+                               </button>
+                             ) : (
+                               <div className="py-1 bg-emerald-50 text-emerald-700 rounded-lg text-center font-bold">
+                                 {lang === 'ar' ? '✓ الحساب مصفى' : '✓ Settled'}
+                               </div>
+                             )}
 
                             <a
                               href={`https://wa.me/${drv.phone.replace(/[^0-9]/g, '') || '201015555555'}?text=${encodeURIComponent(
@@ -2325,13 +2296,21 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[10.5px]">
                                         <div className="space-y-1.5 text-right">
                                           <p className="font-bold text-slate-400 text-[8.5px] uppercase">{lang === 'ar' ? '📍 نقطة الركوب' : '📍 Pickup'}</p>
-                                          <p className="font-black text-slate-800">{getLocationName(trip.pickup, lang)}</p>
-                                          <p className="text-[8px] text-slate-400 font-mono">Lat: {trip.pickup.lat.toFixed(5)}, Lng: {trip.pickup.lng.toFixed(5)}</p>
+                                           <p className="font-black text-slate-800">{getLocationName(trip.pickup, lang)}</p>
+                                           <p className="text-[8px] text-slate-400 font-mono">
+                                             {trip.pickup?.lat != null && trip.pickup?.lng != null
+                                               ? `Lat: ${trip.pickup.lat.toFixed(5)}, Lng: ${trip.pickup.lng.toFixed(5)}`
+                                               : lang === 'ar' ? 'غير متوفر' : 'N/A'}
+                                           </p>
                                         </div>
                                         <div className="space-y-1.5 text-right">
                                           <p className="font-bold text-slate-400 text-[8.5px] uppercase">{lang === 'ar' ? '🏁 وجهة الوصول' : '🏁 Dropoff'}</p>
-                                          <p className="font-black text-slate-800">{getLocationName(trip.dropoff, lang)}</p>
-                                          <p className="text-[8px] text-slate-400 font-mono">Lat: {trip.dropoff.lat.toFixed(5)}, Lng: {trip.dropoff.lng.toFixed(5)}</p>
+                                           <p className="font-black text-slate-800">{getLocationName(trip.dropoff, lang)}</p>
+                                           <p className="text-[8px] text-slate-400 font-mono">
+                                             {trip.dropoff?.lat != null && trip.dropoff?.lng != null
+                                               ? `Lat: ${trip.dropoff.lat.toFixed(5)}, Lng: ${trip.dropoff.lng.toFixed(5)}`
+                                               : lang === 'ar' ? 'غير متوفر' : 'N/A'}
+                                           </p>
                                         </div>
                                       </div>
 
@@ -2419,20 +2398,49 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                           ) : (
                                             <p className="text-[9px] text-slate-400 italic">{lang === 'ar' ? 'لم يتم التقييم بعد' : 'No rating submitted yet'}</p>
                                           )}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </td>
-                                </tr>
-                              )}
-                            </React.Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+                                         </div>
+                                       </div>
+
+                                       {(trip.status === 'SEARCHING' || trip.status === 'ACCEPTED' || trip.status === 'ARRIVED' || trip.status === 'STARTED') && (
+                                         <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100">
+                                           {trip.status !== 'STARTED' && onAdminForceCancelTrip && (
+                                             <button
+                                               type="button"
+                                               onClick={(e) => {
+                                                 e.stopPropagation();
+                                                 onAdminForceCancelTrip(trip.id);
+                                               }}
+                                               className="px-3 py-1.5 text-[9px] font-black rounded-lg bg-rose-50 text-rose-700 border border-rose-100 hover:bg-rose-100 transition-colors cursor-pointer pointer-events-auto"
+                                             >
+                                               {lang === 'ar' ? 'إلغاء الرحلة' : 'Cancel Trip'}
+                                             </button>
+                                           )}
+                                           {trip.status === 'STARTED' && onAdminForceEndTrip && (
+                                             <button
+                                               type="button"
+                                               onClick={(e) => {
+                                                 e.stopPropagation();
+                                                 onAdminForceEndTrip(trip.id);
+                                               }}
+                                               className="px-3 py-1.5 text-[9px] font-black rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100 transition-colors cursor-pointer pointer-events-auto"
+                                             >
+                                               {lang === 'ar' ? 'إنهاء الرحلة' : 'End Trip'}
+                                             </button>
+                                           )}
+                                         </div>
+                                       )}
+                                     </div>
+                                   </td>
+                                 </tr>
+                               )}
+                             </React.Fragment>
+                           );
+                         })}
+                       </tbody>
+                     </table>
+                   </div>
+                 )}
+               </div>
 
               {/* Load More */}
               {adminTripsHasMore && (
