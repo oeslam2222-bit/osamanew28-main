@@ -2,10 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const webpush = require('web-push');
 
-const FALLBACK_VAPID_PUBLIC_KEY = 'BK9sPXpbo7aiQFmkupvZS_5Y8oMlFYqlnWDorLlgmbJRbSbqfgllFLDr3kQmkK9KbYWskORGLwMH5mSFb4UnvI0';
-const VAPID_PUBLIC_KEY = process.env.VITE_WEB_PUSH_VAPID_PUBLIC_KEY || FALLBACK_VAPID_PUBLIC_KEY;
-const FALLBACK_VAPID_PRIVATE_KEY = 'GSza88Vs5d0zWeFcbhupefcPcTMHGBHUs6F2ReUnWqw';
-const VAPID_PRIVATE_KEY = process.env.WEB_PUSH_VAPID_PRIVATE_KEY || FALLBACK_VAPID_PRIVATE_KEY;
+const VAPID_PUBLIC_KEY = process.env.VITE_WEB_PUSH_VAPID_PUBLIC_KEY;
+const VAPID_PRIVATE_KEY = process.env.WEB_PUSH_VAPID_PRIVATE_KEY;
 
 if (!webpush.setVapidDetails) {
   console.warn('[notify-driver] web-push is not available in this environment');
