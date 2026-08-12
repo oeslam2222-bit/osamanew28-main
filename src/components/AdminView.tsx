@@ -34,6 +34,8 @@ interface AdminViewProps {
   onUnblockRider: (riderId: string) => void;
   onDeleteRider: (riderId: string) => void;
   onClearAllFakeData: () => void;
+  onAdminForceCancelTrip?: (tripId: string) => void;
+  onAdminForceEndTrip?: (tripId: string) => void;
   lang: 'ar' | 'en';
   onLogout: () => void;
   onTriggerToast?: (title: string, message: string, type?: 'info' | 'success' | 'warning' | 'new_trip') => void;
@@ -65,6 +67,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
   onUnblockRider,
   onDeleteRider,
   onClearAllFakeData,
+  onAdminForceCancelTrip,
+  onAdminForceEndTrip,
   lang,
   onLogout,
   onTriggerToast,
@@ -2394,20 +2398,49 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                           ) : (
                                             <p className="text-[9px] text-slate-400 italic">{lang === 'ar' ? 'لم يتم التقييم بعد' : 'No rating submitted yet'}</p>
                                           )}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </td>
-                                </tr>
-                              )}
-                            </React.Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+                                         </div>
+                                       </div>
+
+                                       {(trip.status === 'SEARCHING' || trip.status === 'ACCEPTED' || trip.status === 'ARRIVED' || trip.status === 'STARTED') && (
+                                         <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100">
+                                           {trip.status !== 'STARTED' && onAdminForceCancelTrip && (
+                                             <button
+                                               type="button"
+                                               onClick={(e) => {
+                                                 e.stopPropagation();
+                                                 onAdminForceCancelTrip(trip.id);
+                                               }}
+                                               className="px-3 py-1.5 text-[9px] font-black rounded-lg bg-rose-50 text-rose-700 border border-rose-100 hover:bg-rose-100 transition-colors cursor-pointer pointer-events-auto"
+                                             >
+                                               {lang === 'ar' ? 'إلغاء الرحلة' : 'Cancel Trip'}
+                                             </button>
+                                           )}
+                                           {trip.status === 'STARTED' && onAdminForceEndTrip && (
+                                             <button
+                                               type="button"
+                                               onClick={(e) => {
+                                                 e.stopPropagation();
+                                                 onAdminForceEndTrip(trip.id);
+                                               }}
+                                               className="px-3 py-1.5 text-[9px] font-black rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100 transition-colors cursor-pointer pointer-events-auto"
+                                             >
+                                               {lang === 'ar' ? 'إنهاء الرحلة' : 'End Trip'}
+                                             </button>
+                                           )}
+                                         </div>
+                                       )}
+                                     </div>
+                                   </td>
+                                 </tr>
+                               )}
+                             </React.Fragment>
+                           );
+                         })}
+                       </tbody>
+                     </table>
+                   </div>
+                 )}
+               </div>
 
               {/* Load More */}
               {adminTripsHasMore && (
