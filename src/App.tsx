@@ -46,7 +46,8 @@
     saveRiderPreferences,
     fetchAllActiveTrips,
     uploadDriverImage,
-    uploadDriverImageFromBase64
+    uploadDriverImageFromBase64,
+    mapDriverFromDB
   } from './supabaseService';
   import {
     requestNotificationPermission,
@@ -1312,7 +1313,7 @@
           table: 'ezz_drivers',
         }, (payload) => {
           if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-            const remoteDriver = payload.new as Driver;
+            const remoteDriver = mapDriverFromDB(payload.new);
             setDrivers((prev) => {
               const existing = prev.find((d) => d.id === remoteDriver.id);
               if (existing) {
