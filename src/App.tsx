@@ -77,8 +77,12 @@
   import { auditLogger } from './utils/auditLog';
   import { riderAuthLimiter, driverAuthLimiter, adminAuthLimiter } from './utils/security';
   import { supabase } from './supabaseClient';
-  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://siqsougaberroesupskl.supabase.co';
-  const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNpcXNvdWdhYmVycm9lc3Vwc2tsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNDI3NTcsImV4cCI6MjEwMTkxODc1N30.QRhYApZAfpR4BghjiR8RaK8KS28pgpz6WANuSjid8bY';
+  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+  const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    throw new Error('Missing Supabase environment variables: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are required.');
+  }
 
   // Support secure data storage with password obfuscation / encryption
   const obfuscatePassword = (password: string): string => {
@@ -2529,8 +2533,6 @@
               status: 'ACCEPTED',
               driver_id: driverId,
               driver_name: drv?.name || null,
-              driver_lat: drv?.lat || null,
-              driver_lng: drv?.lng || null,
             })
             .eq('id', activeTrip.id)
             .eq('status', 'SEARCHING')
@@ -2563,8 +2565,6 @@
                   status: 'ACCEPTED',
                   driver_id: driverId,
                   driver_name: drv?.name || null,
-                  driver_lat: drv?.lat || null,
-                  driver_lng: drv?.lng || null,
                 })
                 .eq('id', activeTrip.id)
                 .select('id, status');
