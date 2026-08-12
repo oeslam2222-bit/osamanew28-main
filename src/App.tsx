@@ -2264,14 +2264,6 @@
                 markPromoCodeAsUsed(promoCodeId, newTrip.id).catch(() => {});
               }
               if (ok) {
-                sendNewTripNotification({
-                  tripId: newTrip.id,
-                  origin: pLoc.nameAr,
-                  destination: dLoc.nameAr,
-                  fare,
-                  distance,
-                }).catch(() => {});
-
                 fetch('/api/notify-driver', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -2281,27 +2273,6 @@
                     vehicleType: requestedVehicleType,
                   }),
                 }).catch(() => {});
-
-                offeredDriverIds.forEach((driverId) => {
-                  const drv = eligibleDriversByType.find((d) => d.id === driverId);
-                  sendPushToDriver(driverId, {
-                    tripId: newTrip.id,
-                    title: lang === 'ar' ? '🚖 طلب مشوار جديد!' : '🚖 New Ride Request!',
-                    body: lang === 'ar'
-                      ? `من ${pLoc.nameAr} إلى ${dLoc.nameAr} | ${fare} ج.م`
-                      : `${pLoc.nameEn} → ${dLoc.nameEn} | ${fare} EGP`,
-                    url: '/?screen=DRIVER',
-                    tag: `ride-request-${newTrip.id}`,
-                    data: {
-                      tripId: newTrip.id,
-                      driverId,
-                      pickupLat: pLoc.lat,
-                      pickupLng: pLoc.lng,
-                      dropoffLat: dLoc.lat,
-                      dropoffLng: dLoc.lng,
-                    },
-                  }).catch(() => {});
-                });
               }
             });
 
