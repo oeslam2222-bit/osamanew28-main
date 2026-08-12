@@ -1760,17 +1760,55 @@ export const saveTripToHistory = async (
   deviceId?: string
 ): Promise<boolean> => {
   try {
-    const { error } = await supabase.rpc('save_trip_to_history', {
+    const payload = {
       p_user_id: userId || '',
       p_role: role || 'rider',
       p_device_id: deviceId || '',
       p_trip: mapTripToDB(trip),
-    });
-    if (error) throw error;
+    };
+    console.log('[saveTripToHistory] Attempting to save trip:', trip.id, 'role:', role, 'userId:', userId, 'deviceId:', deviceId);
+    const { error } = await supabase.rpc('save_trip_to_history', payload);
+    if (error) {
+      console.error('[saveTripToHistory] RPC error:', error);
+      throw error;
+    }
+    console.log('[saveTripToHistory] Trip saved successfully:', trip.id);
     return true;
   } catch (err: any) {
-    console.warn('Could not save trip to history in Supabase:', err.message);
+    console.error('[saveTripToHistory] Failed to save trip:', err.message);
     return false;
+  }
+};
+
+export const debugTripsHistory = async (): Promise<{
+  rpcExists: boolean;
+  sessionCount: number;
+  tripsCount: number;
+  sampleSession: any;
+  error?: string;
+}> => {
+  try {
+    const [rpcCheck, sessionCheck, tripsCheck] = await Promise.all([
+      supabase.from('pg_proc').select('proname').eq('proname', 'save_trip_to_history').maybeSingle(),
+      supabase.from('ezz_sessions').select('*').limit(1).maybeSingle(),
+      supabase.from('ezz_trips_history').select('*', { count: 'exact', head: true }),
+    ]);
+
+    return {
+      rpcExists: !!rpcCheck.data,
+      sessionCount: sessionCheck.data ? 1 : 0,
+      tripsCount: tripsCheck.count || 0,
+      sampleSession: sessionCheck.data || null,
+      error: rpcCheck.error?.message || sessionCheck.error?.message || tripsCheck.error?.message,
+    };
+  } catch (err: any) {
+    return {
+      rpcExists: false,
+      sessionCount: 0,
+      tripsCount: 0,
+      sampleSession: null,
+      error: err.message,
+    };
   }
 };
 
