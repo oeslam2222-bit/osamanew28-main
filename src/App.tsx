@@ -2272,6 +2272,16 @@
                   distance,
                 }).catch(() => {});
 
+                fetch('/api/notify-driver', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    tripId: newTrip.id,
+                    pickup: pLoc.nameAr || pLoc.nameEn,
+                    vehicleType: requestedVehicleType,
+                  }),
+                }).catch(() => {});
+
                 offeredDriverIds.forEach((driverId) => {
                   const drv = eligibleDriversByType.find((d) => d.id === driverId);
                   sendPushToDriver(driverId, {
