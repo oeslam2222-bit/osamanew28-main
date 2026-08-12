@@ -777,6 +777,7 @@ AS $$
 $$;
 
 -- RPC: Get paginated trips for admin (all trips with filtering)
+-- SECURITY: requires valid admin session via verify_session
 CREATE OR REPLACE FUNCTION get_admin_trips(
   p_admin_user_id TEXT DEFAULT NULL,
   p_device_id TEXT DEFAULT NULL,
@@ -788,9 +789,15 @@ CREATE OR REPLACE FUNCTION get_admin_trips(
   p_search TEXT DEFAULT NULL
 )
 RETURNS SETOF ezz_trips_history
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
+BEGIN
+  IF NOT verify_session(p_admin_user_id, 'ADMIN', p_device_id) THEN
+    RAISE EXCEPTION 'Unauthorized: admin access required';
+  END IF;
+
+  RETURN QUERY
   SELECT * FROM ezz_trips_history
   WHERE (p_date_from IS NULL OR created_at >= p_date_from)
     AND (p_date_to IS NULL OR created_at <= p_date_to)
@@ -810,9 +817,11 @@ AS $$
     )
   ORDER BY created_at DESC
   LIMIT p_limit OFFSET (p_page * p_limit);
+END;
 $$;
 
 -- RPC: Count all trips for admin
+-- SECURITY: requires valid admin session via verify_session
 CREATE OR REPLACE FUNCTION count_admin_trips(
   p_admin_user_id TEXT DEFAULT NULL,
   p_device_id TEXT DEFAULT NULL,
@@ -822,10 +831,17 @@ CREATE OR REPLACE FUNCTION count_admin_trips(
   p_search TEXT DEFAULT NULL
 )
 RETURNS BIGINT
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
-  SELECT COUNT(*) FROM ezz_trips_history
+DECLARE
+  v_count BIGINT;
+BEGIN
+  IF NOT verify_session(p_admin_user_id, 'ADMIN', p_device_id) THEN
+    RAISE EXCEPTION 'Unauthorized: admin access required';
+  END IF;
+
+  SELECT COUNT(*) INTO v_count FROM ezz_trips_history
   WHERE (p_date_from IS NULL OR created_at >= p_date_from)
     AND (p_date_to IS NULL OR created_at <= p_date_to)
     AND (
@@ -842,18 +858,28 @@ AS $$
       OR LOWER(COALESCE(dropoff->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
       OR LOWER(COALESCE(dropoff->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
     );
+
+  RETURN v_count;
+END;
 $$;
 
 -- RPC: Admin clear all trips
+-- SECURITY: requires valid admin session via verify_session
 CREATE OR REPLACE FUNCTION admin_clear_all_trips(
   p_admin_user_id TEXT DEFAULT NULL,
   p_device_id TEXT DEFAULT NULL
 )
 RETURNS VOID
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
+BEGIN
+  IF NOT verify_session(p_admin_user_id, 'ADMIN', p_device_id) THEN
+    RAISE EXCEPTION 'Unauthorized: admin access required';
+  END IF;
+
   DELETE FROM ezz_trips_history;
+END;
 $$;
 
 -- Helper: verify session exists
@@ -1093,8 +1119,10 @@ $$;
 -- ============================================================
 -- SECURITY DEFINER functions for driver admin operations
 -- (bypasses RLS to avoid connection pooling issues)
--- ============================================================
+-- SECURITY: requires valid admin session via verify_session
 CREATE OR REPLACE FUNCTION admin_update_driver(
+  p_admin_user_id TEXT DEFAULT NULL,
+  p_device_id TEXT DEFAULT NULL,
   p_driver_id TEXT,
   p_data JSONB
 )
@@ -1104,6 +1132,10 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+  IF NOT verify_session(p_admin_user_id, 'ADMIN', p_device_id) THEN
+    RAISE EXCEPTION 'Unauthorized: admin access required';
+  END IF;
+
   UPDATE ezz_drivers
   SET
     approval_status = COALESCE(p_data->>'approval_status', approval_status),
@@ -1115,6 +1147,8 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION admin_set_driver_approval(
+  p_admin_user_id TEXT DEFAULT NULL,
+  p_device_id TEXT DEFAULT NULL,
   p_driver_id TEXT,
   p_approval_status TEXT
 )
@@ -1124,6 +1158,10 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+  IF NOT verify_session(p_admin_user_id, 'ADMIN', p_device_id) THEN
+    RAISE EXCEPTION 'Unauthorized: admin access required';
+  END IF;
+
   UPDATE ezz_drivers
   SET approval_status = p_approval_status
   WHERE id = p_driver_id;
@@ -1132,12 +1170,12 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, JSONB) TO anon;
-GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT) TO anon;
-GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, JSONB) TO authenticated;
-GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, JSONB) TO service_role;
-GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, TEXT, TEXT, JSONB) TO anon;
+GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT, TEXT, TEXT) TO anon;
+GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, TEXT, TEXT, JSONB) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_update_driver(TEXT, TEXT, TEXT, JSONB) TO service_role;
+GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT, TEXT, TEXT) TO service_role;
 
 -- ============================================================
 -- Storage bucket setup:
