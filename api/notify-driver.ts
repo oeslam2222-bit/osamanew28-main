@@ -73,7 +73,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Verify trip exists and is still searching
     const { data: trip, error: tripError } = await supabase
       .from('ezz_active_trip')
-      .select('id,status,pickup,dropoff,rider_name,requested_vehicle_type')
+      .select('id,status,pickup,dropoff,rider_name,requested_vehicle_type,fare')
       .eq('id', tripId)
       .maybeSingle();
 
