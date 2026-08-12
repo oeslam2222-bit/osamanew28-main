@@ -1428,12 +1428,28 @@ export const fetchDriversBasic = async (): Promise<Driver[] | null> => {
     const result = await withRetry<Driver[]>(() =>
       supabase
         .from('ezz_drivers')
-        .select('id,name,phone,car_model,car_plate,vehicle_type,vehicle_name,national_id,driver_license,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,agreed_to_terms,service_areas,last_seen,auto_accept,auto_show_map,fcm_token')
+        .select('id,name,phone,car_model,car_plate,vehicle_type,vehicle_name,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,service_areas,last_seen,auto_accept,auto_show_map')
     );
     if (result.error) throw result.error;
     return (result.data || []).map(mapDriverFromDB);
   } catch (err: any) {
     console.warn('Could not fetch drivers (basic) from Supabase:', err.message);
+    return null;
+  }
+};
+
+// Ultra-lightweight polling: only essential fields for map/display
+export const fetchDriversPolling = async (): Promise<Driver[] | null> => {
+  try {
+    const result = await withRetry<Driver[]>(() =>
+      supabase
+        .from('ezz_drivers')
+        .select('id,name,status,is_online,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen')
+    );
+    if (result.error) throw result.error;
+    return (result.data || []).map(mapDriverFromDB);
+  } catch (err: any) {
+    console.warn('Could not fetch drivers (polling) from Supabase:', err.message);
     return null;
   }
 };
