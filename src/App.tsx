@@ -1343,7 +1343,7 @@
     useEffect(() => {
       if (!supabaseConnected) return;
 
-      const pollInterval = 60000;
+      const pollInterval = 25000;
 
       const interval = setInterval(async () => {
         if (!isMountedRef.current) return;
@@ -1372,7 +1372,7 @@
     useEffect(() => {
       if (!supabaseConnected || !adminIsLoggedIn) return;
 
-      const pollInterval = 60000;
+      const pollInterval = 120000;
 
       const interval = setInterval(async () => {
         if (!isMountedRef.current) return;
@@ -1812,7 +1812,7 @@
         lastNotifiedOfferedDriverIdRef.current = activeTrip.currentOfferedDriverId || null;
       }
 
-      const pollInterval = getBackgroundPollingInterval(3000, dataSaverMode, !!activeTrip && activeTrip.status === 'SEARCHING');
+      const pollInterval = getBackgroundPollingInterval(60000, dataSaverMode, !!activeTrip && activeTrip.status === 'SEARCHING');
 
       const interval = setInterval(async () => {
         if (!isMountedRef.current) return;
