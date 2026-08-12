@@ -326,6 +326,8 @@
     };
 
     const [routeCache, setRouteCache] = useState<Record<string, RouteResult>>({});
+    const routeCacheRef = useRef(routeCache);
+    routeCacheRef.current = routeCache;
     const lastRouteCacheUseRef = useRef<number>(Date.now());
 
     useEffect(() => {
@@ -341,7 +343,7 @@
 
     const getRealRoute = useCallback(async (pickup: Location, dropoff: Location): Promise<RouteResult | null> => {
       const cacheKey = `${pickup.lat.toFixed(4)}_${pickup.lng.toFixed(4)}_${dropoff.lat.toFixed(4)}_${dropoff.lng.toFixed(4)}`;
-      const cached = routeCache[cacheKey] || getCachedRoute([pickup.lat, pickup.lng, dropoff.lat, dropoff.lng]);
+      const cached = routeCacheRef.current[cacheKey] || getCachedRoute([pickup.lat, pickup.lng, dropoff.lat, dropoff.lng]);
       if (cached && cached.distance > 0) return cached;
 
       const coordStr = `${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}`;
@@ -434,7 +436,7 @@
         // ignore
       }
       return null;
-    }, [routeCache, lang]);
+    }, [lang]);
 
     // Navigation route: driver current position -> pickup -> dropoff
     const getNavigationRoute = useCallback(async (
@@ -444,7 +446,7 @@
       dropoff: Location
     ): Promise<RouteResult | null> => {
       const cacheKey = `nav_${driverLat.toFixed(4)}_${driverLng.toFixed(4)}_${pickup.lat.toFixed(4)}_${pickup.lng.toFixed(4)}_${dropoff.lat.toFixed(4)}_${dropoff.lng.toFixed(4)}`;
-      const cached = routeCache[cacheKey] || getCachedRoute([driverLat, driverLng, pickup.lat, pickup.lng, dropoff.lat, dropoff.lng], 'nav_');
+      const cached = routeCacheRef.current[cacheKey] || getCachedRoute([driverLat, driverLng, pickup.lat, pickup.lng, dropoff.lat, dropoff.lng], 'nav_');
       if (cached && cached.distance > 0) return cached;
 
       const coordStr = `${driverLng},${driverLat};${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}`;
@@ -539,7 +541,7 @@
         // ignore
       }
       return null;
-    }, [routeCache, lang]);
+    }, [lang]);
 
     const [tripDateFrom, setTripDateFrom] = useState<string>('');
     const [tripDateTo, setTripDateTo] = useState<string>('');
@@ -1337,7 +1339,34 @@
       };
     }, [supabaseConnected]);
 
+    // Polling fallback for drivers list (Realtime can miss/delay events)
+    useEffect(() => {
+      if (!supabaseConnected) return;
 
+      const pollInterval = 15000;
+
+      const interval = setInterval(async () => {
+        if (!isMountedRef.current) return;
+        try {
+          const remoteDrivers = await fetchDrivers();
+          if (isMountedRef.current && remoteDrivers) {
+            setDrivers(prev => {
+              const remoteMap = new Map(remoteDrivers.map(d => [d.id, d]));
+              return prev
+                .map(d => {
+                  const rd = remoteMap.get(d.id);
+                  return rd ? { ...d, ...rd } : null;
+                })
+                .filter((d): d is Driver => d !== null);
+            });
+          }
+        } catch (err) {
+          console.warn('Drivers polling error:', err);
+        }
+      }, pollInterval);
+
+      return () => clearInterval(interval);
+    }, [supabaseConnected, setDrivers]);
 
     // 1e. Polling for live/active trips (admin dashboard)
     useEffect(() => {
