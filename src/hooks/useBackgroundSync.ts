@@ -38,11 +38,11 @@ export const useBackgroundSync = (
   const lastSavedTripSnapshotRef = useRef<string>('');
   const activePollingLockRef = useRef(false);
 
-  // Drivers list polling
+  // Drivers list polling (fallback only — Realtime is the primary source)
   useEffect(() => {
-    if (!supabaseConnected) return;
+    if (!supabaseConnected || !driverIsLoggedIn) return;
 
-    const pollInterval = 30000;
+    const pollInterval = 300000; // 5 minutes fallback
 
     const interval = setInterval(async () => {
       if (!isMountedRef.current) return;
@@ -61,7 +61,7 @@ export const useBackgroundSync = (
                   ...rd,
                   personalPhoto: ld.personalPhoto || rd.personalPhoto,
                   nationalIdImage: ld.nationalIdImage || rd.nationalIdImage,
-                  driverLicenseImage: ld.driverLicenseImage || rd.driverLicenseImage,
+                  driverLicenseImage: ld.driverLicenseImage || ld.driverLicenseImage,
                   vehicleLicenseImage: ld.vehicleLicenseImage || rd.vehicleLicenseImage,
                   isOnline: isStale ? false : rd.isOnline,
                   status: isStale ? 'OFFLINE' : (rd.isOnline ? rd.status : 'OFFLINE'),
@@ -77,13 +77,13 @@ export const useBackgroundSync = (
     }, pollInterval);
 
     return () => clearInterval(interval);
-  }, [supabaseConnected, setDrivers]);
+  }, [supabaseConnected, driverIsLoggedIn, setDrivers]);
 
   // General-purpose sync (riders + stats)
   useEffect(() => {
     if (!supabaseConnected) return;
 
-    let syncInterval = 90000;
+    let syncInterval = 300000; // 5 minutes
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const scheduleSync = async () => {
@@ -157,19 +157,33 @@ export const useBackgroundSync = (
     };
   }, [drivers, supabaseConnected]);
 
-  // Active trip auto-save on change
+  // Active trip auto-save on change (debounced — saves at most once every 8s)
   useEffect(() => {
     if (!supabaseConnected || !activeTrip) return;
 
-    const currentTripKey = JSON.stringify(activeTrip);
+    const currentTripKey = JSON.stringify({
+      id: activeTrip.id,
+      status: activeTrip.status,
+      driverId: activeTrip.driverId,
+      riderId: activeTrip.riderId,
+      fare: activeTrip.fare,
+      commission: activeTrip.commission,
+      distance: activeTrip.distance,
+    });
+
     if (lastSavedTripRef.current === currentTripKey) return;
 
     lastSavedTripRef.current = currentTripKey;
     lastSavedActiveTripIdRef.current = activeTrip.id;
-    saveActiveTrip(activeTrip).then((ok) => {
-      console.log('[saveActiveTrip useEffect] Saved trip:', activeTrip.id, 'status:', activeTrip.status, 'result:', ok);
-    });
-  }, [supabaseConnected, activeTrip]);
+
+    const timeoutId = setTimeout(() => {
+      saveActiveTrip(activeTrip).then((ok) => {
+        console.log('[saveActiveTrip useEffect] Saved trip:', activeTrip.id, 'status:', activeTrip.status, 'result:', ok);
+      });
+    }, 8000);
+
+    return () => clearTimeout(timeoutId);
+  }, [supabaseConnected, activeTrip?.id, activeTrip?.status, activeTrip?.driverId, activeTrip?.riderId, activeTrip?.fare, activeTrip?.commission, activeTrip?.distance]);
 
   // Clear saved trip when activeTrip becomes null
   useEffect(() => {
