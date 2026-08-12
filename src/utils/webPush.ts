@@ -1,5 +1,8 @@
-const FALLBACK_VAPID_PUBLIC_KEY = 'BK9sPXpbo7aiQFmkupvZS_5Y8oMlFYqlnWDorLlgmbJRbSbqfgllFLDr3kQmkK9KbYWskORGLwMH5mSFb4UnvI0';
-const VAPID_PUBLIC_KEY = import.meta.env.VITE_WEB_PUSH_VAPID_PUBLIC_KEY || FALLBACK_VAPID_PUBLIC_KEY;
+const VAPID_PUBLIC_KEY = import.meta.env.VITE_WEB_PUSH_VAPID_PUBLIC_KEY;
+
+if (!VAPID_PUBLIC_KEY) {
+  console.warn('Missing VITE_WEB_PUSH_VAPID_PUBLIC_KEY environment variable. Push notifications will not work.');
+}
 
 export const isWebPushSupported = (): boolean => {
   return (
