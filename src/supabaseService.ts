@@ -1422,29 +1422,13 @@ export const mapTripToDB = (trip: Trip) => ({
 
 // --- API METHODS ---
 
-// Fetch Drivers (lightweight for polling — excludes heavy image columns)
-export const fetchDriversBasic = async (): Promise<Driver[] | null> => {
-  try {
-    const result = await withRetry<Driver[]>(() =>
-      supabase
-        .from('ezz_drivers')
-        .select('id,name,phone,car_model,car_plate,vehicle_type,vehicle_name,is_online,status,approval_status,rating,total_trips,total_earnings,total_commission_paid,current_x,current_y,service_areas,last_seen,auto_accept,auto_show_map')
-    );
-    if (result.error) throw result.error;
-    return (result.data || []).map(mapDriverFromDB);
-  } catch (err: any) {
-    console.warn('Could not fetch drivers (basic) from Supabase:', err.message);
-    return null;
-  }
-};
-
 // Ultra-lightweight polling: only essential fields for map/display
 export const fetchDriversPolling = async (): Promise<Driver[] | null> => {
   try {
     const result = await withRetry<Driver[]>(() =>
       supabase
         .from('ezz_drivers')
-        .select('id,name,status,is_online,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen')
+        .select('id,name,status,is_online,approval_status,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen,service_areas')
     );
     if (result.error) throw result.error;
     return (result.data || []).map(mapDriverFromDB);
@@ -1454,7 +1438,23 @@ export const fetchDriversPolling = async (): Promise<Driver[] | null> => {
   }
 };
 
-// Fetch Drivers
+// Lightweight driver fetch for dispatch (excludes heavy image columns)
+export const fetchDriversBasic = async (): Promise<Driver[] | null> => {
+  try {
+    const result = await withRetry<Driver[]>(() =>
+      supabase
+        .from('ezz_drivers')
+        .select('id,name,status,is_online,approval_status,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen,service_areas')
+    );
+    if (result.error) throw result.error;
+    return (result.data || []).map(mapDriverFromDB);
+  } catch (err: any) {
+    console.warn('Could not fetch drivers (basic) from Supabase:', err.message);
+    return null;
+  }
+};
+
+// Fetch Drivers (full data - for admin/profile screens only)
 export const fetchDrivers = async (): Promise<Driver[] | null> => {
   try {
     const result = await withRetry<Driver[]>(() =>
