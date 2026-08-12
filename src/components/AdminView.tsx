@@ -2292,13 +2292,21 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[10.5px]">
                                         <div className="space-y-1.5 text-right">
                                           <p className="font-bold text-slate-400 text-[8.5px] uppercase">{lang === 'ar' ? '📍 نقطة الركوب' : '📍 Pickup'}</p>
-                                          <p className="font-black text-slate-800">{getLocationName(trip.pickup, lang)}</p>
-                                          <p className="text-[8px] text-slate-400 font-mono">Lat: {trip.pickup.lat.toFixed(5)}, Lng: {trip.pickup.lng.toFixed(5)}</p>
+                                           <p className="font-black text-slate-800">{getLocationName(trip.pickup, lang)}</p>
+                                           <p className="text-[8px] text-slate-400 font-mono">
+                                             {trip.pickup?.lat != null && trip.pickup?.lng != null
+                                               ? `Lat: ${trip.pickup.lat.toFixed(5)}, Lng: ${trip.pickup.lng.toFixed(5)}`
+                                               : lang === 'ar' ? 'غير متوفر' : 'N/A'}
+                                           </p>
                                         </div>
                                         <div className="space-y-1.5 text-right">
                                           <p className="font-bold text-slate-400 text-[8.5px] uppercase">{lang === 'ar' ? '🏁 وجهة الوصول' : '🏁 Dropoff'}</p>
-                                          <p className="font-black text-slate-800">{getLocationName(trip.dropoff, lang)}</p>
-                                          <p className="text-[8px] text-slate-400 font-mono">Lat: {trip.dropoff.lat.toFixed(5)}, Lng: {trip.dropoff.lng.toFixed(5)}</p>
+                                           <p className="font-black text-slate-800">{getLocationName(trip.dropoff, lang)}</p>
+                                           <p className="text-[8px] text-slate-400 font-mono">
+                                             {trip.dropoff?.lat != null && trip.dropoff?.lng != null
+                                               ? `Lat: ${trip.dropoff.lat.toFixed(5)}, Lng: ${trip.dropoff.lng.toFixed(5)}`
+                                               : lang === 'ar' ? 'غير متوفر' : 'N/A'}
+                                           </p>
                                         </div>
                                       </div>
 
