@@ -2367,42 +2367,47 @@
         return;
       }
 
-      const interval = setInterval(async () => {
-        if (!isMountedRef.current) return;
-        setActiveTripWithTracking((prev) => {
-          if (!prev || prev.status !== 'SEARCHING') {
-            clearInterval(interval);
-            return prev;
-          }
+       const interval = setInterval(async () => {
+         if (!isMountedRef.current) return;
+         setActiveTripWithTracking((prev) => {
+           if (!prev || prev.status !== 'SEARCHING') {
+             clearInterval(interval);
+             return prev;
+           }
 
-          const currentTimer = prev.dispatchTimer ?? 300;
-          if (currentTimer <= 1) {
-            clearInterval(interval);
-            const cancelled = { ...prev, status: 'CANCELLED' as TripStatus, completedAt: new Date().toISOString() };
-            if (supabaseConnected) {
-              saveTripToHistory(cancelled, rider.id, 'rider', getDeviceId());
-              saveActiveTrip(null, prev.id).catch(() => {});
-            }
-            playNotificationSound('alert');
-            speakText(
-              lang === 'ar'
-                ? 'انتهت مهلة انتظار الرحلة. يمكنك طلب رحلة جديدة.'
-                : 'The ride waiting time has expired. You can request a new ride.',
-              lang === 'ar' ? 'ar-EG' : 'en-US'
-            );
-            triggerToast(
-              lang === 'ar' ? 'انتهت مهلة الانتظار' : 'Waiting time expired',
-              lang === 'ar'
-                ? 'لم يقبل أي سائق الرحلة في الوقت المحدد. يمكنك المحاولة مرة أخرى.'
-                : 'No driver accepted the ride in time. You can try again.',
-              'warning'
-            );
-            return null;
-          }
+           const currentTimer = prev.dispatchTimer ?? 300;
+           if (currentTimer <= 1) {
+             clearInterval(interval);
+             const cancelled = { ...prev, status: 'CANCELLED' as TripStatus, completedAt: new Date().toISOString() };
+             setTimeout(async () => {
+               if (supabaseConnected) {
+                 const saved = await saveTripToHistory(cancelled, rider.id, 'rider', getDeviceId());
+                 if (!saved) {
+                   console.error('[DispatchTimer] Failed to save cancelled trip to history');
+                 }
+                 saveActiveTrip(null, prev.id).catch(() => {});
+               }
+             }, 0);
+             playNotificationSound('alert');
+             speakText(
+               lang === 'ar'
+                 ? 'انتهت مهلة انتظار الرحلة. يمكنك طلب رحلة جديدة.'
+                 : 'The ride waiting time has expired. You can try again.',
+               lang === 'ar' ? 'ar-EG' : 'en-US'
+             );
+             triggerToast(
+               lang === 'ar' ? 'انتهت مهلة الانتظار' : 'Waiting time expired',
+               lang === 'ar'
+                 ? 'لم يقبل أي سائق الرحلة في الوقت المحدد. يمكنك المحاولة مرة أخرى.'
+                 : 'No driver accepted the ride in time. You can try again.',
+               'warning'
+             );
+             return null;
+           }
 
-          return { ...prev, dispatchTimer: currentTimer - 1 };
-        });
-      }, 1000);
+           return { ...prev, dispatchTimer: currentTimer - 1 };
+         });
+       }, 1000);
 
       return () => clearInterval(interval);
     }, [activeTrip?.id, activeTrip?.status, lang, supabaseConnected, driverIsLoggedIn, rider.isLoggedIn]);
@@ -2472,11 +2477,20 @@
 
       try {
         if (supabaseConnected) {
-          await saveTripToHistory(cancelledTrip, cancelUserId, cancelRole, getDeviceId());
+          const saved = await saveTripToHistory(cancelledTrip, cancelUserId, cancelRole, getDeviceId());
+          if (!saved) {
+            console.error('[handleCancelRide] Failed to save cancelled trip for', cancelUserId, cancelRole);
+          }
           if (cancelRole === 'rider' && driverId) {
-            await saveTripToHistory(cancelledTrip, driverId, 'driver', getDeviceId()).catch(() => {});
+            const savedDriver = await saveTripToHistory(cancelledTrip, driverId, 'driver', getDeviceId());
+            if (!savedDriver) {
+              console.error('[handleCancelRide] Failed to save cancelled trip for driver');
+            }
           } else if (cancelRole === 'driver' && activeTrip.riderId) {
-            await saveTripToHistory(cancelledTrip, activeTrip.riderId, 'rider', getDeviceId()).catch(() => {});
+            const savedRider = await saveTripToHistory(cancelledTrip, activeTrip.riderId, 'rider', getDeviceId());
+            if (!savedRider) {
+              console.error('[handleCancelRide] Failed to save cancelled trip for rider');
+            }
           }
           await saveActiveTrip(null, cancelledTripId);
           console.log('[handleCancelRide] Cleared active trip from DB');
@@ -2926,9 +2940,15 @@
 
         if (supabaseConnected) {
           await saveActiveTrip(completed);
-          await saveTripToHistory(completed, driverId, 'driver', getDeviceId());
+          const savedDriver = await saveTripToHistory(completed, driverId, 'driver', getDeviceId());
+          if (!savedDriver) {
+            console.error('[handleEndTrip] Failed to save completed trip for driver');
+          }
           if (activeTrip.riderId) {
-            await saveTripToHistory(completed, activeTrip.riderId, 'rider', getDeviceId()).catch(() => {});
+            const savedRider = await saveTripToHistory(completed, activeTrip.riderId, 'rider', getDeviceId());
+            if (!savedRider) {
+              console.error('[handleEndTrip] Failed to save completed trip for rider');
+            }
           }
         }
 
