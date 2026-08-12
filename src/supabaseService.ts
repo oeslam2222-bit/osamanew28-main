@@ -584,12 +584,95 @@ CREATE POLICY "admin_delete_drivers" ON ezz_drivers FOR DELETE TO anon USING (
   EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
 );
 
--- Active Trip: القراءة للجميع (مطلوب لـ Realtime)، الكتابة للجميع
+-- Active Trip: قراءة للرحلة/السائق/أدمن، تعديل للرحلة/السائق المعين/أدمن
 DROP POLICY IF EXISTS "Deny anon read active_trip" ON ezz_active_trip;
 DROP POLICY IF EXISTS "Allow anon read active_trip" ON ezz_active_trip;
-CREATE POLICY "anon_read_active_trip" ON ezz_active_trip FOR SELECT USING (true);
-DROP POLICY IF EXISTS "Allow public write active_trip" ON ezz_active_trip;
-CREATE POLICY "anon_write_active_trip" ON ezz_active_trip FOR ALL TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "anon_read_active_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "anon_write_active_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "rider_read_own_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "driver_read_assigned_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "admin_read_all_trips" ON ezz_active_trip;
+DROP POLICY IF EXISTS "driver_accept_searching_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "driver_update_assigned_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "rider_update_own_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "admin_update_all_trips" ON ezz_active_trip;
+DROP POLICY IF EXISTS "rider_insert_own_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "rider_delete_own_trip" ON ezz_active_trip;
+DROP POLICY IF EXISTS "admin_delete_all_trips" ON ezz_active_trip;
+
+CREATE POLICY "rider_read_own_trip" ON ezz_active_trip
+  FOR SELECT TO anon
+  USING (
+    rider_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'RIDER')
+  );
+
+CREATE POLICY "driver_read_assigned_trip" ON ezz_active_trip
+  FOR SELECT TO anon
+  USING (
+    driver_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'DRIVER')
+  );
+
+CREATE POLICY "admin_read_all_trips" ON ezz_active_trip
+  FOR SELECT TO anon
+  USING (
+    EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+  );
+
+CREATE POLICY "driver_accept_searching_trip" ON ezz_active_trip
+  FOR UPDATE TO anon
+  USING (
+    status = 'SEARCHING'
+    AND EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'DRIVER')
+  )
+  WITH CHECK (
+    driver_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'DRIVER')
+    AND status IN ('ACCEPTED', 'ARRIVED', 'STARTED', 'COMPLETED', 'CANCELLED')
+  );
+
+CREATE POLICY "driver_update_assigned_trip" ON ezz_active_trip
+  FOR UPDATE TO anon
+  USING (
+    driver_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'DRIVER')
+  )
+  WITH CHECK (
+    driver_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'DRIVER')
+  );
+
+CREATE POLICY "rider_update_own_trip" ON ezz_active_trip
+  FOR UPDATE TO anon
+  USING (
+    rider_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'RIDER')
+  )
+  WITH CHECK (
+    rider_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'RIDER')
+  );
+
+CREATE POLICY "admin_update_all_trips" ON ezz_active_trip
+  FOR UPDATE TO anon
+  USING (
+    EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+  )
+  WITH CHECK (
+    EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+  );
+
+CREATE POLICY "rider_insert_own_trip" ON ezz_active_trip
+  FOR INSERT TO anon
+  WITH CHECK (
+    rider_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'RIDER')
+  );
+
+CREATE POLICY "rider_delete_own_trip" ON ezz_active_trip
+  FOR DELETE TO anon
+  USING (
+    rider_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'RIDER')
+  );
+
+CREATE POLICY "admin_delete_all_trips" ON ezz_active_trip
+  FOR DELETE TO anon
+  USING (
+    EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN')
+  );
 
 -- تفعيل Realtime على جدول الرحلة النشطة (مطلوب لوصول الطلب للسائق فوراً)
 ALTER PUBLICATION supabase_realtime ADD TABLE ezz_active_trip;
