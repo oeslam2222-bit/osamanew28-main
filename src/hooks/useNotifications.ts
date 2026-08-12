@@ -52,6 +52,11 @@ export const useNotifications = (
         lastTripStatusBeforeNullRef.current = null;
         return;
       }
+      if (prevStatus === 'ACCEPTED' || prevStatus === 'ARRIVED' || prevStatus === 'STARTED') {
+        notifiedEventsRef.current.add('cancelled_notified');
+        lastTripStatusBeforeNullRef.current = null;
+        return;
+      }
       if (notifiedEventsRef.current.has('had_trip') && !notifiedEventsRef.current.has('cancelled_notified')) {
         notifiedEventsRef.current.add('cancelled_notified');
         if (lastTripCompletedRef.current) {
@@ -62,7 +67,7 @@ export const useNotifications = (
           lastTripCancelledRef.current = false;
           return;
         }
-        if (!['COMPLETED', 'SEARCHING'].includes(prevStatus || '')) {
+        if (!['COMPLETED', 'SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'].includes(prevStatus || '')) {
           playNotificationSound('alert');
           sendNativeNotification('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', '❌');
           triggerToast('⚠️ تم إلغاء الرحلة', 'تم إلغاء المشوار الحالي من قبل الطرف الآخر.', 'warning');
