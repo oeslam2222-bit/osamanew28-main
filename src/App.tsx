@@ -47,7 +47,8 @@
     fetchAllActiveTrips,
     uploadDriverImage,
     uploadDriverImageFromBase64,
-    mapDriverFromDB
+    mapDriverFromDB,
+    mapTripFromDB
   } from './supabaseService';
   import {
     requestNotificationPermission,
@@ -3285,6 +3286,168 @@
       alert(lang === 'ar' ? 'تم مسح جميع البيانات الوهمية نهائياً' : 'All fake data has been permanently cleared');
     };
 
+    const handleAdminForceCancelTrip = async (tripId: string) => {
+      if (!supabaseConnected) {
+        triggerToast(
+          lang === 'ar' ? 'غير متصل' : 'Offline',
+          lang === 'ar' ? 'لا يمكن تنفيذ العملية بدون اتصال' : 'Cannot perform this action while offline',
+          'warning'
+        );
+        return;
+      }
+      if (!confirm(lang === 'ar' ? 'تأكيد إلغاء الرحلة' : 'Confirm cancel trip')) return;
+
+      let trip = activeTrip?.id === tripId ? activeTrip : null;
+      if (!trip) {
+        const { data } = await supabase
+          .from('ezz_active_trip')
+          .select('*')
+          .eq('id', tripId)
+          .maybeSingle();
+        if (data) {
+          trip = mapTripFromDB(data);
+        }
+      }
+      if (!trip) {
+        triggerToast(
+          lang === 'ar' ? 'خطأ' : 'Error',
+          lang === 'ar' ? 'الرحلة غير موجودة' : 'Trip not found',
+          'warning'
+        );
+        return;
+      }
+
+      const cancelled: Trip = {
+        ...trip,
+        status: 'CANCELLED' as TripStatus,
+        completedAt: new Date().toISOString(),
+      };
+
+      if (trip.driverId) {
+        setDrivers((prev) =>
+          prev.map((d) => (d.id === trip.driverId ? { ...d, status: 'AVAILABLE' } : d))
+        );
+        const driver = drivers.find((d) => d.id === trip.driverId);
+        if (driver) {
+          await saveDriver({ ...driver, status: 'AVAILABLE' }).catch(() => {});
+        }
+      }
+
+      try {
+        await saveActiveTrip(cancelled);
+        if (trip.riderId) {
+          await saveTripToHistory(cancelled, trip.riderId, 'rider', getDeviceId());
+        }
+        if (trip.driverId) {
+          await saveTripToHistory(cancelled, trip.driverId, 'driver', getDeviceId());
+        }
+        await saveActiveTrip(null, tripId);
+      } catch (e) {
+        console.warn('[adminForceCancel] DB error:', e);
+      }
+
+      if (activeTrip?.id === tripId) {
+        setActiveTripWithTracking(null);
+        setNoAvailableDrivers(false);
+      }
+
+      triggerToast(
+        lang === 'ar' ? 'تم إلغاء الرحلة' : 'Trip cancelled',
+        lang === 'ar' ? 'تم إلغاء الرحلة بنجاح من لوحة التحكم' : 'Trip has been cancelled from admin panel',
+        'success'
+      );
+    };
+
+    const handleAdminForceEndTrip = async (tripId: string) => {
+      if (!supabaseConnected) {
+        triggerToast(
+          lang === 'ar' ? 'غير متصل' : 'Offline',
+          lang === 'ar' ? 'لا يمكن تنفيذ العملية بدون اتصال' : 'Cannot perform this action while offline',
+          'warning'
+        );
+        return;
+      }
+      if (!confirm(lang === 'ar' ? 'تأكيد إنهاء الرحلة' : 'Confirm end trip')) return;
+
+      let trip = activeTrip?.id === tripId ? activeTrip : null;
+      if (!trip) {
+        const { data } = await supabase
+          .from('ezz_active_trip')
+          .select('*')
+          .eq('id', tripId)
+          .maybeSingle();
+        if (data) {
+          trip = mapTripFromDB(data);
+        }
+      }
+      if (!trip || trip.status !== 'STARTED') {
+        triggerToast(
+          lang === 'ar' ? 'خطأ' : 'Error',
+          lang === 'ar' ? 'لا يمكن إنهاء هذه الرحلة (ليست في حالة جارية)' : 'Cannot end this trip (not in STARTED status)',
+          'warning'
+        );
+        return;
+      }
+
+      const { driverId, fare, commission } = trip;
+      const netEarnings = fare - commission;
+
+      if (driverId) {
+        const updatedDrivers = drivers.map((d) => {
+          if (d.id !== driverId) return d;
+          return {
+            ...d,
+            status: 'OFFLINE' as const,
+            isOnline: false,
+            totalTrips: d.totalTrips + 1,
+            totalEarnings: d.totalEarnings + netEarnings,
+            totalCommissionPaid: d.totalCommissionPaid + commission,
+          };
+        });
+        const updatedDriver = updatedDrivers.find((d) => d.id === driverId);
+        setDrivers(updatedDrivers);
+        if (updatedDriver) {
+          await saveDriver(updatedDriver).catch(() => {});
+        }
+      }
+
+      setStats((s) => ({
+        ...s,
+        totalRevenue: s.totalRevenue + fare,
+        totalCommission: s.totalCommission + commission,
+        totalCompletedTrips: s.totalCompletedTrips + 1,
+      }));
+
+      const completed: Trip = {
+        ...trip,
+        status: 'COMPLETED' as TripStatus,
+        completedAt: new Date().toISOString(),
+      };
+
+      try {
+        await saveActiveTrip(completed);
+        if (trip.driverId) {
+          await saveTripToHistory(completed, trip.driverId, 'driver', getDeviceId());
+        }
+        if (trip.riderId) {
+          await saveTripToHistory(completed, trip.riderId, 'rider', getDeviceId());
+        }
+        await saveActiveTrip(null, tripId);
+      } catch (e) {
+        console.warn('[adminForceEnd] DB error:', e);
+      }
+
+      if (activeTrip?.id === tripId) {
+        setActiveTripWithTracking(completed);
+      }
+
+      triggerToast(
+        lang === 'ar' ? 'تم إنهاء الرحلة' : 'Trip ended',
+        lang === 'ar' ? 'تم إنهاء الرحلة بنجاح من لوحة التحكم' : 'Trip has been ended from admin panel',
+        'success'
+      );
+    };
+
     // Rider auth submission
     const handleRiderSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
@@ -4661,8 +4824,10 @@
                         onBlockRider={handleBlockRider}
                         onUnblockRider={handleUnblockRider}
                           onDeleteRider={handleDeleteRider}
-                          onClearAllFakeData={handleClearAllFakeData}
-                          lang={lang}
+                           onClearAllFakeData={handleClearAllFakeData}
+                           onAdminForceCancelTrip={handleAdminForceCancelTrip}
+                           onAdminForceEndTrip={handleAdminForceEndTrip}
+                           lang={lang}
                             onLogout={() => {
                               setAdminIsLoggedIn(false);
                               setAdminUserId('');
