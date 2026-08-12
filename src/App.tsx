@@ -1339,11 +1339,14 @@
       };
     }, [supabaseConnected]);
 
-    // Polling fallback for drivers list (Realtime can miss/delay events)
+    // Polling fallback for drivers list — disabled, using Realtime only
+    // Realtime subscription on ezz_drivers handles all driver updates instantly
+    // Uncomment below only if Realtime is not working reliably
+    /*
     useEffect(() => {
-      if (!supabaseConnected) return;
+      if (!supabaseConnected || !driverIsLoggedIn) return;
 
-      const pollInterval = 25000;
+      const pollInterval = 300000; // 5 minutes fallback only
 
       const interval = setInterval(async () => {
         if (!isMountedRef.current) return;
@@ -1366,13 +1369,14 @@
       }, pollInterval);
 
       return () => clearInterval(interval);
-    }, [supabaseConnected, setDrivers]);
+    }, [supabaseConnected, driverIsLoggedIn, setDrivers]);
+    */
 
-    // 1e. Polling for live/active trips (admin dashboard)
+    // 1e. Polling for live/active trips (admin dashboard) — manual refresh recommended
     useEffect(() => {
       if (!supabaseConnected || !adminIsLoggedIn) return;
 
-      const pollInterval = 120000;
+      const pollInterval = 300000;
 
       const interval = setInterval(async () => {
         if (!isMountedRef.current) return;
