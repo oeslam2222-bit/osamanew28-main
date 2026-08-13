@@ -2853,8 +2853,8 @@
             if (d.id !== driverId) return d;
             return {
               ...d,
-              status: 'OFFLINE' as const,
-              isOnline: false,
+              status: 'AVAILABLE' as const,
+              isOnline: true,
               totalTrips: d.totalTrips + 1,
               totalEarnings: d.totalEarnings + netEarnings,
               totalCommissionPaid: d.totalCommissionPaid + commission,
@@ -3036,9 +3036,23 @@
             approvalStatus: cleared.approvalStatus,
             serviceAreas: cleared.serviceAreas,
           };
+          triggerToast(
+            lang === 'ar' ? 'تمت التسوية بنجاح' : 'Settlement Successful',
+            lang === 'ar'
+              ? `تم تصفية عمولة الكابتن ${driver.name} وتصبح الحساب مصفى الآن.`
+              : `Captain ${driver.name}'s commission has been settled. Account is now clear.`,
+            'success'
+          );
         }
       } else {
         setDrivers((prev) => prev.map((d) => (d.id === driverId ? cleared : d)));
+        triggerToast(
+          lang === 'ar' ? 'تمت التسوية محلياً' : 'Settled Locally',
+          lang === 'ar'
+            ? `تم تصفية عمولة الكابتن ${driver.name} محلياً. ستتم المزامنة عند عودة الاتصال.`
+            : `Captain ${driver.name}'s commission cleared locally. Will sync when connection returns.`,
+          'info'
+        );
       }
     };
 
@@ -3374,8 +3388,8 @@
           if (d.id !== driverId) return d;
           return {
             ...d,
-            status: 'OFFLINE' as const,
-            isOnline: false,
+            status: 'AVAILABLE' as const,
+            isOnline: true,
             totalTrips: d.totalTrips + 1,
             totalEarnings: d.totalEarnings + netEarnings,
             totalCommissionPaid: d.totalCommissionPaid + commission,
