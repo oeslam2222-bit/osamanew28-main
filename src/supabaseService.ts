@@ -1422,6 +1422,22 @@ export const mapTripToDB = (trip: Trip) => ({
 
 // --- API METHODS ---
 
+// Lightweight driver fetch for non-admin screens (excludes heavy columns: images, fcm_token, earnings, etc.)
+export const fetchDriversBasic = async (): Promise<Driver[] | null> => {
+  try {
+    const result = await withRetry<Driver[]>(() =>
+      supabase
+        .from('ezz_drivers')
+        .select('id,name,status,is_online,approval_status,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen,service_areas')
+    );
+    if (result.error) throw result.error;
+    return (result.data || []).map(mapDriverFromDB);
+  } catch (err: any) {
+    console.warn('Could not fetch drivers (basic) from Supabase:', err.message);
+    return null;
+  }
+};
+
 // Ultra-lightweight polling: only essential fields for map/display
 export const fetchDriversPolling = async (): Promise<Driver[] | null> => {
   try {
@@ -1434,22 +1450,6 @@ export const fetchDriversPolling = async (): Promise<Driver[] | null> => {
     return (result.data || []).map(mapDriverFromDB);
   } catch (err: any) {
     console.warn('Could not fetch drivers (polling) from Supabase:', err.message);
-    return null;
-  }
-};
-
-// Lightweight driver fetch for dispatch (excludes heavy image columns)
-export const fetchDriversBasic = async (): Promise<Driver[] | null> => {
-  try {
-    const result = await withRetry<Driver[]>(() =>
-      supabase
-        .from('ezz_drivers')
-        .select('id,name,status,is_online,approval_status,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen,service_areas')
-    );
-    if (result.error) throw result.error;
-    return (result.data || []).map(mapDriverFromDB);
-  } catch (err: any) {
-    console.warn('Could not fetch drivers (basic) from Supabase:', err.message);
     return null;
   }
 };
@@ -1712,6 +1712,8 @@ export const subscribeToActiveTrips = (
   let filter: any = { event: '*', schema: 'public', table: 'ezz_active_trip' };
   if (userId && userRole === 'rider') {
     filter = { ...filter, filter: `rider_id=eq.${userId}` };
+  } else if (userId && userRole === 'driver') {
+    filter = { ...filter, filter: `driver_id=eq.${userId},current_offered_driver_id=eq.${userId}` };
   }
   const channel = supabase
     .channel('ezz_active_trip_changes')
