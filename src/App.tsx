@@ -2289,6 +2289,7 @@
     const refreshWaitingTrip = async (tripOverride?: Trip): Promise<boolean> => {
       const trip = tripOverride ?? activeTrip;
       if (!trip || trip.status !== 'SEARCHING' || !rider.isLoggedIn) return false;
+      if (trip.riderId !== rider.id) return false;
 
       const pLoc = trip.pickup;
       const dLoc = trip.dropoff;
@@ -2379,6 +2380,7 @@
     // Auto-refresh waiting trip every 2 minutes to re-dispatch to new online drivers
     useEffect(() => {
       if (!activeTrip || activeTrip.status !== 'SEARCHING' || !rider.isLoggedIn) return;
+      if (activeTrip.riderId !== rider.id) return;
 
       const refreshInterval = setInterval(() => {
         if (!isMountedRef.current) return;
