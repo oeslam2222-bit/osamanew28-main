@@ -120,7 +120,7 @@ export const useActiveTripSync = ({
   useEffect(() => {
     if (!supabaseConnected) return;
 
-    const pollInterval = dataSaverMode ? 180000 : 120000;
+    const pollInterval = dataSaverMode ? 120000 : 60000;
 
     const interval = setInterval(async () => {
       if (!isMountedRef.current) return;
