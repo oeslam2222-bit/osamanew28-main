@@ -2394,6 +2394,63 @@
       return () => clearInterval(refreshInterval);
     }, [activeTrip?.id, activeTrip?.status, rider.isLoggedIn, supabaseConnected]);
 
+    // ARRIVED timeout: 15 minutes
+    useEffect(() => {
+      if (!activeTrip || activeTrip.status !== 'ARRIVED') return;
+
+      const timeoutMs = 15 * 60 * 1000; // 15 minutes
+      const statusUpdatedAt = activeTrip.statusUpdatedAt ? new Date(activeTrip.statusUpdatedAt).getTime() : Date.now();
+      const remaining = timeoutMs - (Date.now() - statusUpdatedAt);
+
+      if (remaining <= 0) {
+        // Already expired, cancel immediately
+        handleCancelRide({ userId: 'system', role: 'rider' });
+        return;
+      }
+
+      const timeoutId = setTimeout(() => {
+        if (!isMountedRef.current) return;
+        handleCancelRide({ userId: 'system', role: 'rider' });
+        triggerToast(
+          lang === 'ar' ? 'انتهت مهلة الانتظار' : 'Waiting time expired',
+          lang === 'ar'
+            ? 'لم يبدأ السائق الرحلة في الوقت المحدد. تم إلغاء الرحلة.'
+            : 'The driver did not start the ride in time. The ride has been cancelled.',
+          'warning'
+        );
+      }, remaining);
+
+      return () => clearTimeout(timeoutId);
+    }, [activeTrip?.id, activeTrip?.status, activeTrip?.statusUpdatedAt]);
+
+    // STARTED timeout: 1 hour
+    useEffect(() => {
+      if (!activeTrip || activeTrip.status !== 'STARTED') return;
+
+      const timeoutMs = 60 * 60 * 1000; // 1 hour
+      const statusUpdatedAt = activeTrip.statusUpdatedAt ? new Date(activeTrip.statusUpdatedAt).getTime() : Date.now();
+      const remaining = timeoutMs - (Date.now() - statusUpdatedAt);
+
+      if (remaining <= 0) {
+        handleCancelRide({ userId: 'system', role: 'rider' });
+        return;
+      }
+
+      const timeoutId = setTimeout(() => {
+        if (!isMountedRef.current) return;
+        handleCancelRide({ userId: 'system', role: 'rider' });
+        triggerToast(
+          lang === 'ar' ? 'انتهت مهلة الرحلة' : 'Ride time expired',
+          lang === 'ar'
+            ? 'انتهت المهلة المسموح بها للرحلة. تم إلغاء الرحلة.'
+            : 'The allowed ride time has expired. The ride has been cancelled.',
+          'warning'
+        );
+      }, remaining);
+
+      return () => clearTimeout(timeoutId);
+    }, [activeTrip?.id, activeTrip?.status, activeTrip?.statusUpdatedAt]);
+
     // Handler: Send Chat Message in Active Trip
     const handleSendChatMessage = (text: string, sender: 'RIDER' | 'DRIVER') => {
       if (!activeTrip) return;
@@ -2439,6 +2496,7 @@
         ...activeTrip,
         status: 'CANCELLED' as TripStatus,
         completedAt: new Date().toISOString(),
+        statusUpdatedAt: new Date().toISOString(),
       };
 
       try {
@@ -2527,6 +2585,7 @@
         status: 'ACCEPTED',
         driverId,
         driverName: drv?.name,
+        statusUpdatedAt: new Date().toISOString(),
       };
 
       setActiveTripWithTracking(acceptedTrip);
@@ -2542,6 +2601,7 @@
               status: 'ACCEPTED',
               driver_id: driverId,
               driver_name: drv?.name || null,
+              status_updated_at: new Date().toISOString(),
             })
             .eq('id', activeTrip.id)
             .eq('status', 'SEARCHING')
@@ -2793,7 +2853,7 @@
             : d
         )
       );
-      const updated = { ...activeTrip, status: 'STARTED' as TripStatus };
+      const updated = { ...activeTrip, status: 'STARTED' as TripStatus, statusUpdatedAt: new Date().toISOString() };
       setActiveTripWithTracking(updated);
       if (supabaseConnected) {
         saveActiveTrip(updated);
@@ -2818,7 +2878,7 @@
 
     const handleRiderConfirmArrival = () => {
       if (!activeTrip || activeTrip.status !== 'ARRIVED') return;
-      const updated = { ...activeTrip, status: 'STARTED' as TripStatus };
+      const updated = { ...activeTrip, status: 'STARTED' as TripStatus, statusUpdatedAt: new Date().toISOString() };
       setActiveTripWithTracking(updated);
       if (supabaseConnected) {
         saveActiveTrip(updated);
@@ -2893,6 +2953,7 @@
           ...activeTrip,
           status: 'COMPLETED' as TripStatus,
           completedAt: new Date().toISOString(),
+          statusUpdatedAt: new Date().toISOString(),
         };
 
         lastRouteCacheUseRef.current = Date.now();
@@ -3020,6 +3081,14 @@
       const driver = drivers.find((d) => d.id === driverId);
       console.log('[handleSettleDriverCommissions] driverId:', driverId, 'found:', !!driver, 'supabaseConnected:', supabaseConnected, 'currentCommission:', driver?.totalCommissionPaid);
       if (!driver) return;
+      if (driver.totalCommissionPaid > 0) {
+        const confirmed = confirm(
+          lang === 'ar'
+            ? `هل أنت متأكد من تصفية عمولة الكابتن ${driver.name} بقيمة ${Math.round(driver.totalCommissionPaid)} ج.م؟`
+            : `Are you sure you want to settle Captain ${driver.name}'s commission of ${Math.round(driver.totalCommissionPaid)} EGP?`
+        );
+        if (!confirmed) return;
+      }
       const cleared = { ...driver, totalCommissionPaid: 0 };
       if (supabaseConnected) {
         const saved = await saveDriver(cleared);
@@ -3273,7 +3342,7 @@
       await Promise.allSettled([
         clearAllDriversInDB(),
         clearAllRidersInDB(),
-        clearTripsHistoryInDB(adminUserId, getDeviceId())
+        clearTripsHistoryInDB()
       ]);
 
       alert(lang === 'ar' ? 'تم مسح جميع البيانات الوهمية نهائياً' : 'All fake data has been permanently cleared');

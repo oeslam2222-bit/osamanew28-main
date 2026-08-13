@@ -59,6 +59,7 @@ export interface Trip {
   appliedPromoDiscount?: number;
   pickupRegionId?: string;
   pickupRegionName?: string;
+  statusUpdatedAt?: string;
 }
 
 export interface PromoCode {

@@ -638,9 +638,14 @@ CREATE OR REPLACE FUNCTION get_admin_trips(
   p_search TEXT DEFAULT NULL
 )
 RETURNS SETOF ezz_trips_history
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN') THEN
+    RAISE EXCEPTION 'Unauthorized: admin access required';
+  END IF;
+  RETURN QUERY
   SELECT * FROM ezz_trips_history
   WHERE (p_date_from IS NULL OR created_at >= p_date_from)
   AND (p_date_to IS NULL OR created_at <= p_date_to)
@@ -660,6 +665,7 @@ AS $$
   )
   ORDER BY created_at DESC
   LIMIT p_limit OFFSET (p_page * p_limit);
+END;
 $$;
 
 -- ============================================================
@@ -672,10 +678,17 @@ CREATE OR REPLACE FUNCTION count_admin_trips(
   p_search TEXT DEFAULT NULL
 )
 RETURNS BIGINT
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
-  SELECT COUNT(*) FROM ezz_trips_history
+DECLARE
+  v_count BIGINT;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN') THEN
+    RAISE EXCEPTION 'Unauthorized: admin access required';
+  END IF;
+
+  SELECT COUNT(*) INTO v_count FROM ezz_trips_history
   WHERE (p_date_from IS NULL OR created_at >= p_date_from)
   AND (p_date_to IS NULL OR created_at <= p_date_to)
   AND (
@@ -692,6 +705,9 @@ AS $$
     OR LOWER(COALESCE(dropoff->>'nameAr', '')) LIKE LOWER('%' || p_search || '%')
     OR LOWER(COALESCE(dropoff->>'nameEn', '')) LIKE LOWER('%' || p_search || '%')
   );
+
+  RETURN v_count;
+END;
 $$;
 
 -- ============================================================
@@ -699,10 +715,16 @@ $$;
 -- ============================================================
 CREATE OR REPLACE FUNCTION admin_clear_all_trips()
 RETURNS VOID
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM ezz_sessions WHERE role = 'ADMIN') THEN
+    RAISE EXCEPTION 'Unauthorized: admin access required';
+  END IF;
+
   DELETE FROM ezz_trips_history;
+END;
 $$;
 
 -- ============================================================

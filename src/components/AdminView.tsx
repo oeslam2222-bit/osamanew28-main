@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Driver, Trip, SystemStats, Location, Rider, PromoCode, Region, Ad } from '../types';
 import { DollarSign, ShieldAlert, Award, TrendingUp, Settings, Percent, CheckCircle, Star, Users, MapPin, Database, Sparkles, Search, AlertCircle, HelpCircle, Globe, Loader2, Calendar, Clock, BarChart2, Car, Map, Trash2, Plus, Megaphone, Phone, Eye, EyeOff } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, AreaChart, Area, PieChart, Pie, Cell } from 'recharts';
-import { fetchTripsHistoryFilteredPaginated, fetchTripsHistoryCount, fetchAllTrips, generatePromoCode, fetchPromoCodes, deletePromoCode, fetchRegions, saveRegion, deleteRegionInDB, fetchAds, saveAd, deleteAd, loadSession, getDeviceId } from '../supabaseService';
+import { fetchTripsHistoryFilteredPaginated, fetchTripsHistoryCount, fetchAllTrips, generatePromoCode, fetchPromoCodes, deletePromoCode, fetchRegions, saveRegion, deleteRegionInDB, fetchAds, saveAd, deleteAd, loadSession, getDeviceId, adminForceCompleteTrip } from '../supabaseService';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE, DATA_RETENTION_POLICY } from '../utils/legal';
 import { exportBackup, importBackup } from '../utils/backup';
 import { AVAILABLE_CITIES } from '../constants';
@@ -282,6 +282,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [promoUsageLimit, setPromoUsageLimit] = useState<number | ''>('');
   const [tripHistorySearchQuery, setTripHistorySearchQuery] = useState('');
   const [tripHistoryStatusFilter, setTripHistoryStatusFilter] = useState<'all' | 'COMPLETED' | 'CANCELLED' | 'ACTIVE'>('all');
+  const [tripCommissionFilter, setTripCommissionFilter] = useState<number | ''>('');
   const [expandedTripId, setExpandedTripId] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -539,7 +540,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       if (!statsObj[key]) statsObj[key] = { trips: 0, earnings: 0, commission: 0 };
       statsObj[key].trips += 1;
       statsObj[key].earnings += t.fare;
-      statsObj[key].commission += t.commission;
+      statsObj[key].commission += t.commission || 0;
     });
     return statsObj;
   };
@@ -572,11 +573,18 @@ export const AdminView: React.FC<AdminViewProps> = ({
         page,
         limit: 20,
       });
+      let filtered = result.trips;
+      if (tripCommissionFilter !== '' && tripCommissionFilter !== null && tripCommissionFilter !== undefined) {
+        const minCommission = Number(tripCommissionFilter);
+        if (!Number.isNaN(minCommission)) {
+          filtered = filtered.filter(t => Number(t.commission) >= minCommission);
+        }
+      }
       if (reset) {
-        setAdminTrips(result.trips);
+        setAdminTrips(filtered);
         setAdminTripsPage(1);
       } else {
-        setAdminTrips((prev) => [...prev, ...result.trips]);
+        setAdminTrips((prev) => [...prev, ...filtered]);
         setAdminTripsPage((prev) => prev + 1);
       }
       setAdminTripsHasMore(result.hasMore);
@@ -594,12 +602,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   useEffect(() => {
     loadAdminTrips(true);
-  }, [tripDateFrom, tripDateTo, tripHistoryStatusFilter, tripHistorySearchQuery, adminUserId]);
+  }, [tripDateFrom, tripDateTo, tripHistoryStatusFilter, tripHistorySearchQuery, tripCommissionFilter, adminUserId]);
 
   useEffect(() => {
     let cancelled = false;
     setIsLoadingAllTrips(true);
-    fetchAllTrips(1000, adminUserId || undefined, getDeviceId()).then((trips) => {
+    fetchAllTrips(1000).then((trips) => {
       if (!cancelled) {
         setAllTrips(trips);
         setIsLoadingAllTrips(false);
@@ -609,6 +617,30 @@ export const AdminView: React.FC<AdminViewProps> = ({
     });
     return () => { cancelled = true; };
   }, [adminUserId]);
+
+  const handleForceCompleteTrip = async (tripId: string) => {
+    const confirmed = confirm(
+      lang === 'ar'
+        ? 'هل أنت متأكد من إجبار إكمال هذه الرحلة؟ سيتم حساب العمولة وإضافتها.'
+        : 'Are you sure you want to force complete this trip? Commission will be calculated and added.'
+    );
+    if (!confirmed) return;
+    const ok = await adminForceCompleteTrip(tripId);
+    if (ok) {
+      triggerToast(
+        lang === 'ar' ? 'تم إكمال الرحلة بنجاح' : 'Trip force completed',
+        lang === 'ar' ? 'تم تغيير حالة الرحلة إلى مكتملة وحساب العمولة.' : 'Trip status changed to completed and commission calculated.',
+        'success'
+      );
+      loadAdminTrips(true);
+    } else {
+      triggerToast(
+        lang === 'ar' ? 'فشل العملية' : 'Operation failed',
+        lang === 'ar' ? 'لم يتم تغيير حالة الرحلة. حاول مرة أخرى.' : 'Could not change trip status. Try again.',
+        'warning'
+      );
+    }
+  };
 
   // OpenStreetMap Nominatim Live Search State
   const [osmQuery, setOsmQuery] = useState('');
@@ -1684,10 +1716,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           (d.vehicleName && d.vehicleName.toLowerCase().includes(q))
                         );
                       })
-                       .map((drv) => {
-                         const isFrozen = drv.approvalStatus === 'FROZEN';
-                         const isRejected = drv.approvalStatus === 'REJECTED';
-                          const driverPeriodStats = getDriverStatsForPeriod(driverPeriodFilter)[drv.id] || { trips: 0, earnings: 0, commission: 0 };
+                        .map((drv) => {
+                          const isFrozen = drv.approvalStatus === 'FROZEN';
+                          const isRejected = drv.approvalStatus === 'REJECTED';
+                          const statsForPeriod = getDriverStatsForPeriod(driverPeriodFilter);
+                          const driverPeriodStats = statsForPeriod[drv.id] || statsForPeriod[drv.name] || { trips: 0, earnings: 0, commission: 0 };
 
                          return (
                          <div key={drv.id} className={`border border-slate-100 p-3 rounded-xl space-y-2.5 ${isFrozen ? 'bg-red-50/20 border-red-100' : isRejected ? 'bg-slate-50 border-slate-200' : 'bg-white'}`}>
@@ -1739,10 +1772,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'أرباح السائق' : 'Driver Net'}</p>
                                <p className="font-bold text-slate-700 mt-0.5">{Math.round(driverPeriodStats.earnings)} ج.م</p>
                              </div>
-                              <div>
-                                <p className="text-[8px] text-rose-500">{lang === 'ar' ? 'المديونة (العمولة)' : 'Outstanding Commission'}</p>
-                                <p className="font-bold text-rose-600 mt-0.5">{Math.round(drv.totalCommissionPaid)} ج.م</p>
-                              </div>
+                               <div>
+                                 <p className="text-[8px] text-rose-500">{lang === 'ar' ? 'المديونة (العمولة)' : 'Outstanding Commission'}</p>
+                                 <p className="font-bold text-rose-600 mt-0.5">{Math.round(driverPeriodStats.commission)} ج.م</p>
+                               </div>
                            </div>
 
                           {/* Service Areas Assignment */}
@@ -2158,21 +2191,36 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   )}
                  </div>
 
-                 <div className="flex gap-2">
-                   <input
-                     type="date"
-                     value={tripDateFrom}
-                     onChange={(e) => setTripDateFrom(e.target.value)}
-                     className="flex-1 text-[9px] bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:outline-none focus:border-indigo-500 pointer-events-auto"
-                   />
-                   <span className="text-[9px] text-slate-400 self-center">{lang === 'ar' ? 'إلى' : 'to'}</span>
-                   <input
-                     type="date"
-                     value={tripDateTo}
-                     onChange={(e) => setTripDateTo(e.target.value)}
-                     className="flex-1 text-[9px] bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:outline-none focus:border-indigo-500 pointer-events-auto"
-                   />
-                 </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="date"
+                      value={tripDateFrom}
+                      onChange={(e) => setTripDateFrom(e.target.value)}
+                      className="flex-1 text-[9px] bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:outline-none focus:border-indigo-500 pointer-events-auto"
+                    />
+                    <span className="text-[9px] text-slate-400 self-center">{lang === 'ar' ? 'إلى' : 'to'}</span>
+                    <input
+                      type="date"
+                      value={tripDateTo}
+                      onChange={(e) => setTripDateTo(e.target.value)}
+                      className="flex-1 text-[9px] bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:outline-none focus:border-indigo-500 pointer-events-auto"
+                    />
+                    <input
+                      type="number"
+                      value={tripCommissionFilter}
+                      onChange={(e) => setTripCommissionFilter(e.target.value === '' ? '' : Number(e.target.value))}
+                      placeholder={lang === 'ar' ? 'عمولة من...' : 'Commission from...'}
+                      className="w-24 text-[9px] bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:outline-none focus:border-indigo-500 pointer-events-auto"
+                    />
+                    {tripCommissionFilter !== '' && (
+                      <button
+                        onClick={() => setTripCommissionFilter('')}
+                        className="text-[9px] text-slate-400 hover:text-slate-600 font-bold"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
 
                  <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none pointer-events-auto">
                   {[
@@ -2274,6 +2322,18 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                 <td className="py-3 px-3 text-center">
                                   <button
                                     type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleForceCompleteTrip(trip.id);
+                                    }}
+                                    className="px-2.5 py-1 text-[9px] font-black rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-colors cursor-pointer"
+                                    title={lang === 'ar' ? 'إجبار إكمال الرحلة' : 'Force complete trip'}
+                                  >
+                                    {lang === 'ar' ? '✓ إكمال' : '✓ Complete'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedTripId(isExpanded ? null : trip.id)}
                                     className="px-2.5 py-1 text-[9px] font-black rounded-lg bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-600 transition-colors cursor-pointer"
                                   >
                                     {isExpanded ? (lang === 'ar' ? 'إخفاء 🔼' : 'Hide 🔼') : (lang === 'ar' ? 'تفاصيل 🔽' : 'Details 🔽')}

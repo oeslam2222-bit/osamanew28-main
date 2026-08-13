@@ -1217,7 +1217,7 @@ export const mapDriverFromDB = (row: any): Driver => ({
   rating: row.rating || 5.0,
   totalTrips: row.total_trips || 0,
   totalEarnings: row.total_earnings || 0,
-  totalCommissionPaid: row.total_commission_paid || 0,
+  totalCommissionPaid: Number(row.total_commission_paid) || 0,
   currentX: row.current_x || 50,
   currentY: row.current_y || 50,
   agreedToTerms: !!row.agreed_to_terms,
@@ -1360,7 +1360,7 @@ export const mapTripFromDB = (row: any): Trip => ({
   pickupLandmark: row.pickup_landmark || undefined,
   status: row.status || 'IDLE',
   fare: row.fare || 0,
-  commission: row.commission || 0,
+  commission: Number(row.commission) || 0,
   distance: row.distance || 0,
   etaMinutes: row.eta_minutes || undefined,
   requestedVehicleType: row.requested_vehicle_type || undefined,
@@ -1384,6 +1384,7 @@ export const mapTripFromDB = (row: any): Trip => ({
   dispatchTimerMax: row.dispatch_timer_max ?? undefined,
   appliedPromoCode: row.applied_promo_code || undefined,
   appliedPromoDiscount: row.applied_promo_discount || undefined,
+  statusUpdatedAt: row.status_updated_at || undefined,
 });
 
 export const mapTripToDB = (trip: Trip) => ({
@@ -1418,6 +1419,7 @@ export const mapTripToDB = (trip: Trip) => ({
   dispatch_timer_max: trip.dispatchTimerMax ?? null,
   applied_promo_code: trip.appliedPromoCode || null,
   applied_promo_discount: trip.appliedPromoDiscount || null,
+  status_updated_at: trip.statusUpdatedAt || null,
 });
 
 // --- API METHODS ---
@@ -1946,12 +1948,9 @@ export const fetchTripsHistoryFilteredPaginated = async ({
   searchQuery?: string;
   page?: number;
   limit?: number;
-}): Promise<{ trips: Trip[]; hasMore: boolean }> => {
+  }): Promise<{ trips: Trip[]; hasMore: boolean }> => {
   try {
-    const adminId = role === 'admin' ? userId : undefined;
     const { data, error } = await supabase.rpc('get_admin_trips', {
-      p_admin_user_id: adminId || userId,
-      p_device_id: deviceId || null,
       p_page: page,
       p_limit: limit,
       p_date_from: dateFrom || null,
@@ -1970,11 +1969,9 @@ export const fetchTripsHistoryFilteredPaginated = async ({
 };
 
 // Fetch all trips (admin/backup usage)
-export const fetchAllTrips = async (limit: number = 1000, adminUserId?: string, deviceId?: string): Promise<Trip[]> => {
+export const fetchAllTrips = async (limit: number = 1000): Promise<Trip[]> => {
   try {
     const { data, error } = await supabase.rpc('get_admin_trips', {
-      p_admin_user_id: adminUserId || '',
-      p_device_id: deviceId || null,
       p_page: 0,
       p_limit: limit,
       p_date_from: null,
@@ -1991,16 +1988,27 @@ export const fetchAllTrips = async (limit: number = 1000, adminUserId?: string, 
 };
 
 // Clear Trips History (admin only - uses secure RPC)
-export const clearTripsHistoryInDB = async (adminUserId?: string, deviceId?: string): Promise<boolean> => {
+export const clearTripsHistoryInDB = async (): Promise<boolean> => {
   try {
-    const { error } = await supabase.rpc('admin_clear_all_trips', {
-      p_admin_user_id: adminUserId || '',
-      p_device_id: deviceId || '',
-    });
+    const { error } = await supabase.rpc('admin_clear_all_trips', {});
     if (error) throw error;
     return true;
   } catch (err: any) {
     console.warn('Could not clear trips history in Supabase:', err.message);
+    return false;
+  }
+};
+
+// Admin force complete a trip (CANCELLED -> COMPLETED)
+export const adminForceCompleteTrip = async (tripId: string): Promise<boolean> => {
+  try {
+    const { error } = await supabase.rpc('admin_force_complete_trip', {
+      p_trip_id: tripId,
+    });
+    if (error) throw error;
+    return true;
+  } catch (err: any) {
+    console.warn('Could not force complete trip in Supabase:', err.message);
     return false;
   }
 };
