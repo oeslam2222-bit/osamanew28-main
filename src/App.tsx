@@ -12,10 +12,11 @@
   import { motion, AnimatePresence } from 'motion/react';
   import { calculateHaversineDistance, estimateDrivingDistance, calculateDynamicFare, getVehiclePricing, calculateVehicleFare, calculateFullTripFare, RouteResult, RouteStep } from './utils/haversine';
   import { getEligibleDrivers, getCoordsFromXY } from './utils/tripDispatchUtils';
-  import { 
-    checkSupabaseConnection, 
-    fetchDrivers, 
-    saveDriver, 
+  import {
+    checkSupabaseConnection,
+    fetchDrivers,
+    fetchDriversBasic,
+    saveDriver,
     fetchRiders, 
     saveRider, 
     fetchActiveTrip, 
@@ -69,7 +70,6 @@
     getInitialDataSaverState,
     setDataSaverState,
     getAdaptivePollingInterval,
-    getBackgroundPollingInterval,
     getCachedRoute,
     setCachedRoute
   } from './utils/dataSaver';
@@ -826,8 +826,8 @@
         let driver = drivers.find(d => d.id === selectedDriverId);
         if (!driver) {
           try {
-            const freshDrivers = await fetchDrivers();
-            driver = freshDrivers?.find(d => d.id === selectedDriverId);
+            const freshDrivers = await fetchDriversBasic();
+          driver = freshDrivers?.find(d => d.id === selectedDriverId);
           } catch (e) {
             console.warn('[DriverReset] Could not fetch driver:', e);
           }
@@ -1103,7 +1103,7 @@
             dbActiveTrip,
           ] = await Promise.all([
             fetchLocations(),
-            fetchDrivers(),
+            fetchDriversBasic(),
             fetchRiders(),
             fetchRegions(),
             fetchAds(),
@@ -1776,87 +1776,7 @@
       };
     }, [driverIsLoggedIn, selectedDriverId, lang]);
 
-      // 3. Background notification poller — keeps driver alerts alive even when tab is hidden
-    useEffect(() => {
-      if (!supabaseConnected || !driverIsLoggedIn) return;
-      if (currentScreen !== 'DRIVER_AUTH' && currentScreen !== 'DRIVER_DASHBOARD') return;
-
-      // Auto-request notification permission when driver logs in
-      if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission();
-      }
-
-      const resetNotified = () => {
-        lastNotifiedTripIdRef.current = null;
-        lastNotifiedOfferedDriverIdRef.current = null;
-      };
-
-      // Reset notification state when app goes to background so we can re-notify when it comes back
-      const handleVisibilityChange = () => {
-        if (document.hidden) {
-          resetNotified();
-        } else {
-          // App just became visible, immediately check for pending trip
-          const remoteActiveTrip = activeTrip;
-          if (remoteActiveTrip && remoteActiveTrip.status === 'SEARCHING') {
-            const isEligible = remoteActiveTrip.offeredDriverIds?.includes(selectedDriverId);
-            const isNewlyOffered = remoteActiveTrip.currentOfferedDriverId === selectedDriverId;
-            const needsNotify = lastNotifiedTripIdRef.current !== remoteActiveTrip.id ||
-              lastNotifiedOfferedDriverIdRef.current !== remoteActiveTrip.currentOfferedDriverId;
-            if (isEligible && needsNotify && isNewlyOffered) {
-              lastNotifiedTripIdRef.current = remoteActiveTrip.id;
-              lastNotifiedOfferedDriverIdRef.current = remoteActiveTrip.currentOfferedDriverId || null;
-            }
-          }
-        }
-      };
-
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-
-      if (activeTrip && activeTrip.status === 'SEARCHING') {
-        lastNotifiedTripIdRef.current = activeTrip.id;
-        lastNotifiedOfferedDriverIdRef.current = activeTrip.currentOfferedDriverId || null;
-      }
-
-      const pollInterval = getBackgroundPollingInterval(60000, dataSaverMode, !!activeTrip && activeTrip.status === 'SEARCHING');
-
-      const interval = setInterval(async () => {
-        if (!isMountedRef.current) return;
-        try {
-          const remoteActiveTrip = await fetchActiveTrip(selectedDriverId, 'driver');
-          if (!remoteActiveTrip) return;
-
-          if (remoteActiveTrip.status !== 'SEARCHING') {
-            if (lastNotifiedTripIdRef.current !== null) {
-              console.log('[BackgroundPoller] Trip left SEARCHING, clearing notifications');
-              lastNotifiedTripIdRef.current = null;
-              lastNotifiedOfferedDriverIdRef.current = null;
-            }
-            return;
-          }
-
-          if (remoteActiveTrip.status === 'SEARCHING') {
-            const isEligible = remoteActiveTrip.offeredDriverIds?.includes(selectedDriverId);
-            const isNewlyOffered = remoteActiveTrip.currentOfferedDriverId === selectedDriverId;
-            const needsNotify = lastNotifiedTripIdRef.current !== remoteActiveTrip.id ||
-              lastNotifiedOfferedDriverIdRef.current !== remoteActiveTrip.currentOfferedDriverId;
-            if (isEligible && needsNotify && isNewlyOffered) {
-              lastNotifiedTripIdRef.current = remoteActiveTrip.id;
-              lastNotifiedOfferedDriverIdRef.current = remoteActiveTrip.currentOfferedDriverId || null;
-              setActiveTripWithTracking(remoteActiveTrip);
-            }
-          }
-        } catch (err) {
-          console.warn('Background notification poll error:', err);
-        }
-      }, pollInterval);
-
-      return () => {
-        clearInterval(interval);
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-        resetNotified();
-      };
-    }, [supabaseConnected, driverIsLoggedIn, selectedDriverId, lang, dataSaverMode, activeTrip?.id, activeTrip?.status, currentScreen]);
+    // 3. Active trip updates are handled by useActiveTripSync hook (unified polling + realtime)
 
     // 4. Reactive Push Sync to Supabase upon state updates (debounced)
     const driversSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1908,7 +1828,7 @@
       if (driversSyncTimerRef.current) clearTimeout(driversSyncTimerRef.current);
       driversSyncTimerRef.current = setTimeout(() => {
         syncDriversToSupabase(drivers);
-      }, 3000);
+      }, 15000);
       return () => {
         if (driversSyncTimerRef.current) clearTimeout(driversSyncTimerRef.current);
       };
@@ -2051,9 +1971,9 @@
             clearInterval(interval);
           }
 
-          // Save driver location to DB every 25 ticks (~5s) for live tracking
+          // Save driver location to DB every 90 ticks (~18s) for live tracking
           saveCounter++;
-          if (saveCounter % 25 === 0 && supabaseConnected) {
+          if (saveCounter % 90 === 0 && supabaseConnected) {
             const updatedDriver = next.find((d) => d.id === activeTrip.driverId);
             if (updatedDriver && updatedDriver.lat && updatedDriver.lng) {
               saveDriver(updatedDriver);
@@ -2075,7 +1995,7 @@
 
       if (supabaseConnected) {
         try {
-          const freshDrivers = await fetchDrivers();
+          const freshDrivers = await fetchDriversBasic();
           if (freshDrivers?.length) driverList = freshDrivers;
         } catch (e) {
           console.warn('Could not fetch fresh drivers for dispatch, falling back to local list:', e);
@@ -3650,7 +3570,7 @@
             console.warn('[FCM] Could not register token:', err);
           }
           
-          const freshDrivers = await fetchDrivers();
+          const freshDrivers = await fetchDriversBasic();
           if (freshDrivers && freshDrivers.length > 0) {
             setDrivers(freshDrivers);
           }
