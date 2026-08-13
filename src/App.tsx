@@ -1334,7 +1334,18 @@
           }
         });
 
-      channel.subscribe();
+      channel.subscribe((status: string) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[realtime] drivers_list_channel subscribed');
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn('[realtime] drivers_list_channel', status, '- triggering fallback fetch');
+          fetchDriversBasic().then((fresh) => {
+            if (fresh && fresh.length > 0) {
+              setDrivers(fresh);
+            }
+          }).catch(() => {});
+        }
+      });
 
       return () => {
         supabase.removeChannel(channel);
@@ -1417,7 +1428,40 @@
       };
 
     updateLastSeen();
-    const interval = setInterval(updateLastSeen, 30000);
+    const interval = setInterval(updateLastSeen, 10000);
+
+      const handleOnline = async () => {
+        if (!isMountedRef.current) return;
+        try {
+          const fresh = await fetchDriversBasic();
+          if (fresh && fresh.length > 0) {
+            setDrivers((prev) => {
+              const merged = [...fresh];
+              fresh.forEach((fd) => {
+                const local = prev.find((d) => d.id === fd.id);
+                if (local) {
+                  const idx = merged.findIndex((m) => m.id === fd.id);
+                  merged[idx] = { ...fd, ...local, lastSeen: local.lastSeen || fd.lastSeen };
+                }
+              });
+              return merged;
+            });
+          }
+        } catch (e) {
+          // best-effort
+        }
+      };
+
+      const handleVisibilityChange = () => {
+        if (!document.hidden && isMountedRef.current) {
+          handleOnline();
+        }
+      };
+
+      if (typeof window !== 'undefined') {
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('visibilitychange', handleVisibilityChange);
+      }
 
       // Mark offline immediately when app/tab is closed
       const markOffline = async () => {
@@ -1439,6 +1483,8 @@
         clearInterval(interval);
         if (typeof window !== 'undefined') {
           window.removeEventListener('beforeunload', markOffline);
+          window.removeEventListener('online', handleOnline);
+          window.removeEventListener('visibilitychange', handleVisibilityChange);
         }
       };
     }, [supabaseConnected, driverIsLoggedIn, selectedDriverId]);
@@ -2022,6 +2068,17 @@
       if (!rider.isLoggedIn) return;
       requestInProgressRef.current = true;
       try {
+        if (activeTrip && ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'].includes(activeTrip.status)) {
+          triggerToast(
+            lang === 'ar' ? 'لديك رحلة جارية' : 'You have an active trip',
+            lang === 'ar'
+              ? 'يرجى انتظار انتهاء الرحلة الحالية قبل طلب رحلة جديدة.'
+              : 'Please wait for your current trip to finish before requesting a new one.',
+            'warning'
+          );
+          requestInProgressRef.current = false;
+          return;
+        }
         if (!selectedPickup || !selectedDropoff) return;
         if (!riderPickupRegion) {
           triggerToast(
@@ -2330,7 +2387,7 @@
             console.log('[WaitingTripRefresh] Trip refreshed successfully');
           }
         });
-      }, 120000);
+      }, 60000);
 
       return () => clearInterval(refreshInterval);
     }, [activeTrip?.id, activeTrip?.status, rider.isLoggedIn, supabaseConnected]);
