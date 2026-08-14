@@ -1560,7 +1560,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                               {lang === 'ar' ? 'رفض الطلب' : 'Reject'}
                             </button>
                             <a
-                              href={`https://wa.me/${drv.phone.replace(/[^0-9]/g, '') || '201015555555'}?text=${encodeURIComponent(
+                              href={`https://wa.me/${String(drv.phone || '201015555555').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
                                 lang === 'ar'
                                   ? `مرحباً كابتن ${drv.name}، معك إدارة تطبيق كابتن عز. لقد تلقينا طلب انضمامك.\n\nنحتاج منك إرسال المستندات التالية:\n1. صورة بطاقة الرقم القومي\n2. صورة رخصة القيادة\n3. صورة رخصة المركبة\n4. صورة شخصية\n\nبمجرد استلام المستندات سيتم مراجعة طلبك والرد عليك.`
                                   : `Hello Captain ${drv.name}, this is Ezz Admin. We received your driver application.\n\nPlease send the following documents:\n1. National ID card photo\n2. Driving license photo\n3. Vehicle license photo\n4. Personal photo\n\nWe will review and reply once received.`
@@ -1808,7 +1808,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                              )}
 
                             <a
-                              href={`https://wa.me/${drv.phone.replace(/[^0-9]/g, '') || '201015555555'}?text=${encodeURIComponent(
+                              href={`https://wa.me/${String(drv.phone || '201015555555').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
                                 lang === 'ar'
                                   ? `مرحباً كابتن ${drv.name}، نرجو تسوية عمولة الرحلات المتأخرة المستحقة لتطبيق كابتن عز بقيمة (${drv.totalCommissionPaid} ج.م).`
                                   : `Hello Captain ${drv.name}, please settle your outstanding commissions of ${drv.totalCommissionPaid} EGP.`
