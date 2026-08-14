@@ -1668,6 +1668,11 @@ export const saveActiveTrip = async (trip: Trip | null, clearTripId?: string): P
       return true;
     }
 
+    if (!trip.id || !trip.status) {
+      console.warn('[saveActiveTrip] Refusing to save trip with missing id/status');
+      return false;
+    }
+
     console.log('[saveActiveTrip] Saving trip to DB:', trip.id, 'status:', trip.status, 'offeredDriverIds:', trip.offeredDriverIds, 'chatMessages count:', trip.chatMessages?.length || 0);
 
     // If updating an existing trip with chat messages, merge with remote to avoid losing messages
