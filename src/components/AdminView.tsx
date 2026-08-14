@@ -1809,18 +1809,24 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                </div>
                              )}
 
-                             <a
-                               href={`https://wa.me/${String(drv.phone || '201015555555').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                                 lang === 'ar'
-                                   ? `مرحباً كابتن ${drv.name}، نرجو تسوية عمولة الرحلات المتأخرة المستحقة لتطبيق كابتن عز بقيمة (${drv.totalCommissionPaid} ج.م).`
-                                   : `Hello Captain ${drv.name}, please settle your outstanding commissions of ${drv.totalCommissionPaid} EGP.`
-                               )}`}
-                               target="_blank"
-                               rel="noopener noreferrer"
-                               className="py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors text-center cursor-pointer pointer-events-auto flex items-center justify-center gap-1"
-                             >
-                               💬 {lang === 'ar' ? 'تواصل واتساب' : 'WhatsApp'}
-                             </a>
+                             {drv.phone ? (
+                               <a
+                                 href={`https://wa.me/${String(drv.phone).replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+                                   lang === 'ar'
+                                     ? `مرحباً كابتن ${drv.name}، نرجو تسوية عمولة الرحلات المتأخرة المستحقة لتطبيق كابتن عز بقيمة (${drv.totalCommissionPaid} ج.م).`
+                                     : `Hello Captain ${drv.name}, please settle your outstanding commissions of ${drv.totalCommissionPaid} EGP.`
+                                 )}`}
+                                 target="_blank"
+                                 rel="noopener noreferrer"
+                                 className="py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors text-center cursor-pointer pointer-events-auto flex items-center justify-center gap-1"
+                               >
+                                 💬 {lang === 'ar' ? 'تواصل واتساب' : 'WhatsApp'}
+                               </a>
+                             ) : (
+                               <span className="text-[8px] text-slate-400 font-bold">
+                                 {lang === 'ar' ? '⚠️ رقم الهاتف غير متاح' : '⚠️ Phone number missing'}
+                               </span>
+                             )}
 
                             {isFrozen ? (
                               <button
