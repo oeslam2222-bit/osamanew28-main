@@ -1239,37 +1239,42 @@ export const mapDriverFromDB = (row: any): Driver => ({
   fcmToken: row.fcm_token || undefined,
 });
 
-export const mapDriverToDB = (drv: Driver) => ({
-  id: drv.id,
-  name: drv.name,
-  phone: drv.phone,
-  password: drv.password,
-  car_model: drv.carModel,
-  car_plate: drv.carPlate,
-  vehicle_type: drv.vehicleType,
-  vehicle_name: drv.vehicleName,
-  national_id: drv.nationalId,
-  driver_license: drv.driverLicense,
-  personal_photo: drv.personalPhoto,
-  national_id_image: drv.nationalIdImage,
-  driver_license_image: drv.driverLicenseImage,
-  vehicle_license_image: drv.vehicleLicenseImage,
-  is_online: drv.isOnline,
-  status: drv.status,
-  approval_status: drv.approvalStatus,
-  rating: drv.rating,
-  total_trips: drv.totalTrips,
-  total_earnings: drv.totalEarnings,
-  total_commission_paid: drv.totalCommissionPaid,
-  current_x: drv.currentX,
-  current_y: drv.currentY,
-  agreed_to_terms: drv.agreedToTerms,
-  service_areas: drv.serviceAreas || [],
-  auto_accept: drv.autoAccept || false,
-  auto_show_map: drv.autoShowMap || false,
-  last_seen: drv.lastSeen || new Date().toISOString(),
-  fcm_token: drv.fcmToken || null,
-});
+export const mapDriverToDB = (drv: Driver) => {
+  const base: Record<string, any> = {
+    id: drv.id,
+    name: drv.name,
+    phone: drv.phone,
+    car_model: drv.carModel,
+    car_plate: drv.carPlate,
+    vehicle_type: drv.vehicleType,
+    vehicle_name: drv.vehicleName,
+    national_id: drv.nationalId,
+    driver_license: drv.driverLicense,
+    is_online: drv.isOnline,
+    status: drv.status,
+    approval_status: drv.approvalStatus,
+    rating: drv.rating,
+    total_trips: drv.totalTrips,
+    total_earnings: drv.totalEarnings,
+    total_commission_paid: drv.totalCommissionPaid,
+    current_x: drv.currentX ?? 50,
+    current_y: drv.currentY ?? 50,
+    agreed_to_terms: drv.agreedToTerms,
+    service_areas: drv.serviceAreas || [],
+    auto_accept: drv.autoAccept || false,
+    auto_show_map: drv.autoShowMap || false,
+    last_seen: drv.lastSeen || new Date().toISOString(),
+  };
+
+  if (drv.password) base.password = drv.password;
+  if (drv.personalPhoto) base.personal_photo = drv.personalPhoto;
+  if (drv.nationalIdImage) base.national_id_image = drv.nationalIdImage;
+  if (drv.driverLicenseImage) base.driver_license_image = drv.driverLicenseImage;
+  if (drv.vehicleLicenseImage) base.vehicle_license_image = drv.vehicleLicenseImage;
+  if (drv.fcmToken) base.fcm_token = drv.fcmToken;
+
+  return base;
+};
 
 // --- RIDER TRANSFORMS ---
 export const mapRiderFromDB = (row: any): Rider => ({
