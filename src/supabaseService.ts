@@ -1240,31 +1240,31 @@ export const mapDriverFromDB = (row: any): Driver => ({
 });
 
 export const mapDriverToDB = (drv: Driver) => {
-  const base: Record<string, any> = {
-    id: drv.id,
-    name: drv.name,
-    phone: drv.phone,
-    car_model: drv.carModel,
-    car_plate: drv.carPlate,
-    vehicle_type: drv.vehicleType,
-    vehicle_name: drv.vehicleName,
-    national_id: drv.nationalId,
-    driver_license: drv.driverLicense,
-    is_online: drv.isOnline,
-    status: drv.status,
-    approval_status: drv.approvalStatus,
-    rating: drv.rating,
-    total_trips: drv.totalTrips,
-    total_earnings: drv.totalEarnings,
-    total_commission_paid: drv.totalCommissionPaid,
-    current_x: drv.currentX ?? 50,
-    current_y: drv.currentY ?? 50,
-    agreed_to_terms: drv.agreedToTerms,
-    service_areas: drv.serviceAreas || [],
-    auto_accept: drv.autoAccept || false,
-    auto_show_map: drv.autoShowMap || false,
-    last_seen: drv.lastSeen || new Date().toISOString(),
-  };
+  const base: Record<string, any> = {};
+
+  if (drv.id) base.id = drv.id;
+  if (drv.name) base.name = drv.name;
+  if (drv.phone) base.phone = drv.phone;
+  if (drv.carModel) base.car_model = drv.carModel;
+  if (drv.carPlate) base.car_plate = drv.carPlate;
+  if (drv.vehicleType) base.vehicle_type = drv.vehicleType;
+  if (drv.vehicleName) base.vehicle_name = drv.vehicleName;
+  if (drv.nationalId) base.national_id = drv.nationalId;
+  if (drv.driverLicense) base.driver_license = drv.driverLicense;
+  base.is_online = !!drv.isOnline;
+  base.status = drv.status || 'AVAILABLE';
+  base.approval_status = drv.approvalStatus || 'PENDING';
+  base.rating = drv.rating ?? 5.0;
+  base.total_trips = drv.totalTrips ?? 0;
+  base.total_earnings = drv.totalEarnings ?? 0;
+  base.total_commission_paid = drv.totalCommissionPaid ?? 0;
+  base.current_x = drv.currentX ?? 50;
+  base.current_y = drv.currentY ?? 50;
+  base.agreed_to_terms = !!drv.agreedToTerms;
+  base.service_areas = drv.serviceAreas || [];
+  base.auto_accept = drv.autoAccept || false;
+  base.auto_show_map = drv.autoShowMap || false;
+  base.last_seen = drv.lastSeen || new Date().toISOString();
 
   if (drv.password) base.password = drv.password;
   if (drv.personalPhoto) base.personal_photo = drv.personalPhoto;
@@ -1476,6 +1476,14 @@ export const fetchDrivers = async (): Promise<Driver[] | null> => {
 // Save Driver
 export const saveDriver = async (driver: Driver): Promise<boolean> => {
   try {
+    if (!driver?.id || !driver?.name || !driver?.phone) {
+      console.warn('[saveDriver] Refusing to save driver with missing required fields:', {
+        id: driver?.id,
+        name: driver?.name,
+        phone: driver?.phone,
+      });
+      return false;
+    }
     const driverData = { ...mapDriverToDB(driver) };
     if (driver.password && isSecureHash(driver.password)) {
       driverData.password = driver.password;
