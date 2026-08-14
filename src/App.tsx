@@ -1428,7 +1428,7 @@
       };
 
     updateLastSeen();
-    const interval = setInterval(updateLastSeen, 10000);
+    const interval = setInterval(updateLastSeen, 30000);
 
       const handleOnline = async () => {
         if (!isMountedRef.current) return;
@@ -1495,7 +1495,7 @@
     useEffect(() => {
       if (!supabaseConnected) return;
 
-      let syncInterval = 30000;
+      let syncInterval = 60000;
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
       const runSync = async () => {
