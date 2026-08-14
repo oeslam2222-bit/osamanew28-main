@@ -610,6 +610,7 @@ CREATE POLICY "driver_read_assigned_trip" ON ezz_active_trip
   FOR SELECT TO anon
   USING (
     driver_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'DRIVER')
+    OR current_offered_driver_id IN (SELECT user_id FROM ezz_sessions WHERE role = 'DRIVER')
   );
 
 CREATE POLICY "admin_read_all_trips" ON ezz_active_trip
@@ -676,6 +677,7 @@ CREATE POLICY "admin_delete_all_trips" ON ezz_active_trip
 
 -- تفعيل Realtime على جدول الرحلة النشطة (مطلوب لوصول الطلب للسائق فوراً)
 ALTER PUBLICATION supabase_realtime ADD TABLE ezz_active_trip;
+ALTER TABLE ezz_active_trip REPLICA IDENTITY FULL;
 
 -- Trips History: منع القراءة المباشرة، واستخدام RPC functions فقط للعزل
 DROP POLICY IF EXISTS "Allow public read trips_history" ON ezz_trips_history;
