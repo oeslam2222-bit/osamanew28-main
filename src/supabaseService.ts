@@ -1726,7 +1726,7 @@ export const subscribeToActiveTrips = (
   if (userId && userRole === 'rider') {
     filter = { ...filter, filter: `rider_id=eq.${userId}` };
   } else if (userId && userRole === 'driver') {
-    filter = { ...filter, filter: `or=(driver_id=eq.${userId},current_offered_driver_id=eq.${userId})` };
+    filter = { ...filter, filter: `or=(driver_id.eq.${userId},current_offered_driver_id.eq.${userId})` };
   }
   const channel = supabase
     .channel('ezz_active_trip_changes')
@@ -1745,8 +1745,10 @@ export const subscribeToActiveTrips = (
             const isAssignedDriver = trip.driverId === userId;
             const isCurrentOffered = trip.currentOfferedDriverId === userId;
             const isOffered = !!(trip.offeredDriverIds && trip.offeredDriverIds.includes(userId));
+            console.log('[realtime] Driver trip check:', trip.id, trip.status, 'assigned:', isAssignedDriver, 'currentOffered:', isCurrentOffered, 'inList:', isOffered);
             if (!isAssignedDriver && !isCurrentOffered && !isOffered) return;
           }
+          console.log('[realtime] Delivering trip to', userRole, userId, ':', trip.id, trip.status);
           onTrip(trip);
         }
       }
