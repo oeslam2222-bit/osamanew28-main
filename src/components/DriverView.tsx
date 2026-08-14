@@ -740,7 +740,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                   value={chatText}
                   onChange={(e) => setChatText(e.target.value)}
                   placeholder={lang === 'ar' ? 'اكتب رسالة للراكب...' : 'Message passenger...'}
-                  className="flex-1 px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[10.5px] font-medium text-slate-800 focus:outline-none focus:border-blue-500"
+                  className="flex-1 px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-base font-medium text-slate-800 focus:outline-none focus:border-blue-500"
                 />
                 <button
                   type="submit"
