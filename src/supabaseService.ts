@@ -1751,7 +1751,13 @@ export const subscribeToActiveTrips = (
         }
       }
     )
-    .subscribe();
+    .subscribe((status: string, err?: any) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('[realtime] ezz_active_trip_changes subscribed');
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        console.warn('[realtime] ezz_active_trip_changes', status, err || '');
+      }
+    });
 
   return {
     unsubscribe: () => {
