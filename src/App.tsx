@@ -141,7 +141,14 @@
         const stored = localStorage.getItem('ezz_drivers_cache');
         if (stored) {
           const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed)) return parsed as Driver[];
+          if (Array.isArray(parsed)) {
+            return parsed.map(d => ({
+              ...d,
+              phone: d.phone || '',
+              name: d.name || '',
+              id: d.id || '',
+            })) as Driver[];
+          }
         }
       } catch {}
       return [];
@@ -3503,7 +3510,7 @@
         }
 
         const found = registeredRiders.find(
-          r => r.phone.trim() === riderLoginPhone.trim()
+          r => (r.phone || '').trim() === riderLoginPhone.trim()
         );
 
         if (!found || !(await verifyPasswordHash(found.password, riderLoginPassword.trim()))) {
@@ -3630,7 +3637,7 @@
         };
 
         const found = drivers.find(
-          d => d.phone.trim() === drvLoginPhone.trim()
+          d => (d.phone || '').trim() === drvLoginPhone.trim()
         );
 
         if (!found) {
