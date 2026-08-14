@@ -1476,7 +1476,7 @@ export const fetchDrivers = async (): Promise<Driver[] | null> => {
 // Save Driver
 export const saveDriver = async (driver: Driver): Promise<boolean> => {
   try {
-    if (!driver?.id || !driver?.name) {
+    if (!driver?.id || !driver?.name || !driver?.phone) {
       console.warn('[saveDriver] Refusing to save driver with missing required fields:', {
         id: driver?.id,
         name: driver?.name,
