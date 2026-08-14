@@ -1902,35 +1902,6 @@
       };
     }, [drivers, supabaseConnected, currentScreen]);
 
-    // Fallback: if driver is logged in but has no active trip, poll Supabase directly
-    // so the driver still receives pending SEARCHING trips even if realtime is delayed/broken
-    useEffect(() => {
-      if (!supabaseConnected || !driverIsLoggedIn || !selectedDriverId) return;
-      if (activeTrip) return;
-
-      let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-      const pollForPendingTrip = async () => {
-        try {
-          const trip = await fetchActiveTrip(selectedDriverId, 'driver');
-          if (trip && trip.status === 'SEARCHING') {
-            console.log('[DriverFallback] Found pending trip for driver:', selectedDriverId, 'trip:', trip.id);
-            setActiveTripWithTracking(trip);
-          }
-        } catch (e) {
-          // best-effort
-        }
-      };
-
-      pollForPendingTrip();
-
-      timeoutId = setInterval(pollForPendingTrip, 10000);
-
-      return () => {
-        if (timeoutId) clearInterval(timeoutId);
-      };
-    }, [supabaseConnected, driverIsLoggedIn, selectedDriverId, activeTrip?.id, activeTrip?.status]);
-
     const lastSavedTripRef = useRef<string | null>(null);
     const lastSavedActiveTripIdRef = useRef<string | null>(null);
     const lastSavedTripSnapshotRef = useRef<string>('');
@@ -4781,7 +4752,6 @@
                                clearSession('DRIVER');
                                setCurrentScreen('HOME');
                              }}
-                       onUpdateActiveTrip={(trip) => setActiveTripWithTracking(trip)}
                        />
                     </ErrorBoundary>
                     )}
