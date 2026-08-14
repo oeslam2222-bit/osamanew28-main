@@ -1863,7 +1863,16 @@
         );
       });
       if (changedDrivers.length === 0) return;
-      await Promise.allSettled(changedDrivers.map((d) => saveDriver(d)));
+
+      const BATCH_SIZE = 2;
+      for (let i = 0; i < changedDrivers.length; i += BATCH_SIZE) {
+        const batch = changedDrivers.slice(i, i + BATCH_SIZE);
+        await Promise.allSettled(batch.map((d) => saveDriver(d)));
+        if (i + BATCH_SIZE < changedDrivers.length) {
+          await new Promise(resolve => setTimeout(resolve, 400));
+        }
+      }
+
       changedDrivers.forEach((d) => {
         lastSyncedDriversRef.current[d.id] = {
           currentX: d.currentX,
@@ -1892,6 +1901,35 @@
         if (driversSyncTimerRef.current) clearTimeout(driversSyncTimerRef.current);
       };
     }, [drivers, supabaseConnected, currentScreen]);
+
+    // Fallback: if driver is logged in but has no active trip, poll Supabase directly
+    // so the driver still receives pending SEARCHING trips even if realtime is delayed/broken
+    useEffect(() => {
+      if (!supabaseConnected || !driverIsLoggedIn || !selectedDriverId) return;
+      if (activeTrip) return;
+
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+      const pollForPendingTrip = async () => {
+        try {
+          const trip = await fetchActiveTrip(selectedDriverId, 'driver');
+          if (trip && trip.status === 'SEARCHING') {
+            console.log('[DriverFallback] Found pending trip for driver:', selectedDriverId, 'trip:', trip.id);
+            setActiveTripWithTracking(trip);
+          }
+        } catch (e) {
+          // best-effort
+        }
+      };
+
+      pollForPendingTrip();
+
+      timeoutId = setInterval(pollForPendingTrip, 10000);
+
+      return () => {
+        if (timeoutId) clearInterval(timeoutId);
+      };
+    }, [supabaseConnected, driverIsLoggedIn, selectedDriverId, activeTrip?.id, activeTrip?.status]);
 
     const lastSavedTripRef = useRef<string | null>(null);
     const lastSavedActiveTripIdRef = useRef<string | null>(null);
@@ -4699,51 +4737,52 @@
                   {/* 5. DRIVER VIEW */}
                   {currentScreen === 'DRIVER_DASHBOARD' && (
                       <ErrorBoundary>
-                          <DriverView
-                        drivers={drivers}
-                        selectedDriverId={selectedDriverId}
-                        setSelectedDriverId={setSelectedDriverId}
-                        activeTrip={activeTrip}
-                        locations={locations}
-                        regions={regions}
-                        commissionRate={stats.commissionRate}
-                        onUpdateDriverLocation={handleUpdateDriverLocation}
-                        onUpdateServiceAreas={handleUpdateServiceAreas}
-                        onAcceptTrip={handleAcceptTrip}
-                      onRejectTrip={handleRejectTrip}
-                      onArrivedAtPickup={handleArrivedAtPickup}
-                      onStartTrip={handleStartTrip}
-                      onEndTrip={handleEndTrip}
-  onTripCompleted={handleTripCompleted}
-                      lang={lang}
-                      onSendChatMessage={handleSendChatMessage}
-                      stats={stats}
-                      lowDataMode={lowDataMode}
-                      onEnableLowData={enableLowData}
-                      onDisableLowData={disableLowData}
-                      driverLat={drivers.find(d => d.id === selectedDriverId)?.lat}
-                        driverLng={drivers.find(d => d.id === selectedDriverId)?.lng}
-                        onOpenGuide={openGuideModal}
-                          onLogout={() => {
-                              // Auto-set driver offline in Supabase and clear any active trip
-                              if (supabaseConnected && selectedDriverId) {
-                                saveDriver({ ...drivers.find(d => d.id === selectedDriverId), isOnline: false, status: 'AVAILABLE' } as Driver);
-                                setDrivers(prev => prev.map(d => d.id === selectedDriverId ? { ...d, isOnline: false } : d));
-                              }
-                              if (activeTrip) {
-                                dismissedTripIdsRef.current.add(activeTrip.id);
-                                lastTripStatusBeforeNullRef.current = null;
-                                if (supabaseConnected) {
-                                  saveActiveTrip(null, activeTrip.id);
-                                }
-                                setActiveTripWithTracking(null);
-                                setNoAvailableDrivers(false);
-                              }
-                              setDriverIsLoggedIn(false);
-                              clearSession('DRIVER');
-                              setCurrentScreen('HOME');
-                            }}
-                      />
+                           <DriverView
+                         drivers={drivers}
+                         selectedDriverId={selectedDriverId}
+                         setSelectedDriverId={setSelectedDriverId}
+                         activeTrip={activeTrip}
+                         locations={locations}
+                         regions={regions}
+                         commissionRate={stats.commissionRate}
+                         onUpdateDriverLocation={handleUpdateDriverLocation}
+                         onUpdateServiceAreas={handleUpdateServiceAreas}
+                         onAcceptTrip={handleAcceptTrip}
+                       onRejectTrip={handleRejectTrip}
+                       onArrivedAtPickup={handleArrivedAtPickup}
+                       onStartTrip={handleStartTrip}
+                       onEndTrip={handleEndTrip}
+   onTripCompleted={handleTripCompleted}
+                       lang={lang}
+                       onSendChatMessage={handleSendChatMessage}
+                       stats={stats}
+                       lowDataMode={lowDataMode}
+                       onEnableLowData={enableLowData}
+                       onDisableLowData={disableLowData}
+                       driverLat={drivers.find(d => d.id === selectedDriverId)?.lat}
+                         driverLng={drivers.find(d => d.id === selectedDriverId)?.lng}
+                         onOpenGuide={openGuideModal}
+                           onLogout={() => {
+                               // Auto-set driver offline in Supabase and clear any active trip
+                               if (supabaseConnected && selectedDriverId) {
+                                 saveDriver({ ...drivers.find(d => d.id === selectedDriverId), isOnline: false, status: 'AVAILABLE' } as Driver);
+                                 setDrivers(prev => prev.map(d => d.id === selectedDriverId ? { ...d, isOnline: false } : d));
+                               }
+                               if (activeTrip) {
+                                 dismissedTripIdsRef.current.add(activeTrip.id);
+                                 lastTripStatusBeforeNullRef.current = null;
+                                 if (supabaseConnected) {
+                                   saveActiveTrip(null, activeTrip.id);
+                                 }
+                                 setActiveTripWithTracking(null);
+                                 setNoAvailableDrivers(false);
+                               }
+                               setDriverIsLoggedIn(false);
+                               clearSession('DRIVER');
+                               setCurrentScreen('HOME');
+                             }}
+                       onUpdateActiveTrip={(trip) => setActiveTripWithTracking(trip)}
+                       />
                     </ErrorBoundary>
                     )}
 
