@@ -2240,6 +2240,8 @@
             pickupRegionName: selectedRegion?.nameAr,
           };
 
+          console.log('[handleRequestRide] Offering trip to drivers:', offeredDriverIds, 'currentOfferedDriverId:', currentOfferedDriverId);
+
           setActiveTripWithTracking(newTrip);
 
           if (supabaseConnected) {
