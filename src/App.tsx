@@ -2,8 +2,9 @@
   import ErrorBoundary from './components/ErrorBoundary';
   import NetworkStatusBar from './components/NetworkStatusBar';
   import InitializingOverlay from './components/InitializingOverlay';
-  import { useNetworkStatus } from './hooks/useNetworkStatus';
-  import { useWebPush } from './hooks/useWebPush';
+import { useNetworkStatus } from './hooks/useNetworkStatus';
+import { useWebPush } from './hooks/useWebPush';
+import { useActiveTripSync } from './hooks/useActiveTripSync';
   import { Location, Driver, Trip, Rider, SystemStats, TripStatus, Region, Ad } from './types';
   import { RiderView } from './components/RiderView';
   import { DriverView } from './components/DriverView';
@@ -34,7 +35,6 @@
     deleteDriverInDB,
     deleteRiderInDB,
     SQL_SCHEMA,
-    subscribeToActiveTrips,
     saveSession,
     loadSession,
     clearSession,
@@ -184,6 +184,7 @@
     const dismissedTripIdsRef = useRef<Set<string>>(new Set());
     const lastTripCompletedRef = useRef(false);
     const lastTripCancelledRef = useRef(false);
+    const isMountedRef = useRef(true);
     const cancelInProgressRef = useRef(false);
     const endTripInProgressRef = useRef(false);
     const requestInProgressRef = useRef(false);
@@ -1208,33 +1209,10 @@
       initSupabase();
     }, []);
 
-    const TRIP_STATUS_ORDER: Record<string, number> = {
-      'IDLE': 0,
-      'SEARCHING': 1,
-      'ACCEPTED': 2,
-      'ARRIVED': 3,
-      'STARTED': 4,
-      'COMPLETED': 5,
-      'CANCELLED': 6,
-    };
-
     const lastLocalStatusChangeRef = useRef<{ status: string; timestamp: number } | null>(null);
 
     const markLocalStatusChange = (status: string) => {
       lastLocalStatusChangeRef.current = { status, timestamp: Date.now() };
-    };
-
-    const shouldSkipPollingUpdate = (remoteStatus: string): boolean => {
-      const last = lastLocalStatusChangeRef.current;
-      if (!last) return false;
-      const secondsSinceChange = (Date.now() - last.timestamp) / 1000;
-      if (secondsSinceChange > 3) {
-        lastLocalStatusChangeRef.current = null;
-        return false;
-      }
-      const remoteOrder = TRIP_STATUS_ORDER[remoteStatus] ?? 0;
-      const localOrder = TRIP_STATUS_ORDER[last.status] ?? 0;
-      return remoteOrder <= localOrder;
     };
 
     const setActiveTripWithTracking = (updater: React.SetStateAction<Trip | null>) => {
@@ -1247,73 +1225,16 @@
       });
     };
 
-    // 1b. Realtime subscription: deliver new ride requests to the driver's device instantly
-    useEffect(() => {
-      if (!supabaseConnected) return;
-      const userId = driverIsLoggedIn ? selectedDriverId : (rider.id || undefined);
-      const userRole = driverIsLoggedIn ? 'driver' : (rider.id ? 'rider' : undefined);
-      const sub = subscribeToActiveTrips(
-        (trip) => {
-          setActiveTripWithTracking((prev) => {
-            if (!trip) {
-              if (prev && prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
-                return prev;
-              }
-              return null;
-            }
-
-            if (dismissedTripIdsRef.current.has(trip.id)) {
-              return null;
-            }
-            if (!prev) return trip;
-            if (prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
-              return prev;
-            }
-            if (prev.id !== trip.id) return trip;
-
-            if (prev.status === 'COMPLETED' || trip.status === 'COMPLETED') {
-              return {
-                ...prev,
-                ...trip,
-                riderRatingToDriver: trip.riderRatingToDriver ?? prev.riderRatingToDriver,
-                riderFeedbackTags: trip.riderFeedbackTags?.length ? trip.riderFeedbackTags : prev.riderFeedbackTags,
-                riderFeedbackComment: trip.riderFeedbackComment || prev.riderFeedbackComment,
-                driverRatingToRider: trip.driverRatingToRider ?? prev.driverRatingToRider,
-                driverFeedbackTags: trip.driverFeedbackTags?.length ? trip.driverFeedbackTags : prev.driverFeedbackTags,
-                driverFeedbackComment: trip.driverFeedbackComment || prev.driverFeedbackComment,
-              };
-            }
-
-            if (prev.status !== trip.status) {
-              const prevOrder = TRIP_STATUS_ORDER[prev.status] ?? 0;
-              const tripOrder = TRIP_STATUS_ORDER[trip.status] ?? 0;
-              if (tripOrder <= prevOrder) return prev;
-            }
-
-            const remoteMsgs = trip.chatMessages || [];
-            const localMsgs = prev.chatMessages || [];
-            const localMsgIds = new Set(localMsgs.map(m => m.id));
-            const mergedChatMessages = [...localMsgs];
-            for (const m of remoteMsgs) {
-              if (!localMsgIds.has(m.id)) {
-                mergedChatMessages.push(m);
-              }
-            }
-
-            const remoteTimer = trip.dispatchTimer;
-            const localTimer = prev.dispatchTimer;
-            const mergedDispatchTimer = (typeof localTimer === 'number' && typeof remoteTimer === 'number' && localTimer < remoteTimer)
-              ? localTimer
-              : (remoteTimer ?? localTimer);
-
-            return { ...trip, chatMessages: mergedChatMessages, dispatchTimer: mergedDispatchTimer };
-          });
-        },
-        userId,
-        userRole
-      );
-      return () => sub.unsubscribe();
-    }, [supabaseConnected, driverIsLoggedIn, selectedDriverId, rider.id]);
+     // 1b. Active trip sync: realtime subscription via unified hook (no polling to minimize API usage)
+     useActiveTripSync({
+       supabaseConnected,
+       driverIsLoggedIn,
+       selectedDriverId,
+       riderId: rider.id,
+       setActiveTripWithTracking,
+       dismissedTripIdsRef,
+       lastLocalStatusChangeRef,
+     });
 
     // Polling disabled — using Realtime only to reduce API usage
     useEffect(() => {
@@ -1905,7 +1826,6 @@
     const lastSavedTripRef = useRef<string | null>(null);
     const lastSavedActiveTripIdRef = useRef<string | null>(null);
     const lastSavedTripSnapshotRef = useRef<string>('');
-    const isMountedRef = useRef(true);
     const activePollingLockRef = useRef(false);
 
     useEffect(() => {
