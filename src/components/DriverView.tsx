@@ -172,7 +172,9 @@ export const DriverView: React.FC<DriverViewProps> = ({
    const isEligibleForRequest =
     currentDriver &&
     activeTrip &&
-    (activeTrip.driverId === currentDriver.id || activeTrip.offeredDriverIds?.includes(currentDriver.id)) &&
+    (activeTrip.driverId === currentDriver.id ||
+      activeTrip.currentOfferedDriverId === currentDriver.id ||
+      (Array.isArray(activeTrip.offeredDriverIds) && activeTrip.offeredDriverIds.includes(currentDriver.id))) &&
     activeTrip.status === 'SEARCHING' &&
     currentDriver.isOnline &&
     currentDriver.status !== 'UNAVAILABLE';
