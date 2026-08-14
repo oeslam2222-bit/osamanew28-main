@@ -3,6 +3,7 @@ import { Driver, Rider, SystemStats, Location, Trip } from '../types';
 import {
   fetchDrivers,
   fetchDriversBasic,
+  fetchDriversPolling,
   saveDriver,
   fetchRiders,
   saveRider,
@@ -17,6 +18,7 @@ const STALE_THRESHOLD_MS = 120000;
 
 export const useBackgroundSync = (
   supabaseConnected: boolean,
+  driverIsLoggedIn: boolean,
   drivers: Driver[],
   registeredRiders: Rider[],
   stats: SystemStats,
@@ -142,6 +144,9 @@ export const useBackgroundSync = (
 
         for (const driver of driversToSync) {
           if (!isMountedRef.current) break;
+          if (!driver?.id || !driver?.phone) {
+            continue;
+          }
           await saveDriver(driver);
           lastSyncedDriversRef.current[driver.id] = { ...driver };
         }

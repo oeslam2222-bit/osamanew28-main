@@ -691,10 +691,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   // Filtered locations display (limit to 10 for render performance, with a counter)
   const filteredLocs = locations.filter((loc) => {
+    if (!loc) return false;
     const matchesSearch =
-      loc.nameAr.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      loc.nameEn.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (loc.city && loc.city.toLowerCase().includes(searchQuery.toLowerCase()));
+      (loc.nameAr || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (loc.nameEn || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (loc.city || '').toLowerCase().includes(searchQuery.toLowerCase());
     
     if (selectedCountryFilter === 'all') return matchesSearch;
     return matchesSearch && loc.country === selectedCountryFilter;
@@ -1553,18 +1554,18 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             >
                               {lang === 'ar' ? 'رفض الطلب' : 'Reject'}
                             </button>
-                            <a
-                              href={`https://wa.me/${drv.phone.replace(/[^0-9]/g, '') || '201015555555'}?text=${encodeURIComponent(
-                                lang === 'ar'
-                                  ? `مرحباً كابتن ${drv.name}، معك إدارة تطبيق كابتن عز. لقد تلقينا طلب انضمامك.\n\nنحتاج منك إرسال المستندات التالية:\n1. صورة بطاقة الرقم القومي\n2. صورة رخصة القيادة\n3. صورة رخصة المركبة\n4. صورة شخصية\n\nبمجرد استلام المستندات سيتم مراجعة طلبك والرد عليك.`
-                                  : `Hello Captain ${drv.name}, this is Ezz Admin. We received your driver application.\n\nPlease send the following documents:\n1. National ID card photo\n2. Driving license photo\n3. Vehicle license photo\n4. Personal photo\n\nWe will review and reply once received.`
-                              )}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg transition-colors text-center cursor-pointer pointer-events-auto flex items-center justify-center gap-1"
-                            >
-                              <span>💬 {lang === 'ar' ? 'واتساب للمستندات' : 'WhatsApp Docs'}</span>
-                            </a>
+                             <a
+                               href={`https://wa.me/${String(drv.phone || '').replace(/[^0-9]/g, '') || '201015555555'}?text=${encodeURIComponent(
+                                 lang === 'ar'
+                                   ? `مرحباً كابتن ${drv.name}، معك إدارة تطبيق كابتن عز. لقد تلقينا طلب انضمامك.\n\nنحتاج منك إرسال المستندات التالية:\n1. صورة بطاقة الرقم القومي\n2. صورة رخصة القيادة\n3. صورة رخصة المركبة\n4. صورة شخصية\n\nبمجرد استلام المستندات سيتم مراجعة طلبك والرد عليك.`
+                                   : `Hello Captain ${drv.name}, this is Ezz Admin. We received your driver application.\n\nPlease send the following documents:\n1. National ID card photo\n2. Driving license photo\n3. Vehicle license photo\n4. Personal photo\n\nWe will review and reply once received.`
+                               )}`}
+                               target="_blank"
+                               rel="noopener noreferrer"
+                               className="py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg transition-colors text-center cursor-pointer pointer-events-auto flex items-center justify-center gap-1"
+                             >
+                               <span>💬 {lang === 'ar' ? 'واتساب للمستندات' : 'WhatsApp Docs'}</span>
+                             </a>
                           </div>
                         </div>
                       ))}
@@ -1672,8 +1673,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         const q = driverSearchQuery.trim().toLowerCase();
                         if (!q) return true;
                         return (
-                          d.name.toLowerCase().includes(q) ||
-                          d.phone.includes(q) ||
+                          (d.name || '').toLowerCase().includes(q) ||
+                          (d.phone || '').includes(q) ||
                           (d.carPlate && d.carPlate.toLowerCase().includes(q)) ||
                           (d.vehicleName && d.vehicleName.toLowerCase().includes(q))
                         );
@@ -1691,16 +1692,17 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                  <span>{drv.name}</span>
                                  <span className={`w-2 h-2 rounded-full inline-block ${drv.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
                                </h5>
-                               <p className="text-[9px] text-slate-400 mt-0.5">
-                                 {drv.vehicleType === 'CAR'
-                                   ? (lang === 'ar' ? '🚖 سيارة' : '🚖 Car')
-                                   : drv.vehicleType === 'MOTORCYCLE'
-                                   ? (lang === 'ar' ? '🏍️ موتوسيكل' : '🏍️ Motorcycle')
-                                   : drv.vehicleType === 'TOKTOK'
-                                   ? (lang === 'ar' ? '🛺 توكتوك' : '🛺 TukTuk')
-                                   : (lang === 'ar' ? '🚲 تروسيكل' : '🚲 Tricycle')
-                                 } | {drv.vehicleName} | {drv.carPlate}
-                               </p>
+                                <p className="text-[9px] text-slate-400 mt-0.5">
+                                  {drv.vehicleType === 'CAR'
+                                    ? (lang === 'ar' ? '🚖 سيارة' : '🚖 Car')
+                                    : drv.vehicleType === 'MOTORCYCLE'
+                                    ? (lang === 'ar' ? '🏍️ موتوسيكل' : '🏍️ Motorcycle')
+                                    : drv.vehicleType === 'TOKTOK'
+                                    ? (lang === 'ar' ? '🛺 توكتوك' : '🛺 TukTuk')
+                                    : (lang === 'ar' ? '🚲 تروسيكل' : '🚲 Tricycle')
+                                  } | {drv.vehicleName} | {drv.carPlate}
+                                </p>
+                                <p className="text-[10px] text-slate-500 font-bold mt-0.5">📞 {drv.phone}</p>
                              </div>
                              <div className="flex flex-col items-end gap-1">
                                <div className="flex items-center gap-0.5 text-amber-500 text-[10px] font-bold">
@@ -1801,18 +1803,24 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                </div>
                              )}
 
-                            <a
-                              href={`https://wa.me/${drv.phone.replace(/[^0-9]/g, '') || '201015555555'}?text=${encodeURIComponent(
-                                lang === 'ar'
-                                  ? `مرحباً كابتن ${drv.name}، نرجو تسوية عمولة الرحلات المتأخرة المستحقة لتطبيق كابتن عز بقيمة (${drv.totalCommissionPaid} ج.م).`
-                                  : `Hello Captain ${drv.name}, please settle your outstanding commissions of ${drv.totalCommissionPaid} EGP.`
-                              )}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors text-center cursor-pointer pointer-events-auto flex items-center justify-center gap-1"
-                            >
-                              💬 {lang === 'ar' ? 'تواصل واتساب' : 'WhatsApp'}
-                            </a>
+                             {drv.phone ? (
+                               <a
+                                 href={`https://wa.me/${String(drv.phone).replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+                                   lang === 'ar'
+                                     ? `مرحباً كابتن ${drv.name}، نرجو تسوية عمولة الرحلات المتأخرة المستحقة لتطبيق كابتن عز بقيمة (${drv.totalCommissionPaid} ج.م).`
+                                     : `Hello Captain ${drv.name}, please settle your outstanding commissions of ${drv.totalCommissionPaid} EGP.`
+                                 )}`}
+                                 target="_blank"
+                                 rel="noopener noreferrer"
+                                 className="py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors text-center cursor-pointer pointer-events-auto flex items-center justify-center gap-1"
+                               >
+                                 💬 {lang === 'ar' ? 'تواصل واتساب' : 'WhatsApp'}
+                               </a>
+                             ) : (
+                               <span className="text-[8px] text-slate-400 font-bold">
+                                 {lang === 'ar' ? '⚠️ رقم الهاتف غير متاح' : '⚠️ Phone number missing'}
+                               </span>
+                             )}
 
                             {isFrozen ? (
                               <button
@@ -1973,8 +1981,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     const q = riderSearchQuery.trim().toLowerCase();
                     if (!q) return true;
                     return (
-                      r.name.toLowerCase().includes(q) ||
-                      r.phone.includes(q)
+                      (r.name || '').toLowerCase().includes(q) ||
+                      (r.phone || '').includes(q)
                     );
                   })
                    .map((rider) => {
@@ -2039,7 +2047,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
                         <div className="grid grid-cols-1 gap-1.5 text-[9px] font-bold">
                           <a
-                            href={`https://wa.me/${rider.phone.replace(/[^0-9]/g, '') || '201015555555'}?text=${encodeURIComponent(
+                             href={`https://wa.me/${String(rider.phone).replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
                               lang === 'ar'
                                 ? `مرحباً ${rider.name}، كيف يمكننا مساعدتك؟`
                                 : `Hello ${rider.name}, how can we help you?`
@@ -2854,9 +2862,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
             if (selectedAdId !== 'all' && ad.id !== selectedAdId) return false;
             if (adFilterQuery.trim()) {
               const q = adFilterQuery.toLowerCase().trim();
-              const matchName = ad.storeName.toLowerCase().includes(q);
-              const matchOffer = ad.offerText.toLowerCase().includes(q);
-              const matchPhone = ad.phoneNumber.includes(q);
+              const matchName = (ad.storeName || '').toLowerCase().includes(q);
+              const matchOffer = (ad.offerText || '').toLowerCase().includes(q);
+              const matchPhone = (ad.phoneNumber || '').includes(q);
               if (!matchName && !matchOffer && !matchPhone) return false;
             }
             if (adFilterStatus === 'active' && !ad.isActive) return false;
