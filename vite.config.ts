@@ -54,16 +54,6 @@ export default defineConfig(() => {
             Authorization: ORS_KEY,
           },
         },
-        '/api/search': {
-          target: 'https://nominatim.openstreetmap.org',
-          changeOrigin: true,
-          rewrite: (p) => p.replace(/^\/api\/search/, ''),
-        },
-        '/api/reverse': {
-          target: 'https://nominatim.openstreetmap.org',
-          changeOrigin: true,
-          rewrite: (p) => p.replace(/^\/api\/reverse/, ''),
-        },
       },
     },
   };

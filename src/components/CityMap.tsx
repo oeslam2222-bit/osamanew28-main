@@ -260,18 +260,9 @@ export const CityMap: React.FC<CityMapProps> = ({
     map.on('zoomend', updateStationVisibility);
 
     return () => {
-      try {
-        if (mapInstanceRef.current) {
-          mapInstanceRef.current.off();
-          const cg = (window as any).__clusterGroup;
-          if (cg) {
-            try { cg.clearLayers(); } catch {}
-          }
-          mapInstanceRef.current.remove();
-          mapInstanceRef.current = null;
-        }
-      } catch (e) {
-        console.warn('[Leaflet Safe Cleanup]', e);
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
       }
     };
   }, []);
@@ -281,16 +272,9 @@ export const CityMap: React.FC<CityMapProps> = ({
     const map = mapInstanceRef.current;
     const layerGroup = layerGroupRef.current;
     const L = (window as any).L;
-
     if (!map || !layerGroup || !L) return;
-    if (!map.getContainer || !map.getContainer()) return;
 
-    try {
-      layerGroup.clearLayers();
-    } catch (e) {
-      console.warn('[Leaflet] clearLayers failed:', e);
-      return;
-    }
+    layerGroup.clearLayers();
 
     const currentLocationIds = locations.map(l => l.id).join(',');
     const locationsChanged = currentLocationIds !== prevLocationIdsRef.current;
@@ -327,201 +311,203 @@ export const CityMap: React.FC<CityMapProps> = ({
     lastCenterPickupCoordsRef.current = pCoords;
     lastCenterDropoffCoordsRef.current = dCoords;
 
-    try {
-      // 1. Draw pre-defined stations (except selected ones) with clustering + viewport/zoom filtering
-      const clusterGroup = (window as any).__clusterGroup;
-      if (clusterGroup && locationsChanged) {
-        clusterGroup.clearLayers();
-        const bounds = map.getBounds();
-        const zoom = map.getZoom();
-        const minZoomForStations = 14;
+    // 1. Draw pre-defined stations (except selected ones) with clustering + viewport/zoom filtering
+    const clusterGroup = (window as any).__clusterGroup;
+    if (clusterGroup && locationsChanged) {
+      clusterGroup.clearLayers();
+      const bounds = map.getBounds();
+      const zoom = map.getZoom();
+      const minZoomForStations = 14;
+      
+      locations.forEach(loc => {
+        const isPickup = loc.id === selectedPickup;
+        const isDropoff = loc.id === selectedDropoff;
+        const isDefaultNumbered = /^[1-8]$/.test(loc.id);
         
-        locations.forEach(loc => {
-          const isPickup = loc.id === selectedPickup;
-          const isDropoff = loc.id === selectedDropoff;
-          const isDefaultNumbered = /^[1-8]$/.test(loc.id);
+        if (!isPickup && !isDropoff && !isDefaultNumbered) {
+          // Viewport filtering: only show markers within current map bounds
+          if (!bounds.contains([loc.lat, loc.lng])) return;
           
-          if (!isPickup && !isDropoff && !isDefaultNumbered) {
-            if (!bounds.contains([loc.lat, loc.lng])) return;
-            if (zoom < minZoomForStations) return;
-            
-            const stationIcon = L.divIcon({
-              className: 'custom-div-icon',
-              html: `
-                <div style="cursor: pointer;">
-                  <div style="width: 24px; height: 24px; border-radius: 50%; background: #1e293b; border: 2px solid white; display: flex; align-items: center; justify-content: center; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
-                    📍
-                  </div>
+          // Zoom filtering: only show detailed station markers when zoomed in enough
+          if (zoom < minZoomForStations) return;
+          
+          const stationIcon = L.divIcon({
+            className: 'custom-div-icon',
+            html: `
+              <div style="cursor: pointer;">
+                <div style="width: 24px; height: 24px; border-radius: 50%; background: #1e293b; border: 2px solid white; display: flex; align-items: center; justify-content: center; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                  📍
                 </div>
-              `,
-              iconSize: [24, 24],
-              iconAnchor: [12, 12],
-            });
-            
-            const stationMarker = L.marker([loc.lat, loc.lng], { icon: stationIcon });
-            stationMarker.bindPopup(`
-              <div style="font-family: system-ui; padding: 4px; min-width: 120px;">
-                <strong style="font-size: 13px;">${lang === 'ar' ? loc.nameAr : loc.nameEn}</strong>
-                <br/><span style="font-size: 11px; color: #666;">${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}</span>
               </div>
-            `);
-            stationMarker.on('click', (e: any) => {
-              L.DomEvent.stopPropagation(e);
-              const isPickupMode = mapModeRef.current === 'PICKUP';
-              if (isPickupMode && onSelectPickupRef.current) {
-                onSelectPickupRef.current(loc.id);
-              } else if (!isPickupMode && onSelectDropoffRef.current) {
-                onSelectDropoffRef.current(loc.id);
-              }
-            });
-            clusterGroup.addLayer(stationMarker);
-          }
-        });
-      }
-
-      // 2. Custom Icons styled perfectly with Tailwind
-      const pickupIcon = L.divIcon({
-        className: 'custom-div-icon',
-        html: `
-          <div style="cursor: pointer; position: relative;">
-            <span style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 28px; height: 28px; border-radius: 50%; background: rgba(16, 185, 129, 0.3); animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
-            <div style="width: 32px; height: 32px; border-radius: 50%; background: #10b981; border: 3px solid white; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
-              📍
+            `,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+          });
+          
+          const stationMarker = L.marker([loc.lat, loc.lng], { icon: stationIcon });
+          stationMarker.bindPopup(`
+            <div style="font-family: system-ui; padding: 4px; min-width: 120px;">
+              <strong style="font-size: 13px;">${lang === 'ar' ? loc.nameAr : loc.nameEn}</strong>
+              <br/><span style="font-size: 11px; color: #666;">${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}</span>
             </div>
-          </div>
-        `,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16],
+          `);
+          stationMarker.on('click', (e: any) => {
+            L.DomEvent.stopPropagation(e);
+            const isPickupMode = mapModeRef.current === 'PICKUP';
+            if (isPickupMode && onSelectPickupRef.current) {
+              onSelectPickupRef.current(loc.id);
+            } else if (!isPickupMode && onSelectDropoffRef.current) {
+              onSelectDropoffRef.current(loc.id);
+            }
+          });
+          // markercluster uses addLayer to add markers to the group
+          clusterGroup.addLayer(stationMarker);
+        }
       });
+    }
 
-      const dropoffIcon = L.divIcon({
+    // 2. Custom Icons styled perfectly with Tailwind
+    const pickupIcon = L.divIcon({
+      className: 'custom-div-icon',
+      html: `
+        <div style="cursor: pointer; position: relative;">
+          <span style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 28px; height: 28px; border-radius: 50%; background: rgba(16, 185, 129, 0.3); animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
+          <div style="width: 32px; height: 32px; border-radius: 50%; background: #10b981; border: 3px solid white; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+            📍
+          </div>
+        </div>
+      `,
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
+    });
+
+    const dropoffIcon = L.divIcon({
+      className: 'custom-div-icon',
+      html: `
+        <div style="cursor: pointer;">
+          <div style="width: 32px; height: 32px; border-radius: 50%; background: #f43f5e; border: 3px solid white; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+            🏁
+          </div>
+        </div>
+      `,
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
+    });
+
+    // 3. Add Pickup Marker
+    if (pLoc) {
+      const pickupMarker = L.marker([pLoc.lat, pLoc.lng], {
+        icon: pickupIcon,
+        draggable: true,
+      });
+      pickupMarker.bindPopup(`
+        <div style="font-family: system-ui; padding: 4px;">
+          <strong style="color: #059669;">📌 ${lang === 'ar' ? 'نقطة الالتقاء' : 'Pickup'}</strong><br/>
+          <span style="font-size: 12px;">${lang === 'ar' ? pLoc.nameAr : pLoc.nameEn}</span>
+        </div>
+      `);
+      pickupMarker.on('dragend', (e: any) => {
+        const { lat, lng } = e.target.getLatLng();
+        handlePositionUpdate(lat, lng, true);
+      });
+      pickupMarker.addTo(layerGroup);
+    }
+
+    // 4. Add Dropoff Marker
+    if (dLoc) {
+      const dropoffMarker = L.marker([dLoc.lat, dLoc.lng], {
+        icon: dropoffIcon,
+        draggable: true,
+      });
+      dropoffMarker.bindPopup(`
+        <div style="font-family: system-ui; padding: 4px;">
+          <strong style="color: #e11d48;">🏁 ${lang === 'ar' ? 'نقطة الوصول' : 'Dropoff'}</strong><br/>
+          <span style="font-size: 12px;">${lang === 'ar' ? dLoc.nameAr : dLoc.nameEn}</span>
+        </div>
+      `);
+      dropoffMarker.on('dragend', (e: any) => {
+        const { lat, lng } = e.target.getLatLng();
+        handlePositionUpdate(lat, lng, false);
+      });
+      dropoffMarker.addTo(layerGroup);
+    }
+
+    // 4.5. Add Driver Position Marker (for driver navigation)
+    if (currentDriverPosition && readOnly) {
+      const driverIcon = L.divIcon({
         className: 'custom-div-icon',
         html: `
           <div style="cursor: pointer;">
-            <div style="width: 32px; height: 32px; border-radius: 50%; background: #f43f5e; border: 3px solid white; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
-              🏁
+            <div style="width: 36px; height: 36px; border-radius: 50%; background: #2563eb; border: 3px solid white; display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); animation: pulse 2s infinite;">
+              🚖
             </div>
           </div>
         `,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16],
+        iconSize: [36, 36],
+        iconAnchor: [18, 18],
       });
+      const driverMarker = L.marker([currentDriverPosition.lat, currentDriverPosition.lng], {
+        icon: driverIcon,
+        zIndexOffset: 1000,
+      });
+      driverMarker.bindPopup(`
+        <div style="font-family: system-ui; padding: 4px;">
+          <strong style="color: #2563eb;">🚖 ${lang === 'ar' ? 'موقعك الحالي' : 'Your Location'}</strong>
+        </div>
+      `);
+      driverMarker.addTo(layerGroup);
 
-      // 3. Add Pickup Marker
-      if (pLoc) {
-        const pickupMarker = L.marker([pLoc.lat, pLoc.lng], {
-          icon: pickupIcon,
-          draggable: true,
-        });
-        pickupMarker.bindPopup(`
-          <div style="font-family: system-ui; padding: 4px;">
-            <strong style="color: #059669;">📌 ${lang === 'ar' ? 'نقطة الالتقاء' : 'Pickup'}</strong><br/>
-            <span style="font-size: 12px;">${lang === 'ar' ? pLoc.nameAr : pLoc.nameEn}</span>
-          </div>
-        `);
-        pickupMarker.on('dragend', (e: any) => {
-          const { lat, lng } = e.target.getLatLng();
-          handlePositionUpdate(lat, lng, true);
-        });
-        pickupMarker.addTo(layerGroup);
+      // If navigating, center map on driver and fit all points
+      if (navigationRoute && navigationRoute.length > 1 && shouldCenter) {
+        const allPoints = [currentDriverPosition, pLoc, dLoc].filter(Boolean) as { lat: number; lng: number }[];
+        const latLngs = allPoints.map(p => [p.lat, p.lng] as [number, number]);
+        const bounds = L.latLngBounds(latLngs);
+        map.fitBounds(bounds, { padding: [80, 80] });
       }
+    }
 
-      // 4. Add Dropoff Marker
-      if (dLoc) {
-        const dropoffMarker = L.marker([dLoc.lat, dLoc.lng], {
-          icon: dropoffIcon,
-          draggable: true,
-        });
-        dropoffMarker.bindPopup(`
-          <div style="font-family: system-ui; padding: 4px;">
-            <strong style="color: #e11d48;">🏁 ${lang === 'ar' ? 'نقطة الوصول' : 'Dropoff'}</strong><br/>
-            <span style="font-size: 12px;">${lang === 'ar' ? dLoc.nameAr : dLoc.nameEn}</span>
-          </div>
-        `);
-        dropoffMarker.on('dragend', (e: any) => {
-          const { lat, lng } = e.target.getLatLng();
-          handlePositionUpdate(lat, lng, false);
-        });
-        dropoffMarker.addTo(layerGroup);
-      }
+    // 5. Draw navigation route (driver -> pickup -> dropoff) if provided
+    if (navigationRoute && navigationRoute.length > 1) {
+      L.polyline(navigationRoute, {
+        color: '#3b82f6',
+        weight: 6,
+        dashArray: null,
+        opacity: 0.9,
+      }).addTo(layerGroup);
+    }
 
-      // 4.5. Add Driver Position Marker (for driver navigation)
-      if (currentDriverPosition && readOnly) {
-        const driverIcon = L.divIcon({
-          className: 'custom-div-icon',
-          html: `
-            <div style="cursor: pointer;">
-              <div style="width: 36px; height: 36px; border-radius: 50%; background: #2563eb; border: 3px solid white; display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); animation: pulse 2s infinite;">
-                🚖
-              </div>
-            </div>
-          `,
-          iconSize: [36, 36],
-          iconAnchor: [18, 18],
-        });
-        const driverMarker = L.marker([currentDriverPosition.lat, currentDriverPosition.lng], {
-          icon: driverIcon,
-          zIndexOffset: 1000,
-        });
-        driverMarker.bindPopup(`
-          <div style="font-family: system-ui; padding: 4px;">
-            <strong style="color: #2563eb;">🚖 ${lang === 'ar' ? 'موقعك الحالي' : 'Your Location'}</strong>
-          </div>
-        `);
-        driverMarker.addTo(layerGroup);
-
-        if (navigationRoute && navigationRoute.length > 1 && shouldCenter) {
-          const allPoints = [currentDriverPosition, pLoc, dLoc].filter(Boolean) as { lat: number; lng: number }[];
-          const latLngs = allPoints.map(p => [p.lat, p.lng] as [number, number]);
-          const bounds = L.latLngBounds(latLngs);
-          map.fitBounds(bounds, { padding: [80, 80] });
-        }
-      }
-
-      // 5. Draw navigation route (driver -> pickup -> dropoff) if provided
-      if (navigationRoute && navigationRoute.length > 1) {
-        L.polyline(navigationRoute, {
-          color: '#3b82f6',
-          weight: 6,
-          dashArray: null,
-          opacity: 0.9,
+    // 6. Connect pickup-dropoff with route path (fallback if no navigation route)
+    if (!navigationRoute && pLoc && dLoc) {
+      if (routeGeometry && routeGeometry.length > 1) {
+        L.polyline(routeGeometry, {
+          color: activeTrip ? '#3b82f6' : '#10b981',
+          weight: 5,
+          dashArray: activeTrip ? '8, 8' : '5, 5',
+          opacity: 0.85,
+        }).addTo(layerGroup);
+      } else {
+        L.polyline([[pLoc.lat, pLoc.lng], [dLoc.lat, dLoc.lng]], {
+          color: activeTrip ? '#3b82f6' : '#10b981',
+          weight: 5,
+          dashArray: activeTrip ? '8, 8' : '5, 5',
+          opacity: 0.85,
         }).addTo(layerGroup);
       }
 
-      // 6. Connect pickup-dropoff with route path (fallback if no navigation route)
-      if (!navigationRoute && pLoc && dLoc) {
-        if (routeGeometry && routeGeometry.length > 1) {
-          L.polyline(routeGeometry, {
-            color: activeTrip ? '#3b82f6' : '#10b981',
-            weight: 5,
-            dashArray: activeTrip ? '8, 8' : '5, 5',
-            opacity: 0.85,
-          }).addTo(layerGroup);
-        } else {
-          L.polyline([[pLoc.lat, pLoc.lng], [dLoc.lat, dLoc.lng]], {
-            color: activeTrip ? '#3b82f6' : '#10b981',
-            weight: 5,
-            dashArray: activeTrip ? '8, 8' : '5, 5',
-            opacity: 0.85,
-          }).addTo(layerGroup);
-        }
-
-        if (shouldCenter) {
-          const bounds = L.latLngBounds([[pLoc.lat, pLoc.lng], [dLoc.lat, dLoc.lng]]);
-          map.fitBounds(bounds, { padding: [60, 60] });
-        }
-      } else if (pLoc) {
-        if (shouldCenter) {
-          map.setView([pLoc.lat, pLoc.lng], 15);
-        }
-      } else if (dLoc) {
-        if (shouldCenter) {
-          map.setView([dLoc.lat, dLoc.lng], 15);
-        }
+      if (shouldCenter) {
+        const bounds = L.latLngBounds([[pLoc.lat, pLoc.lng], [dLoc.lat, dLoc.lng]]);
+        map.fitBounds(bounds, { padding: [60, 60] });
       }
-    } catch (err) {
-      console.warn('[Leaflet update markers error]', err);
+    } else if (pLoc) {
+      if (shouldCenter) {
+        map.setView([pLoc.lat, pLoc.lng], 15);
+      }
+    } else if (dLoc) {
+      if (shouldCenter) {
+        map.setView([dLoc.lat, dLoc.lng], 15);
+      }
     }
+
   }, [locations, selectedPickup, selectedDropoff, activeTrip, lang, routeGeometry, currentDriverPosition, navigationRoute]);
 
   const handleMapSearch = async (query: string) => {

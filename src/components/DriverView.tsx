@@ -172,10 +172,10 @@ export const DriverView: React.FC<DriverViewProps> = ({
    const isEligibleForRequest =
     currentDriver &&
     activeTrip &&
+    (activeTrip.driverId === currentDriver.id || activeTrip.offeredDriverIds?.includes(currentDriver.id)) &&
     activeTrip.status === 'SEARCHING' &&
-    (activeTrip.driverId === currentDriver.id ||
-      activeTrip.currentOfferedDriverId === currentDriver.id ||
-      (Array.isArray(activeTrip.offeredDriverIds) && activeTrip.offeredDriverIds.includes(currentDriver.id)));
+    currentDriver.isOnline &&
+    currentDriver.status !== 'UNAVAILABLE';
 
    useEffect(() => {
      console.log('[DriverView] activeTrip:', activeTrip?.id || 'null', 'status:', activeTrip?.status || 'null',
@@ -312,7 +312,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
 
         {/* Support WhatsApp Action */}
         <a
-          href={`https://wa.me/${String(stats?.supportWhatsApp || '201015555555').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+          href={`https://wa.me/${(stats?.supportWhatsApp || '201015555555').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
             lang === 'ar'
               ? `مرحباً إدارة كابتن عز، أنا الكابتن ${currentDriver.name} ورقم هاتفي ${currentDriver.phone}، أود الاستفسار بخصوص حسابي.`
               : `Hello Ezz Admin, I am Captain ${currentDriver.name} (${currentDriver.phone}). I have a query about my driver account.`
@@ -740,7 +740,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                   value={chatText}
                   onChange={(e) => setChatText(e.target.value)}
                   placeholder={lang === 'ar' ? 'اكتب رسالة للراكب...' : 'Message passenger...'}
-                  className="flex-1 px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-base font-medium text-slate-800 focus:outline-none focus:border-blue-500"
+                  className="flex-1 px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[10.5px] font-medium text-slate-800 focus:outline-none focus:border-blue-500"
                 />
                 <button
                   type="submit"
@@ -909,7 +909,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 : `Captain ${currentDriver.name}, please settle your outstanding commission of ${currentDriver.totalCommissionPaid} EGP to avoid automatic temporary account freezing.`}
             </p>
             <a
-              href={`https://wa.me/${String(stats?.supportWhatsApp || '201015555555').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+              href={`https://wa.me/${(stats?.supportWhatsApp || '201015555555').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
                 lang === 'ar'
                   ? `أريد سداد عمولة التطبيق المستحقة لحسابي الكابتن: ${currentDriver.name}، القيمة: ${currentDriver.totalCommissionPaid} ج.م`
                   : `I want to settle my outstanding commission for my captain account: ${currentDriver.name}, value: ${currentDriver.totalCommissionPaid} EGP`
