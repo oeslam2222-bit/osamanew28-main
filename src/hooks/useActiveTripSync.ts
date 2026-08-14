@@ -1,10 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { Trip } from '../types';
-import {
-  subscribeToActiveTrips,
-  fetchActiveTrip,
-} from '../supabaseService';
-import { getAdaptivePollingInterval } from '../utils/dataSaver';
+import { subscribeToActiveTrips, fetchActiveTrip } from '../supabaseService';
 import { mergeChatMessages } from '../utils/tripDispatchUtils';
 
 export const useActiveTripSync = ({
@@ -12,27 +8,17 @@ export const useActiveTripSync = ({
   driverIsLoggedIn,
   selectedDriverId,
   riderId,
-  dataSaverMode,
-  activeTrip,
   setActiveTripWithTracking,
   dismissedTripIdsRef,
-  lastTripCompletedRef,
-  lastTripCancelledRef,
   lastLocalStatusChangeRef,
-  isMountedRef,
 }: {
   supabaseConnected: boolean;
   driverIsLoggedIn: boolean;
   selectedDriverId: string | undefined;
   riderId: string | undefined;
-  dataSaverMode: boolean;
-  activeTrip: Trip | null;
   setActiveTripWithTracking: (updater: any) => void;
   dismissedTripIdsRef: React.MutableRefObject<Set<string>>;
-  lastTripCompletedRef: React.MutableRefObject<boolean>;
-  lastTripCancelledRef: React.MutableRefObject<boolean>;
   lastLocalStatusChangeRef: React.MutableRefObject<{ status: string; timestamp: number } | null>;
-  isMountedRef: React.MutableRefObject<boolean>;
 }) => {
   const TRIP_STATUS_ORDER: Record<string, number> = {
     'IDLE': 0,
@@ -46,19 +32,6 @@ export const useActiveTripSync = ({
 
   const markLocalStatusChange = (status: string) => {
     lastLocalStatusChangeRef.current = { status, timestamp: Date.now() };
-  };
-
-  const shouldSkipPollingUpdate = (remoteStatus: string): boolean => {
-    const last = lastLocalStatusChangeRef.current;
-    if (!last) return false;
-    const secondsSinceChange = (Date.now() - last.timestamp) / 1000;
-    if (secondsSinceChange > 3) {
-      lastLocalStatusChangeRef.current = null;
-      return false;
-    }
-    const remoteOrder = TRIP_STATUS_ORDER[remoteStatus] ?? 0;
-    const localOrder = TRIP_STATUS_ORDER[last.status] ?? 0;
-    return remoteOrder <= localOrder;
   };
 
   // Realtime subscription
@@ -116,122 +89,76 @@ export const useActiveTripSync = ({
     return () => sub.unsubscribe();
   }, [supabaseConnected, driverIsLoggedIn, selectedDriverId, riderId]);
 
-  // Dedicated polling for active trip
+  // Fallback: when tab becomes visible, fetch the active trip (covers the case
+  // where Realtime channel is stale or disconnected — minimal API usage, only
+  // fires when the user returns to the tab)
   useEffect(() => {
     if (!supabaseConnected) return;
 
-    const pollInterval = dataSaverMode ? 180000 : 90000;
-
-    const interval = setInterval(async () => {
-      if (!isMountedRef.current) return;
+    const handleVisibility = async () => {
+      if (document.hidden) return;
+      const userId = driverIsLoggedIn ? selectedDriverId : (riderId || undefined);
+      const userRole = driverIsLoggedIn ? 'driver' : (riderId ? 'rider' : undefined);
+      if (!userId || !userRole) return;
       try {
-        const remoteActiveTrip = await fetchActiveTrip(
-          driverIsLoggedIn ? selectedDriverId : (riderId || undefined),
-          driverIsLoggedIn ? 'driver' : (riderId ? 'rider' : undefined)
-        );
-        if (!isMountedRef.current) return;
-        if (!remoteActiveTrip) {
+        const remoteTrip = await fetchActiveTrip(userId, userRole);
+        if (!remoteTrip) {
           setActiveTripWithTracking((prev: Trip | null) => {
             if (prev && prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
-              if (!prev.driverRatingToRider) {
-                return prev;
-              }
-              return null;
+              return prev;
             }
-            // If active trip is gone from DB and wasn't already completed/cancelled,
-            // clear it locally so drivers don't keep seeing stale requests.
             return null;
           });
           return;
         }
-
-        if (dismissedTripIdsRef.current.has(remoteActiveTrip.id)) {
+        if (dismissedTripIdsRef.current.has(remoteTrip.id)) {
           setActiveTripWithTracking((prev: Trip | null) => {
-            if (prev && prev.id === remoteActiveTrip.id) return null;
+            if (prev && prev.id === remoteTrip.id) return null;
             return prev;
           });
           return;
         }
-
-        if (remoteActiveTrip.status === 'CANCELLED') {
+        if (remoteTrip.status === 'CANCELLED') {
           setActiveTripWithTracking((prev: Trip | null) => {
-            if (prev && prev.id === remoteActiveTrip.id) return null;
+            if (prev && prev.id === remoteTrip.id) return null;
             return prev;
           });
           return;
         }
-
         setActiveTripWithTracking((prev: Trip | null) => {
           if (!prev) {
-            if (remoteActiveTrip.status === 'COMPLETED' && dismissedTripIdsRef.current.has(remoteActiveTrip.id)) {
-              return null;
-            }
-            markLocalStatusChange(remoteActiveTrip.status);
-            return remoteActiveTrip;
+            markLocalStatusChange(remoteTrip.status);
+            return remoteTrip;
           }
           if (prev.status === 'COMPLETED' && !dismissedTripIdsRef.current.has(prev.id)) {
             return prev;
           }
-          if (prev.id !== remoteActiveTrip.id) return remoteActiveTrip;
-
-          if (prev.status === 'COMPLETED' || remoteActiveTrip.status === 'COMPLETED') {
-            return {
-              ...prev,
-              ...remoteActiveTrip,
-              riderRatingToDriver: remoteActiveTrip.riderRatingToDriver ?? prev.riderRatingToDriver,
-              riderFeedbackTags: remoteActiveTrip.riderFeedbackTags?.length ? remoteActiveTrip.riderFeedbackTags : prev.riderFeedbackTags,
-              riderFeedbackComment: remoteActiveTrip.riderFeedbackComment || prev.riderFeedbackComment,
-              driverRatingToRider: remoteActiveTrip.driverRatingToRider ?? prev.driverRatingToRider,
-              driverFeedbackTags: remoteActiveTrip.driverFeedbackTags?.length ? remoteActiveTrip.driverFeedbackTags : prev.driverFeedbackTags,
-              driverFeedbackComment: remoteActiveTrip.driverFeedbackComment || prev.driverFeedbackComment,
-            };
-          }
-
-          if (prev.status !== remoteActiveTrip.status) {
-            if (shouldSkipPollingUpdate(remoteActiveTrip.status)) {
-              return prev;
-            }
+          if (prev.id !== remoteTrip.id) return remoteTrip;
+          if (prev.status !== remoteTrip.status) {
             const prevOrder = TRIP_STATUS_ORDER[prev.status] ?? 0;
-            const remoteOrder = TRIP_STATUS_ORDER[remoteActiveTrip.status] ?? 0;
+            const remoteOrder = TRIP_STATUS_ORDER[remoteTrip.status] ?? 0;
             if (remoteOrder < prevOrder) return prev;
-            markLocalStatusChange(remoteActiveTrip.status);
-          } else {
-            const remoteMsgs = remoteActiveTrip.chatMessages || [];
-            const localMsgs = prev.chatMessages || [];
-            const localMsgIds = new Set(localMsgs.map(m => m.id));
-            const hasNewMessages = remoteMsgs.some((m: any) => !localMsgIds.has(m.id));
-            const remoteTimer = remoteActiveTrip.dispatchTimer;
-            const localTimer = prev.dispatchTimer;
-            const timerChanged = typeof remoteTimer === 'number' && typeof localTimer === 'number' && remoteTimer !== localTimer;
-            if (!hasNewMessages && !timerChanged) {
-              return prev;
-            }
+            markLocalStatusChange(remoteTrip.status);
           }
-
-          const remoteMsgs = remoteActiveTrip.chatMessages || [];
+          const remoteMsgs = remoteTrip.chatMessages || [];
           const localMsgs = prev.chatMessages || [];
           const mergedChatMessages = mergeChatMessages(localMsgs, remoteMsgs);
-          const remoteTimer = remoteActiveTrip.dispatchTimer;
-          const localTimer = prev.dispatchTimer;
-          const mergedDispatchTimer = (typeof localTimer === 'number' && typeof remoteTimer === 'number' && localTimer < remoteTimer)
-            ? localTimer
-            : (remoteTimer ?? localTimer);
-
-          markLocalStatusChange(remoteActiveTrip.status);
-          return { ...remoteActiveTrip, chatMessages: mergedChatMessages, dispatchTimer: mergedDispatchTimer };
+          return { ...remoteTrip, chatMessages: mergedChatMessages };
         });
       } catch (err) {
-        console.warn('Active trip polling error:', err);
+        console.warn('[useActiveTripSync] visibility fetch error:', err);
       }
-    }, pollInterval);
+    };
 
-    return () => clearInterval(interval);
-  }, [supabaseConnected, dataSaverMode, !!activeTrip, driverIsLoggedIn, selectedDriverId, riderId]);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [supabaseConnected, driverIsLoggedIn, selectedDriverId, riderId]);
+
+  // Polling disabled — using Realtime + visibility fallback to reduce API usage
 
   return {
     TRIP_STATUS_ORDER,
     markLocalStatusChange,
-    shouldSkipPollingUpdate,
     setActiveTripWithTracking,
   };
 };
