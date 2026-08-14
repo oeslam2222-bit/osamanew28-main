@@ -1,52 +1,63 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const webpush = require('web-push');
+let webpush: any;
+let hasWebPush = false;
 
-const VAPID_PUBLIC_KEY = process.env.VITE_WEB_PUSH_VAPID_PUBLIC_KEY;
-const VAPID_PRIVATE_KEY = process.env.WEB_PUSH_VAPID_PRIVATE_KEY;
-
-const hasWebPush = typeof webpush?.setVapidDetails === 'function';
+try {
+  webpush = require('web-push');
+  hasWebPush = typeof webpush?.setVapidDetails === 'function';
+} catch {
+  console.warn('[notify-driver] web-push package not available');
+}
 
 if (!hasWebPush) {
   console.warn('[notify-driver] web-push is not available in this environment');
 }
 
+const VAPID_PUBLIC_KEY = process.env.VITE_WEB_PUSH_VAPID_PUBLIC_KEY;
+const VAPID_PRIVATE_KEY = process.env.WEB_PUSH_VAPID_PRIVATE_KEY;
+
 async function getAvailableDrivers(supabase: any): Promise<any[]> {
-  const { data: drivers, error: driversError } = await supabase
-    .from('ezz_drivers')
-    .select('id,name')
-    .eq('is_online', true)
-    .eq('status', 'AVAILABLE')
-    .eq('approval_status', 'APPROVED');
+  try {
+    const { data: drivers, error: driversError } = await supabase
+      .from('ezz_drivers')
+      .select('id,name')
+      .eq('is_online', true)
+      .eq('status', 'AVAILABLE')
+      .eq('approval_status', 'APPROVED');
 
-  if (driversError) {
-    console.error('[notify-driver] Error fetching drivers:', driversError);
+    if (driversError) {
+      console.error('[notify-driver] Error fetching drivers:', driversError);
+      return [];
+    }
+
+    if (!drivers || drivers.length === 0) return [];
+
+    const driverIds = drivers.map((d: any) => d.id);
+
+    const { data: subscriptions, error: subsError } = await supabase
+      .from('ezz_push_subscriptions')
+      .select('driver_id,endpoint,p256dh,auth')
+      .in('driver_id', driverIds);
+
+    if (subsError) {
+      console.error('[notify-driver] Error fetching push subscriptions:', subsError);
+      return [];
+    }
+
+    const subMap = new Map((subscriptions || []).map((s: any) => [s.driver_id, s]));
+
+    return drivers
+      .map((d: any) => ({
+        id: d.id,
+        name: d.name,
+        web_push_subscription: subMap.get(d.id) || null,
+      }))
+      .filter((d: any) => d.web_push_subscription && d.web_push_subscription.endpoint);
+  } catch (err: any) {
+    console.error('[notify-driver] getAvailableDrivers failed:', err.message);
     return [];
   }
-
-  if (!drivers || drivers.length === 0) return [];
-
-  const driverIds = drivers.map((d: any) => d.id);
-
-  const { data: subscriptions, error: subsError } = await supabase
-    .from('ezz_push_subscriptions')
-    .select('driver_id,endpoint,p256dh,auth')
-    .in('driver_id', driverIds);
-
-  if (subsError) {
-    console.error('[notify-driver] Error fetching push subscriptions:', subsError);
-    return [];
-  }
-
-  const subMap = new Map((subscriptions || []).map((s: any) => [s.driver_id, s]));
-
-  return drivers
-    .map((d: any) => ({
-      id: d.id,
-      name: d.name,
-      web_push_subscription: subMap.get(d.id) || null,
-    }))
-    .filter((d: any) => d.web_push_subscription && d.web_push_subscription.endpoint);
 }
 
 async function sendPushNotification(
@@ -94,7 +105,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const { tripId, pickup, vehicleType } = req.body || {};
+    let body: any = {};
+    try {
+      body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+    } catch {
+      body = {};
+    }
+
+    const { tripId, pickup, vehicleType } = body;
 
     if (!tripId) {
       return res.status(400).json({ error: 'tripId is required' });
@@ -105,18 +123,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
-      return res.status(500).json({ error: 'Supabase credentials not configured' });
+      return res.status(200).json({
+        success: true,
+        message: 'Supabase credentials not configured',
+        notificationsSent: 0,
+      });
     }
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    let supabase: any;
+    try {
+      supabase = createClient(supabaseUrl, supabaseKey);
+    } catch (err: any) {
+      console.error('[notify-driver] Failed to create Supabase client:', err.message);
+      return res.status(200).json({
+        success: true,
+        message: 'Supabase client creation failed',
+        notificationsSent: 0,
+      });
+    }
 
-    const { data: trip, error: tripError } = await supabase
-      .from('ezz_active_trip')
-      .select('id,status,pickup,dropoff,rider_name,requested_vehicle_type,fare')
-      .eq('id', tripId)
-      .maybeSingle();
+    let trip: any = null;
+    try {
+      const result = await supabase
+        .from('ezz_active_trip')
+        .select('id,status,pickup,dropoff,rider_name,requested_vehicle_type,fare')
+        .eq('id', tripId)
+        .maybeSingle();
 
-    if (tripError || !trip || trip.status !== 'SEARCHING') {
+      trip = result.data;
+      if (result.error) {
+        console.error('[notify-driver] Error fetching trip:', result.error);
+      }
+    } catch (err: any) {
+      console.error('[notify-driver] Exception fetching trip:', err.message);
+    }
+
+    if (!trip || trip.status !== 'SEARCHING') {
       return res.status(200).json({
         success: true,
         message: 'Trip not found or no longer searching',
