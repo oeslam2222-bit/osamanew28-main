@@ -11,14 +11,12 @@ import {
   saveLocationInDB,
   saveActiveTrip,
   saveTripToHistory,
-  fetchDrivers as fetchDriversPolling,
 } from '../supabaseService';
 
 const STALE_THRESHOLD_MS = 120000;
 
 export const useBackgroundSync = (
   supabaseConnected: boolean,
-  driverIsLoggedIn: boolean,
   drivers: Driver[],
   registeredRiders: Rider[],
   stats: SystemStats,

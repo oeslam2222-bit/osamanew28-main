@@ -36,7 +36,7 @@ export const exportBackup = async (): Promise<BackupData | null> => {
       fetchDrivers(),
       fetchRiders(),
       fetchLocations(),
-      fetchAllTrips(1000),
+      fetchAllTrips(1000, adminUserId, getDeviceId()),
       fetchStats(),
     ]);
 

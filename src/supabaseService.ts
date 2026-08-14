@@ -1217,7 +1217,7 @@ export const mapDriverFromDB = (row: any): Driver => ({
   rating: row.rating || 5.0,
   totalTrips: row.total_trips || 0,
   totalEarnings: row.total_earnings || 0,
-  totalCommissionPaid: Number(row.total_commission_paid) || 0,
+  totalCommissionPaid: row.total_commission_paid || 0,
   currentX: row.current_x || 50,
   currentY: row.current_y || 50,
   agreedToTerms: !!row.agreed_to_terms,
@@ -1360,7 +1360,7 @@ export const mapTripFromDB = (row: any): Trip => ({
   pickupLandmark: row.pickup_landmark || undefined,
   status: row.status || 'IDLE',
   fare: row.fare || 0,
-  commission: Number(row.commission) || 0,
+  commission: row.commission || 0,
   distance: row.distance || 0,
   etaMinutes: row.eta_minutes || undefined,
   requestedVehicleType: row.requested_vehicle_type || undefined,
@@ -1384,7 +1384,6 @@ export const mapTripFromDB = (row: any): Trip => ({
   dispatchTimerMax: row.dispatch_timer_max ?? undefined,
   appliedPromoCode: row.applied_promo_code || undefined,
   appliedPromoDiscount: row.applied_promo_discount || undefined,
-  statusUpdatedAt: row.status_updated_at || undefined,
 });
 
 export const mapTripToDB = (trip: Trip) => ({
@@ -1419,21 +1418,17 @@ export const mapTripToDB = (trip: Trip) => ({
   dispatch_timer_max: trip.dispatchTimerMax ?? null,
   applied_promo_code: trip.appliedPromoCode || null,
   applied_promo_discount: trip.appliedPromoDiscount || null,
-  status_updated_at: trip.statusUpdatedAt || null,
 });
 
 // --- API METHODS ---
 
 // Lightweight driver fetch for non-admin screens (excludes heavy columns: images, fcm_token, earnings, etc.)
-export const fetchDriversBasic = async (limit: number = 5, offset: number = 0): Promise<Driver[] | null> => {
+export const fetchDriversBasic = async (): Promise<Driver[] | null> => {
   try {
     const result = await withRetry<Driver[]>(() =>
       supabase
         .from('ezz_drivers')
         .select('id,name,status,is_online,approval_status,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen,service_areas')
-        .eq('approval_status', 'APPROVED')
-        .order('is_online', { ascending: false })
-        .range(offset, offset + limit - 1)
     );
     if (result.error) throw result.error;
     return (result.data || []).map(mapDriverFromDB);
@@ -1444,15 +1439,12 @@ export const fetchDriversBasic = async (limit: number = 5, offset: number = 0): 
 };
 
 // Ultra-lightweight polling: only essential fields for map/display
-export const fetchDriversPolling = async (limit: number = 5, offset: number = 0): Promise<Driver[] | null> => {
+export const fetchDriversPolling = async (): Promise<Driver[] | null> => {
   try {
     const result = await withRetry<Driver[]>(() =>
       supabase
         .from('ezz_drivers')
         .select('id,name,status,is_online,approval_status,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen,service_areas')
-        .eq('approval_status', 'APPROVED')
-        .order('is_online', { ascending: false })
-        .range(offset, offset + limit - 1)
     );
     if (result.error) throw result.error;
     return (result.data || []).map(mapDriverFromDB);
@@ -1532,10 +1524,10 @@ export const deleteDriverInDB = async (driverId: string): Promise<boolean> => {
 };
 
 // Fetch Registered Riders
-export const fetchRiders = async (limit: number = 5, offset: number = 0): Promise<Rider[] | null> => {
+export const fetchRiders = async (): Promise<Rider[] | null> => {
   try {
     const result = await withRetry<Rider[]>(() =>
-      supabase.from('ezz_riders').select('id,name,phone,password,rating,total_trips,approval_status,preferences').order('total_trips', { ascending: false }).range(offset, offset + limit - 1)
+      supabase.from('ezz_riders').select('id,name,phone,password,rating,total_trips,approval_status,preferences')
     );
     if (result.error) throw result.error;
     return (result.data || []).map(mapRiderFromDB);
@@ -1954,9 +1946,12 @@ export const fetchTripsHistoryFilteredPaginated = async ({
   searchQuery?: string;
   page?: number;
   limit?: number;
-  }): Promise<{ trips: Trip[]; hasMore: boolean }> => {
+}): Promise<{ trips: Trip[]; hasMore: boolean }> => {
   try {
+    const adminId = role === 'admin' ? userId : undefined;
     const { data, error } = await supabase.rpc('get_admin_trips', {
+      p_admin_user_id: adminId || userId,
+      p_device_id: deviceId || null,
       p_page: page,
       p_limit: limit,
       p_date_from: dateFrom || null,
@@ -1975,9 +1970,11 @@ export const fetchTripsHistoryFilteredPaginated = async ({
 };
 
 // Fetch all trips (admin/backup usage)
-export const fetchAllTrips = async (limit: number = 1000): Promise<Trip[]> => {
+export const fetchAllTrips = async (limit: number = 1000, adminUserId?: string, deviceId?: string): Promise<Trip[]> => {
   try {
     const { data, error } = await supabase.rpc('get_admin_trips', {
+      p_admin_user_id: adminUserId || '',
+      p_device_id: deviceId || null,
       p_page: 0,
       p_limit: limit,
       p_date_from: null,
@@ -1994,27 +1991,16 @@ export const fetchAllTrips = async (limit: number = 1000): Promise<Trip[]> => {
 };
 
 // Clear Trips History (admin only - uses secure RPC)
-export const clearTripsHistoryInDB = async (): Promise<boolean> => {
+export const clearTripsHistoryInDB = async (adminUserId?: string, deviceId?: string): Promise<boolean> => {
   try {
-    const { error } = await supabase.rpc('admin_clear_all_trips', {});
-    if (error) throw error;
-    return true;
-  } catch (err: any) {
-    console.warn('Could not clear trips history in Supabase:', err.message);
-    return false;
-  }
-};
-
-// Admin force complete a trip (CANCELLED -> COMPLETED)
-export const adminForceCompleteTrip = async (tripId: string): Promise<boolean> => {
-  try {
-    const { error } = await supabase.rpc('admin_force_complete_trip', {
-      p_trip_id: tripId,
+    const { error } = await supabase.rpc('admin_clear_all_trips', {
+      p_admin_user_id: adminUserId || '',
+      p_device_id: deviceId || '',
     });
     if (error) throw error;
     return true;
   } catch (err: any) {
-    console.warn('Could not force complete trip in Supabase:', err.message);
+    console.warn('Could not clear trips history in Supabase:', err.message);
     return false;
   }
 };
