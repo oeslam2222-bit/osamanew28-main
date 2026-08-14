@@ -83,7 +83,17 @@ export const importBackup = async (file: File): Promise<boolean> => {
         const writes: Promise<boolean>[] = [];
 
         if (backup.drivers) {
-          backup.drivers.forEach(d => writes.push(saveDriver(d)));
+          backup.drivers.forEach(d => {
+            if (d?.id && d?.name && d?.phone) {
+              writes.push(saveDriver(d));
+            } else {
+              console.warn('[importBackup] Skipping driver with missing required fields:', {
+                id: d?.id,
+                name: d?.name,
+                phone: d?.phone,
+              });
+            }
+          });
         }
         if (backup.riders) {
           backup.riders.forEach(r => writes.push(saveRider(r)));
