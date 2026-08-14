@@ -2505,15 +2505,17 @@
           if (!saved) {
             console.error('[handleCancelRide] Failed to save cancelled trip for', cancelUserId, cancelRole);
           }
-          if (cancelRole === 'rider' && driverId) {
-            const savedDriver = await saveTripToHistory(cancelledTrip, driverId, 'driver', getDeviceId());
-            if (!savedDriver) {
-              console.error('[handleCancelRide] Failed to save cancelled trip for driver');
-            }
-          } else if (cancelRole === 'driver' && activeTrip.riderId) {
-            const savedRider = await saveTripToHistory(cancelledTrip, activeTrip.riderId, 'rider', getDeviceId());
-            if (!savedRider) {
-              console.error('[handleCancelRide] Failed to save cancelled trip for rider');
+          if (cancelUserId !== 'system') {
+            if (cancelRole === 'rider' && driverId) {
+              const savedDriver = await saveTripToHistory(cancelledTrip, driverId, 'driver', getDeviceId());
+              if (!savedDriver) {
+                console.error('[handleCancelRide] Failed to save cancelled trip for driver');
+              }
+            } else if (cancelRole === 'driver' && activeTrip.riderId) {
+              const savedRider = await saveTripToHistory(cancelledTrip, activeTrip.riderId, 'rider', getDeviceId());
+              if (!savedRider) {
+                console.error('[handleCancelRide] Failed to save cancelled trip for rider');
+              }
             }
           }
           await saveActiveTrip(null, cancelledTripId);

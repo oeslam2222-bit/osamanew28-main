@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Driver, Trip, SystemStats, Location, Rider, PromoCode, Region, Ad } from '../types';
 import { DollarSign, ShieldAlert, Award, TrendingUp, Settings, Percent, CheckCircle, Star, Users, MapPin, Database, Sparkles, Search, AlertCircle, HelpCircle, Globe, Loader2, Calendar, Clock, BarChart2, Car, Map, Trash2, Plus, Megaphone, Phone, Eye, EyeOff } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, AreaChart, Area, PieChart, Pie, Cell } from 'recharts';
 import { fetchTripsHistoryFilteredPaginated, fetchTripsHistoryCount, fetchAllTrips, generatePromoCode, fetchPromoCodes, deletePromoCode, fetchRegions, saveRegion, deleteRegionInDB, fetchAds, saveAd, deleteAd, loadSession, getDeviceId, adminForceCompleteTrip } from '../supabaseService';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE, DATA_RETENTION_POLICY } from '../utils/legal';
 import { exportBackup, importBackup } from '../utils/backup';
+import { getOptimalTripsLimit } from '../utils/deviceDetect';
 import { AVAILABLE_CITIES } from '../constants';
 
 interface AdminViewProps {
@@ -395,9 +396,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
   };
 
   // 1. Data Processor: Most Active Drivers
-  const getActiveDriversData = () => {
+  const activeDriversData = useMemo(() => {
     const statsObj: { [key: string]: { id: string; name: string; rides: number; revenue: number; commission: number } } = {};
-    
+
     drivers.forEach(d => {
       statsObj[d.id] = { id: d.id, name: d.name, rides: 0, revenue: 0, commission: 0 };
     });
@@ -422,10 +423,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
       const valA = a[lang === 'ar' ? 'الرحلات' : 'Rides'] as number;
       return valB - valA;
     });
-  };
+  }, [drivers, allTrips, lang]);
 
   // 2. Data Processor: Busiest Days
-  const getBusiestDaysData = () => {
+  const busiestDaysData = useMemo(() => {
     const daysAr = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
     const daysEn = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const weekDays = lang === 'ar' ? daysAr : daysEn;
@@ -453,10 +454,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
       name,
       [lang === 'ar' ? 'عدد الرحلات' : 'Rides']: dayCounts[name] || 0
     }));
-  };
+  }, [allTrips, lang]);
 
   // 3. Data Processor: Trip Status Breakdown
-  const getTripStatusData = () => {
+  const tripStatusData = useMemo(() => {
     const statusCounts: { [key: string]: number } = {
       COMPLETED: 0,
       CANCELLED: 0,
@@ -497,10 +498,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
         value: count,
         fill: statusColors[status] || '#64748b',
       }));
-  };
+  }, [allTrips, lang]);
 
   // 4. Data Processor: Driver Performance Metrics
-  const getDriverPerformanceData = () => {
+  const driverPerformanceData = useMemo(() => {
     return drivers
       .filter(d => d.approvalStatus === 'APPROVED')
       .map(d => ({
@@ -511,7 +512,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       }))
       .sort((a, b) => (b[lang === 'ar' ? 'رحلات' : 'Rides'] as number) - (a[lang === 'ar' ? 'رحلات' : 'Rides'] as number))
       .slice(0, 10);
-  };
+  }, [drivers, lang]);
 
   const getFilteredTripsForPeriod = (period: 'all' | 'week' | 'month' | '30days') => {
     if (period === 'all') return allTrips;
@@ -607,7 +608,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
   useEffect(() => {
     let cancelled = false;
     setIsLoadingAllTrips(true);
-    fetchAllTrips(1000).then((trips) => {
+    const limit = getOptimalTripsLimit(200);
+    fetchAllTrips(limit).then((trips) => {
       if (!cancelled) {
         setAllTrips(trips);
         setIsLoadingAllTrips(false);
@@ -2751,7 +2753,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={getTripStatusData()}
+                      data={tripStatusData}
                       cx="50%"
                       cy="50%"
                       innerRadius={30}
@@ -2759,7 +2761,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       paddingAngle={2}
                       dataKey="value"
                     >
-                      {getTripStatusData().map((entry, index) => (
+                      {tripStatusData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.fill} stroke="none" />
                       ))}
                     </Pie>
@@ -2788,7 +2790,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               </div>
               <div className="h-40 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={getDriverPerformanceData()} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                   <BarChart data={driverPerformanceData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                     <XAxis dataKey="name" stroke="#64748b" tickLine={false} tick={{ fontSize: 9 }} />
                     <YAxis stroke="#64748b" tickLine={false} tick={{ fontSize: 9 }} />
@@ -2820,7 +2822,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               <div className="h-44 w-full text-[9px] font-bold pointer-events-auto">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
-                    data={getActiveDriversData()}
+                     data={activeDriversData}
                     margin={{ top: 10, right: 10, left: -25, bottom: 0 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -2858,7 +2860,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               <div className="h-44 w-full text-[9px] font-bold pointer-events-auto">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart
-                    data={getBusiestDaysData()}
+                     data={busiestDaysData}
                     margin={{ top: 10, right: 10, left: -25, bottom: 0 }}
                   >
                     <defs>

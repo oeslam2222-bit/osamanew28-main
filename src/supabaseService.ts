@@ -1425,12 +1425,15 @@ export const mapTripToDB = (trip: Trip) => ({
 // --- API METHODS ---
 
 // Lightweight driver fetch for non-admin screens (excludes heavy columns: images, fcm_token, earnings, etc.)
-export const fetchDriversBasic = async (): Promise<Driver[] | null> => {
+export const fetchDriversBasic = async (limit: number = 5, offset: number = 0): Promise<Driver[] | null> => {
   try {
     const result = await withRetry<Driver[]>(() =>
       supabase
         .from('ezz_drivers')
         .select('id,name,status,is_online,approval_status,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen,service_areas')
+        .eq('approval_status', 'APPROVED')
+        .order('is_online', { ascending: false })
+        .range(offset, offset + limit - 1)
     );
     if (result.error) throw result.error;
     return (result.data || []).map(mapDriverFromDB);
@@ -1441,12 +1444,15 @@ export const fetchDriversBasic = async (): Promise<Driver[] | null> => {
 };
 
 // Ultra-lightweight polling: only essential fields for map/display
-export const fetchDriversPolling = async (): Promise<Driver[] | null> => {
+export const fetchDriversPolling = async (limit: number = 5, offset: number = 0): Promise<Driver[] | null> => {
   try {
     const result = await withRetry<Driver[]>(() =>
       supabase
         .from('ezz_drivers')
         .select('id,name,status,is_online,approval_status,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen,service_areas')
+        .eq('approval_status', 'APPROVED')
+        .order('is_online', { ascending: false })
+        .range(offset, offset + limit - 1)
     );
     if (result.error) throw result.error;
     return (result.data || []).map(mapDriverFromDB);
@@ -1526,10 +1532,10 @@ export const deleteDriverInDB = async (driverId: string): Promise<boolean> => {
 };
 
 // Fetch Registered Riders
-export const fetchRiders = async (): Promise<Rider[] | null> => {
+export const fetchRiders = async (limit: number = 5, offset: number = 0): Promise<Rider[] | null> => {
   try {
     const result = await withRetry<Rider[]>(() =>
-      supabase.from('ezz_riders').select('id,name,phone,password,rating,total_trips,approval_status,preferences')
+      supabase.from('ezz_riders').select('id,name,phone,password,rating,total_trips,approval_status,preferences').order('total_trips', { ascending: false }).range(offset, offset + limit - 1)
     );
     if (result.error) throw result.error;
     return (result.data || []).map(mapRiderFromDB);
