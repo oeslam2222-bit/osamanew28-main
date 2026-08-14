@@ -1046,9 +1046,11 @@
               const cachedRider = localStorage.getItem('ezz_rider_session');
               if (cachedRider) {
                 const parsedRider = JSON.parse(cachedRider);
-                if (parsedRider && parsedRider.id && parsedRider.phone) {
+                if (parsedRider && parsedRider.id && parsedRider.phone && parsedRider.approvalStatus === 'APPROVED') {
                   setRider({ ...parsedRider, password: '', isLoggedIn: true });
                   restoreRiderPickupRegion(parsedRider);
+                } else if (parsedRider && parsedRider.id && parsedRider.approvalStatus && parsedRider.approvalStatus !== 'APPROVED') {
+                  localStorage.removeItem('ezz_rider_session');
                 }
               }
             } catch {}
@@ -1159,14 +1161,16 @@
           if (session) {
             if (session.role === 'RIDER') {
               const r = dbRiders?.find(x => x.id === session.userId);
-              if (r) {
+              if (r && r.approvalStatus === 'APPROVED') {
                 setRider({ ...r, isLoggedIn: true });
                 restoreRiderPickupRegion(r);
                 if (supabaseConnected) setAppRole('RIDER');
+              } else {
+                await clearSession('RIDER');
               }
             } else if (session.role === 'DRIVER') {
               const d = dbDrivers?.find(x => x.id === session.userId);
-              if (d) {
+              if (d && d.approvalStatus === 'APPROVED') {
                 setSelectedDriverId(d.id);
                 setDriverIsLoggedIn(true);
                 if (supabaseConnected) setAppRole('DRIVER');
@@ -1174,6 +1178,8 @@
                 if (driverTrip) {
                   setActiveTripWithTracking(driverTrip);
                 }
+              } else {
+                await clearSession('DRIVER');
               }
             } else if (session.role === 'ADMIN') {
               setAdminIsLoggedIn(true);
@@ -3227,6 +3233,12 @@
     const handleDeleteDriver = async (driverId: string) => {
       setDrivers(prev => prev.filter(d => d.id !== driverId));
       await deleteDriverInDB(driverId);
+      if (selectedDriverId === driverId) {
+        await clearSession('DRIVER');
+        setDriverIsLoggedIn(false);
+        setSelectedDriverId('');
+        setCurrentScreen('HOME');
+      }
     };
 
     // Rider account management workflows called by Administrator
@@ -3257,6 +3269,11 @@
     const handleDeleteRider = async (riderId: string) => {
       setRegisteredRiders(prev => prev.filter(r => r.id !== riderId));
       await deleteRiderInDB(riderId);
+      if (rider.id === riderId) {
+        await clearSession('RIDER');
+        setRider({ id: '', name: '', phone: '', password: '', rating: 5.0, totalTrips: 0, isLoggedIn: false });
+        setCurrentScreen('HOME');
+      }
     };
 
     const handleClearAllFakeData = async () => {
@@ -3495,6 +3512,23 @@
           return;
         }
 
+        if (found.approvalStatus && found.approvalStatus !== 'APPROVED') {
+          const statusLabel = found.approvalStatus === 'BLOCKED'
+            ? (lang === 'ar' ? 'محظور' : 'Blocked')
+            : found.approvalStatus === 'FROZEN'
+            ? (lang === 'ar' ? 'متوقف مؤقتاً' : 'Frozen')
+            : found.approvalStatus === 'REJECTED'
+            ? (lang === 'ar' ? 'مرفوض' : 'Rejected')
+            : found.approvalStatus === 'PENDING'
+            ? (lang === 'ar' ? 'قيد المراجعة' : 'Pending')
+            : found.approvalStatus;
+          setRiderFormError(lang === 'ar'
+            ? `لا يمكنك تسجيل الدخول. حالة الحساب: ${statusLabel}`
+            : `Login blocked. Account status: ${statusLabel}`);
+          auditLogger.log('rider_login', found.id, 'rider', `Blocked - status ${found.approvalStatus}`, false);
+          return;
+        }
+
         auditLogger.log('rider_login', found.id, 'rider', 'Login successful', true);
         riderAuthLimiter.reset(riderLoginPhone.trim());
         setRider({ ...found, isLoggedIn: true });
@@ -3609,6 +3643,21 @@
         if (!passwordMatches) {
           setDrvFormError(lang === 'ar' ? 'رقم الهاتف أو كلمة المرور غير صحيحة!' : 'Incorrect phone or password!');
           auditLogger.log('driver_login', drvLoginPhone.trim(), 'driver', 'Login failed - wrong password', false);
+          return;
+        }
+
+        if (found.approvalStatus && found.approvalStatus !== 'APPROVED') {
+          const statusLabel = found.approvalStatus === 'FROZEN'
+            ? (lang === 'ar' ? 'متوقف مؤقتاً' : 'Frozen')
+            : found.approvalStatus === 'REJECTED'
+            ? (lang === 'ar' ? 'مرفوض' : 'Rejected')
+            : found.approvalStatus === 'PENDING'
+            ? (lang === 'ar' ? 'قيد المراجعة' : 'Pending')
+            : found.approvalStatus;
+          setDrvFormError(lang === 'ar'
+            ? `لا يمكنك تسجيل الدخول. حالة الحساب: ${statusLabel}`
+            : `Login blocked. Account status: ${statusLabel}`);
+          auditLogger.log('driver_login', found.id, 'driver', `Blocked - status ${found.approvalStatus}`, false);
           return;
         }
 
