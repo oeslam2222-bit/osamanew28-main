@@ -302,7 +302,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [adSortBy, setAdSortBy] = useState<'newest' | 'views' | 'interactions' | 'revenue'>('newest');
   const [selectedAdId, setSelectedAdId] = useState<string | 'all'>('all');
   const [adImageError, setAdImageError] = useState<Record<string, boolean>>({});
-  const [adsLoading, setAdsLoading] = useState(false);
   const [adForm, setAdForm] = useState({
     storeName: '',
     offerText: '',
@@ -352,15 +351,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   useEffect(() => {
     if (activeTab !== 'ads') return;
-    setAdsLoading(true);
-    setAdError('');
-    fetchAds()
-      .then(setAds)
-      .catch((err) => {
-        console.warn('[AdminView] Failed to fetch ads:', err);
-        setAdError(lang === 'ar' ? 'فشل تحميل الإعلانات. تحقق من اتصالك.' : 'Failed to load ads. Check your connection.');
-      })
-      .finally(() => setAdsLoading(false));
+    fetchAds().then(setAds);
   }, [activeTab]);
 
   // Date formatting helper for completed trips
@@ -395,28 +386,31 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   // 1. Data Processor: Most Active Drivers
   const getActiveDriversData = () => {
-    const statsObj: { [key: string]: { id: string; name: string; rides: number; revenue: number; commission: number } } = {};
+    const statsObj: { [key: string]: { name: string; rides: number; revenue: number; commission: number } } = {};
     
     drivers.forEach(d => {
-      statsObj[d.id] = { id: d.id, name: d.name, rides: 0, revenue: 0, commission: 0 };
+      statsObj[d.name] = { name: d.name, rides: 0, revenue: 0, commission: 0 };
     });
 
     allTrips.filter(t => t.status === 'COMPLETED').forEach(t => {
-      const key = t.driverId || t.driverName || (lang === 'ar' ? 'كابتن مجهول' : 'Unknown Captain');
-      if (!statsObj[key]) {
-        statsObj[key] = { id: key, name: t.driverName || (lang === 'ar' ? 'كابتن مجهول' : 'Unknown Captain'), rides: 0, revenue: 0, commission: 0 };
+      const name = t.driverName || (lang === 'ar' ? 'كابتن مجهول' : 'Unknown Captain');
+      if (!statsObj[name]) {
+        statsObj[name] = { name, rides: 0, revenue: 0, commission: 0 };
       }
-      statsObj[key].rides += 1;
-      statsObj[key].revenue += t.fare;
-      statsObj[key].commission += t.commission;
+      statsObj[name].rides += 1;
+      statsObj[name].revenue += t.fare;
+      statsObj[name].commission += t.commission;
     });
 
-    return Object.values(statsObj).map(drv => ({
-      name: drv.name,
-      [lang === 'ar' ? 'الرحلات' : 'Rides']: drv.rides,
-      [lang === 'ar' ? 'الأرباح' : 'Earnings']: drv.revenue,
-      [lang === 'ar' ? 'العمولات' : 'Commissions']: drv.commission
-    })).sort((a, b) => {
+    return Object.values(statsObj).map(drv => {
+      const matched = drivers.find(d => d.name === drv.name);
+      return {
+        name: drv.name,
+        [lang === 'ar' ? 'الرحلات' : 'Rides']: drv.rides,
+        [lang === 'ar' ? 'الأرباح' : 'Earnings']: drv.revenue,
+        [lang === 'ar' ? 'العمولات' : 'Commissions']: drv.commission
+      };
+    }).sort((a, b) => {
       const valB = b[lang === 'ar' ? 'الرحلات' : 'Rides'] as number;
       const valA = a[lang === 'ar' ? 'الرحلات' : 'Rides'] as number;
       return valB - valA;
@@ -535,11 +529,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
     const trips = getFilteredTripsForPeriod(period);
     const statsObj: { [key: string]: { trips: number; earnings: number; commission: number } } = {};
     trips.forEach(t => {
-      const key = t.driverId || t.driverName || (lang === 'ar' ? 'كابتن مجهول' : 'Unknown');
-      if (!statsObj[key]) statsObj[key] = { trips: 0, earnings: 0, commission: 0 };
-      statsObj[key].trips += 1;
-      statsObj[key].earnings += t.fare;
-      statsObj[key].commission += t.commission;
+      const name = t.driverName || (lang === 'ar' ? 'كابتن مجهول' : 'Unknown');
+      if (!statsObj[name]) statsObj[name] = { trips: 0, earnings: 0, commission: 0 };
+      statsObj[name].trips += 1;
+      statsObj[name].earnings += t.fare;
+      statsObj[name].commission += t.commission;
     });
     return statsObj;
   };
@@ -548,10 +542,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
     const trips = getFilteredTripsForPeriod(period);
     const statsObj: { [key: string]: { trips: number; spent: number } } = {};
     trips.forEach(t => {
-      const key = t.riderId || t.riderName || (lang === 'ar' ? 'راكب مجهول' : 'Unknown');
-      if (!statsObj[key]) statsObj[key] = { trips: 0, spent: 0 };
-      statsObj[key].trips += 1;
-      statsObj[key].spent += t.fare;
+      const name = t.riderName || (lang === 'ar' ? 'راكب مجهول' : 'Unknown');
+      if (!statsObj[name]) statsObj[name] = { trips: 0, spent: 0 };
+      statsObj[name].trips += 1;
+      statsObj[name].spent += t.fare;
     });
     return statsObj;
   };
@@ -1687,7 +1681,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                        .map((drv) => {
                          const isFrozen = drv.approvalStatus === 'FROZEN';
                          const isRejected = drv.approvalStatus === 'REJECTED';
-                          const driverPeriodStats = getDriverStatsForPeriod(driverPeriodFilter)[drv.id] || { trips: 0, earnings: 0, commission: 0 };
+                         const driverPeriodStats = getDriverStatsForPeriod(driverPeriodFilter)[drv.name] || { trips: 0, earnings: 0, commission: 0 };
 
                          return (
                          <div key={drv.id} className={`border border-slate-100 p-3 rounded-xl space-y-2.5 ${isFrozen ? 'bg-red-50/20 border-red-100' : isRejected ? 'bg-slate-50 border-slate-200' : 'bg-white'}`}>
@@ -1739,10 +1733,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                <p className="text-[8px] text-slate-400">{lang === 'ar' ? 'أرباح السائق' : 'Driver Net'}</p>
                                <p className="font-bold text-slate-700 mt-0.5">{Math.round(driverPeriodStats.earnings)} ج.م</p>
                              </div>
-                              <div>
-                                <p className="text-[8px] text-rose-500">{lang === 'ar' ? 'المديونة (العمولة)' : 'Outstanding Commission'}</p>
-                                <p className="font-bold text-rose-600 mt-0.5">{Math.round(drv.totalCommissionPaid)} ج.م</p>
-                              </div>
+                             <div>
+                               <p className="text-[8px] text-rose-500">{lang === 'ar' ? 'عمولة التطبيق' : 'Due Ezz'}</p>
+                               <p className="font-bold text-rose-600 mt-0.5">{Math.round(driverPeriodStats.commission)} ج.م</p>
+                             </div>
                            </div>
 
                           {/* Service Areas Assignment */}
@@ -1969,7 +1963,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               <div className="space-y-2">
                 {riders
                   .filter((r) => {
-                    if (riderStatusFilter === 'ACTIVE') return r.approvalStatus === 'APPROVED';
+                    if (riderStatusFilter === 'ACTIVE') return (r.approvalStatus || 'APPROVED') === 'APPROVED';
                     if (riderStatusFilter === 'FROZEN') return r.approvalStatus === 'FROZEN';
                     if (riderStatusFilter === 'BLOCKED') return r.approvalStatus === 'BLOCKED';
                     if (riderStatusFilter === 'REJECTED') return r.approvalStatus === 'REJECTED';
@@ -1987,7 +1981,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                      const isFrozen = rider.approvalStatus === 'FROZEN';
                      const isBlocked = rider.approvalStatus === 'BLOCKED';
                      const isRejected = rider.approvalStatus === 'REJECTED';
-                      const riderPeriodStats = getRiderStatsForPeriod(riderPeriodFilter)[rider.id] || { trips: 0, spent: 0 };
+                     const riderPeriodStats = getRiderStatsForPeriod(riderPeriodFilter)[rider.name] || { trips: 0, spent: 0 };
 
                      return (
                        <div
@@ -2878,14 +2872,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
           return (
             <div className="space-y-4">
-              {adError && (
-                <div className="bg-rose-50 border border-rose-200 text-rose-600 text-[10px] rounded-xl p-2.5">{adError}</div>
-              )}
-              {adsLoading && (
-                <div className="text-center py-6 text-slate-400">
-                  <p className="text-[10px] font-bold">{lang === 'ar' ? 'جاري تحميل الإعلانات...' : 'Loading ads...'}</p>
-                </div>
-              )}
               {/* Total Ad Revenue & Comprehensive Analytics Header Card */}
               <div className="bg-gradient-to-r from-teal-900 via-emerald-900 to-slate-900 text-white rounded-2xl p-4 shadow-md space-y-3">
                 <div className="flex items-center justify-between border-b border-white/10 pb-2">
@@ -3211,22 +3197,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       onChange={(e) => setAdForm({ ...adForm, adFee: Number(e.target.value) || 0 })}
                       className="w-full text-[10px] bg-emerald-50/50 border border-emerald-200 rounded-lg px-3 py-2 text-emerald-900 font-bold focus:outline-none focus:border-emerald-500"
                     />
-                   </div>
+                  </div>
 
-                   <div className="space-y-1">
-                     <label className="text-[9px] font-bold text-slate-600">{lang === 'ar' ? 'الحد اليومي للظهورات (0 = غير محدود)' : 'Daily Impression Limit (0 = unlimited)'}</label>
-                     <input
-                       type="number"
-                       min="0"
-                       placeholder="0"
-                       value={adForm.dailyImpressionLimit || ''}
-                       onChange={(e) => setAdForm({ ...adForm, dailyImpressionLimit: Number(e.target.value) || 0 })}
-                       className="w-full text-[10px] bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700 focus:outline-none focus:border-teal-500"
-                     />
-                   </div>
-
-                   <div className="space-y-1">
-                     <label className="text-[9px] font-bold text-slate-600">{lang === 'ar' ? 'مكان الظهور' : 'Placement'}</label>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-bold text-slate-600">{lang === 'ar' ? 'مكان الظهور' : 'Placement'}</label>
                     <select
                       value={adForm.placement}
                       onChange={(e) => setAdForm({ ...adForm, placement: e.target.value as Ad['placement'] })}

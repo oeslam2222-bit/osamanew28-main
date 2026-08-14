@@ -989,7 +989,7 @@ export const RiderView: React.FC<RiderViewProps> = ({
         )}
 
         {/* State 2a: CANCELLED Trip - Show dismiss button */}
-        {activeTrip && activeTrip.riderId === rider.id && activeTrip.status === 'CANCELLED' && (
+        {activeTrip && activeTrip.status === 'CANCELLED' && (
           <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 space-y-3 text-center">
             <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto text-lg font-black">
               ❌

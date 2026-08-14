@@ -12,11 +12,10 @@
   import { motion, AnimatePresence } from 'motion/react';
   import { calculateHaversineDistance, estimateDrivingDistance, calculateDynamicFare, getVehiclePricing, calculateVehicleFare, calculateFullTripFare, RouteResult, RouteStep } from './utils/haversine';
   import { getEligibleDrivers, getCoordsFromXY } from './utils/tripDispatchUtils';
-  import {
-    checkSupabaseConnection,
-    fetchDrivers,
-    fetchDriversBasic,
-    saveDriver,
+  import { 
+    checkSupabaseConnection, 
+    fetchDrivers, 
+    saveDriver, 
     fetchRiders, 
     saveRider, 
     fetchActiveTrip, 
@@ -70,6 +69,7 @@
     getInitialDataSaverState,
     setDataSaverState,
     getAdaptivePollingInterval,
+    getBackgroundPollingInterval,
     getCachedRoute,
     setCachedRoute
   } from './utils/dataSaver';
@@ -826,8 +826,8 @@
         let driver = drivers.find(d => d.id === selectedDriverId);
         if (!driver) {
           try {
-            const freshDrivers = await fetchDriversBasic();
-          driver = freshDrivers?.find(d => d.id === selectedDriverId);
+            const freshDrivers = await fetchDrivers();
+            driver = freshDrivers?.find(d => d.id === selectedDriverId);
           } catch (e) {
             console.warn('[DriverReset] Could not fetch driver:', e);
           }
@@ -1103,7 +1103,7 @@
             dbActiveTrip,
           ] = await Promise.all([
             fetchLocations(),
-            fetchDriversBasic(),
+            fetchDrivers(),
             fetchRiders(),
             fetchRegions(),
             fetchAds(),
@@ -1334,18 +1334,7 @@
           }
         });
 
-      channel.subscribe((status: string) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('[realtime] drivers_list_channel subscribed');
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          console.warn('[realtime] drivers_list_channel', status, '- triggering fallback fetch');
-          fetchDriversBasic().then((fresh) => {
-            if (fresh && fresh.length > 0) {
-              setDrivers(fresh);
-            }
-          }).catch(() => {});
-        }
-      });
+      channel.subscribe();
 
       return () => {
         supabase.removeChannel(channel);
@@ -1428,40 +1417,7 @@
       };
 
     updateLastSeen();
-    const interval = setInterval(updateLastSeen, 10000);
-
-      const handleOnline = async () => {
-        if (!isMountedRef.current) return;
-        try {
-          const fresh = await fetchDriversBasic();
-          if (fresh && fresh.length > 0) {
-            setDrivers((prev) => {
-              const merged = [...fresh];
-              fresh.forEach((fd) => {
-                const local = prev.find((d) => d.id === fd.id);
-                if (local) {
-                  const idx = merged.findIndex((m) => m.id === fd.id);
-                  merged[idx] = { ...fd, ...local, lastSeen: local.lastSeen || fd.lastSeen };
-                }
-              });
-              return merged;
-            });
-          }
-        } catch (e) {
-          // best-effort
-        }
-      };
-
-      const handleVisibilityChange = () => {
-        if (!document.hidden && isMountedRef.current) {
-          handleOnline();
-        }
-      };
-
-      if (typeof window !== 'undefined') {
-        window.addEventListener('online', handleOnline);
-        window.addEventListener('visibilitychange', handleVisibilityChange);
-      }
+    const interval = setInterval(updateLastSeen, 30000);
 
       // Mark offline immediately when app/tab is closed
       const markOffline = async () => {
@@ -1483,8 +1439,6 @@
         clearInterval(interval);
         if (typeof window !== 'undefined') {
           window.removeEventListener('beforeunload', markOffline);
-          window.removeEventListener('online', handleOnline);
-          window.removeEventListener('visibilitychange', handleVisibilityChange);
         }
       };
     }, [supabaseConnected, driverIsLoggedIn, selectedDriverId]);
@@ -1822,7 +1776,87 @@
       };
     }, [driverIsLoggedIn, selectedDriverId, lang]);
 
-    // 3. Active trip updates are handled by useActiveTripSync hook (unified polling + realtime)
+      // 3. Background notification poller — keeps driver alerts alive even when tab is hidden
+    useEffect(() => {
+      if (!supabaseConnected || !driverIsLoggedIn) return;
+      if (currentScreen !== 'DRIVER_AUTH' && currentScreen !== 'DRIVER_DASHBOARD') return;
+
+      // Auto-request notification permission when driver logs in
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
+
+      const resetNotified = () => {
+        lastNotifiedTripIdRef.current = null;
+        lastNotifiedOfferedDriverIdRef.current = null;
+      };
+
+      // Reset notification state when app goes to background so we can re-notify when it comes back
+      const handleVisibilityChange = () => {
+        if (document.hidden) {
+          resetNotified();
+        } else {
+          // App just became visible, immediately check for pending trip
+          const remoteActiveTrip = activeTrip;
+          if (remoteActiveTrip && remoteActiveTrip.status === 'SEARCHING') {
+            const isEligible = remoteActiveTrip.offeredDriverIds?.includes(selectedDriverId);
+            const isNewlyOffered = remoteActiveTrip.currentOfferedDriverId === selectedDriverId;
+            const needsNotify = lastNotifiedTripIdRef.current !== remoteActiveTrip.id ||
+              lastNotifiedOfferedDriverIdRef.current !== remoteActiveTrip.currentOfferedDriverId;
+            if (isEligible && needsNotify && isNewlyOffered) {
+              lastNotifiedTripIdRef.current = remoteActiveTrip.id;
+              lastNotifiedOfferedDriverIdRef.current = remoteActiveTrip.currentOfferedDriverId || null;
+            }
+          }
+        }
+      };
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      if (activeTrip && activeTrip.status === 'SEARCHING') {
+        lastNotifiedTripIdRef.current = activeTrip.id;
+        lastNotifiedOfferedDriverIdRef.current = activeTrip.currentOfferedDriverId || null;
+      }
+
+      const pollInterval = getBackgroundPollingInterval(60000, dataSaverMode, !!activeTrip && activeTrip.status === 'SEARCHING');
+
+      const interval = setInterval(async () => {
+        if (!isMountedRef.current) return;
+        try {
+          const remoteActiveTrip = await fetchActiveTrip(selectedDriverId, 'driver');
+          if (!remoteActiveTrip) return;
+
+          if (remoteActiveTrip.status !== 'SEARCHING') {
+            if (lastNotifiedTripIdRef.current !== null) {
+              console.log('[BackgroundPoller] Trip left SEARCHING, clearing notifications');
+              lastNotifiedTripIdRef.current = null;
+              lastNotifiedOfferedDriverIdRef.current = null;
+            }
+            return;
+          }
+
+          if (remoteActiveTrip.status === 'SEARCHING') {
+            const isEligible = remoteActiveTrip.offeredDriverIds?.includes(selectedDriverId);
+            const isNewlyOffered = remoteActiveTrip.currentOfferedDriverId === selectedDriverId;
+            const needsNotify = lastNotifiedTripIdRef.current !== remoteActiveTrip.id ||
+              lastNotifiedOfferedDriverIdRef.current !== remoteActiveTrip.currentOfferedDriverId;
+            if (isEligible && needsNotify && isNewlyOffered) {
+              lastNotifiedTripIdRef.current = remoteActiveTrip.id;
+              lastNotifiedOfferedDriverIdRef.current = remoteActiveTrip.currentOfferedDriverId || null;
+              setActiveTripWithTracking(remoteActiveTrip);
+            }
+          }
+        } catch (err) {
+          console.warn('Background notification poll error:', err);
+        }
+      }, pollInterval);
+
+      return () => {
+        clearInterval(interval);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        resetNotified();
+      };
+    }, [supabaseConnected, driverIsLoggedIn, selectedDriverId, lang, dataSaverMode, activeTrip?.id, activeTrip?.status, currentScreen]);
 
     // 4. Reactive Push Sync to Supabase upon state updates (debounced)
     const driversSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1874,7 +1908,7 @@
       if (driversSyncTimerRef.current) clearTimeout(driversSyncTimerRef.current);
       driversSyncTimerRef.current = setTimeout(() => {
         syncDriversToSupabase(drivers);
-      }, 15000);
+      }, 3000);
       return () => {
         if (driversSyncTimerRef.current) clearTimeout(driversSyncTimerRef.current);
       };
@@ -2017,9 +2051,9 @@
             clearInterval(interval);
           }
 
-          // Save driver location to DB every 90 ticks (~18s) for live tracking
+          // Save driver location to DB every 25 ticks (~5s) for live tracking
           saveCounter++;
-          if (saveCounter % 90 === 0 && supabaseConnected) {
+          if (saveCounter % 25 === 0 && supabaseConnected) {
             const updatedDriver = next.find((d) => d.id === activeTrip.driverId);
             if (updatedDriver && updatedDriver.lat && updatedDriver.lng) {
               saveDriver(updatedDriver);
@@ -2041,7 +2075,7 @@
 
       if (supabaseConnected) {
         try {
-          const freshDrivers = await fetchDriversBasic();
+          const freshDrivers = await fetchDrivers();
           if (freshDrivers?.length) driverList = freshDrivers;
         } catch (e) {
           console.warn('Could not fetch fresh drivers for dispatch, falling back to local list:', e);
@@ -2068,17 +2102,6 @@
       if (!rider.isLoggedIn) return;
       requestInProgressRef.current = true;
       try {
-        if (activeTrip && ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'].includes(activeTrip.status)) {
-          triggerToast(
-            lang === 'ar' ? 'لديك رحلة جارية' : 'You have an active trip',
-            lang === 'ar'
-              ? 'يرجى انتظار انتهاء الرحلة الحالية قبل طلب رحلة جديدة.'
-              : 'Please wait for your current trip to finish before requesting a new one.',
-            'warning'
-          );
-          requestInProgressRef.current = false;
-          return;
-        }
         if (!selectedPickup || !selectedDropoff) return;
         if (!riderPickupRegion) {
           triggerToast(
@@ -2289,7 +2312,6 @@
     const refreshWaitingTrip = async (tripOverride?: Trip): Promise<boolean> => {
       const trip = tripOverride ?? activeTrip;
       if (!trip || trip.status !== 'SEARCHING' || !rider.isLoggedIn) return false;
-      if (trip.riderId !== rider.id) return false;
 
       const pLoc = trip.pickup;
       const dLoc = trip.dropoff;
@@ -2380,7 +2402,6 @@
     // Auto-refresh waiting trip every 2 minutes to re-dispatch to new online drivers
     useEffect(() => {
       if (!activeTrip || activeTrip.status !== 'SEARCHING' || !rider.isLoggedIn) return;
-      if (activeTrip.riderId !== rider.id) return;
 
       const refreshInterval = setInterval(() => {
         if (!isMountedRef.current) return;
@@ -2389,7 +2410,7 @@
             console.log('[WaitingTripRefresh] Trip refreshed successfully');
           }
         });
-      }, 60000);
+      }, 120000);
 
       return () => clearInterval(refreshInterval);
     }, [activeTrip?.id, activeTrip?.status, rider.isLoggedIn, supabaseConnected]);
@@ -2855,8 +2876,8 @@
             if (d.id !== driverId) return d;
             return {
               ...d,
-              status: 'AVAILABLE' as const,
-              isOnline: true,
+              status: 'OFFLINE' as const,
+              isOnline: false,
               totalTrips: d.totalTrips + 1,
               totalEarnings: d.totalEarnings + netEarnings,
               totalCommissionPaid: d.totalCommissionPaid + commission,
@@ -3038,23 +3059,9 @@
             approvalStatus: cleared.approvalStatus,
             serviceAreas: cleared.serviceAreas,
           };
-          triggerToast(
-            lang === 'ar' ? 'تمت التسوية بنجاح' : 'Settlement Successful',
-            lang === 'ar'
-              ? `تم تصفية عمولة الكابتن ${driver.name} وتصبح الحساب مصفى الآن.`
-              : `Captain ${driver.name}'s commission has been settled. Account is now clear.`,
-            'success'
-          );
         }
       } else {
         setDrivers((prev) => prev.map((d) => (d.id === driverId ? cleared : d)));
-        triggerToast(
-          lang === 'ar' ? 'تمت التسوية محلياً' : 'Settled Locally',
-          lang === 'ar'
-            ? `تم تصفية عمولة الكابتن ${driver.name} محلياً. ستتم المزامنة عند عودة الاتصال.`
-            : `Captain ${driver.name}'s commission cleared locally. Will sync when connection returns.`,
-          'info'
-        );
       }
     };
 
@@ -3390,8 +3397,8 @@
           if (d.id !== driverId) return d;
           return {
             ...d,
-            status: 'AVAILABLE' as const,
-            isOnline: true,
+            status: 'OFFLINE' as const,
+            isOnline: false,
             totalTrips: d.totalTrips + 1,
             totalEarnings: d.totalEarnings + netEarnings,
             totalCommissionPaid: d.totalCommissionPaid + commission,
@@ -3643,7 +3650,7 @@
             console.warn('[FCM] Could not register token:', err);
           }
           
-          const freshDrivers = await fetchDriversBasic();
+          const freshDrivers = await fetchDrivers();
           if (freshDrivers && freshDrivers.length > 0) {
             setDrivers(freshDrivers);
           }

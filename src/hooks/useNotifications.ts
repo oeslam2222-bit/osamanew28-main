@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Trip } from '../types';
 import {
   subscribeToActiveTrips,
+  fetchActiveTrip,
   saveActiveTrip,
   saveTripToHistory,
 } from '../supabaseService';
@@ -242,7 +243,50 @@ export const useNotifications = (
     return stopAlarm;
   }, [driverIsLoggedIn, activeTrip]);
 
-  // Background notification polling is handled by useActiveTripSync (unified poller at 60s)
+  // Background notification poller (visibility-aware)
+  useEffect(() => {
+    if (!driverIsLoggedIn || !selectedDriverId || !supabaseConnected) return;
+
+    const pollInterval = dataSaverMode ? 300000 : 60000;
+    const interval = setInterval(async () => {
+      if (document.hidden) return;
+      try {
+        const remoteActiveTrip = await fetchActiveTrip(selectedDriverId, 'driver');
+        if (!remoteActiveTrip) return;
+
+        if (remoteActiveTrip.status !== 'SEARCHING') {
+          if (lastNotifiedTripIdRef.current !== null) {
+            lastNotifiedTripIdRef.current = null;
+            lastNotifiedOfferedDriverIdRef.current = null;
+          }
+          return;
+        }
+
+        if (remoteActiveTrip.status === 'SEARCHING') {
+          const isEligible = remoteActiveTrip.offeredDriverIds?.includes(selectedDriverId);
+          const isNewlyOffered = remoteActiveTrip.currentOfferedDriverId === selectedDriverId;
+          const needsNotify = lastNotifiedTripIdRef.current !== remoteActiveTrip.id ||
+            lastNotifiedOfferedDriverIdRef.current !== remoteActiveTrip.currentOfferedDriverId;
+
+          if (isEligible && needsNotify) {
+            lastNotifiedTripIdRef.current = remoteActiveTrip.id;
+            lastNotifiedOfferedDriverIdRef.current = remoteActiveTrip.currentOfferedDriverId || null;
+            triggerToast(
+              lang === 'ar' ? 'يوجد رحلة جديدة' : 'New trip available',
+              lang === 'ar'
+                ? `العميل ${remoteActiveTrip.riderName} يطلب رحلة من ${remoteActiveTrip.pickup.nameAr}.`
+                : `Rider ${remoteActiveTrip.riderName} requests a ride from ${remoteActiveTrip.pickup.nameEn}.`,
+              'new_trip'
+            );
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }, pollInterval);
+
+    return () => clearInterval(interval);
+  }, [driverIsLoggedIn, selectedDriverId, supabaseConnected, dataSaverMode, lang]);
 
   return {
     notifiedEventsRef,
