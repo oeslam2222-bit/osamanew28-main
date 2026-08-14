@@ -144,6 +144,9 @@ export const useBackgroundSync = (
 
         for (const driver of driversToSync) {
           if (!isMountedRef.current) break;
+          if (!driver?.id || !driver?.phone) {
+            continue;
+          }
           await saveDriver(driver);
           lastSyncedDriversRef.current[driver.id] = { ...driver };
         }
