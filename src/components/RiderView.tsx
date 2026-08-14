@@ -1,15 +1,12 @@
-import React, { useState, useEffect, lazy, Suspense, Dispatch, SetStateAction } from 'react';
+import React, { useState, useEffect, Dispatch, SetStateAction } from 'react';
 import { Location, Driver, Trip, Rider, Region, Ad } from '../types';
 import { MapPin, ArrowRightLeft, Navigation, Phone, Star, DollarSign, Loader2, Sparkles, AlertCircle, Car, HelpCircle, MessageSquare, Search, Check, X, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { calculateHaversineDistance, estimateDrivingDistance, calculateDynamicFare, getVehiclePricing, calculateVehicleFare, calculateFullTripFare } from '../utils/haversine';
 import { saveRiderPreferences, validatePromoCode } from '../supabaseService';
 import { RiderPreferences } from '../types';
 import { AdBanner } from './AdBanner';
-
-// Lazy-load the heavy map components so the rider page opens instantly on
-// weak networks. The map bundle is only fetched when the user taps "Show map".
-const CityMap = lazy(() => import('./CityMap').then(m => ({ default: m.CityMap })));
-const GoogleMap = lazy(() => import('./GoogleMap').then(m => ({ default: m.GoogleMap })));
+import { CityMap } from './CityMap';
+import { GoogleMap } from './GoogleMap';
 
 interface RiderViewProps {
   rider: Rider;
@@ -1257,16 +1254,9 @@ export const RiderView: React.FC<RiderViewProps> = ({
                   {lang === 'ar' ? 'عرض الخريطة لاختيار نقطة الالتقاء / الوصول' : 'Show map to pick pickup / destination'}
                 </button>
               </div>
-            ) : (
-              <Suspense
-                fallback={
-                  <div className="w-full h-64 flex items-center justify-center bg-slate-100 rounded-2xl">
-                    <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
-                  </div>
-                }
-              >
-                 {stats?.mapProvider === 'google' && stats?.googleMapsApiKey ? (
-                  <GoogleMap
+             ) : (
+               stats?.mapProvider === 'google' && stats?.googleMapsApiKey ? (
+                 <GoogleMap
                     locations={locations}
                     activeTrip={activeTrip}
                     selectedPickup={selectedPickup}
@@ -1300,10 +1290,9 @@ export const RiderView: React.FC<RiderViewProps> = ({
                     })() : null}
                     dataSaverMode={lowDataMode}
                     onToggleDataSaver={lowDataMode ? onDisableLowData : onEnableLowData}
-                  />
-                )}
-              </Suspense>
-            )}
+                   />
+                 )
+             )}
 
             {/* Starred / Favorite Locations Section */}
             {favorites.length > 0 && (
