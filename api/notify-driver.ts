@@ -5,24 +5,48 @@ const webpush = require('web-push');
 const VAPID_PUBLIC_KEY = process.env.VITE_WEB_PUSH_VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.WEB_PUSH_VAPID_PRIVATE_KEY;
 
-if (!webpush.setVapidDetails) {
+const hasWebPush = typeof webpush?.setVapidDetails === 'function';
+
+if (!hasWebPush) {
   console.warn('[notify-driver] web-push is not available in this environment');
 }
 
 async function getAvailableDrivers(supabase: any): Promise<any[]> {
-  const { data, error } = await supabase
+  const { data: drivers, error: driversError } = await supabase
     .from('ezz_drivers')
-    .select('id,name,web_push_subscription')
+    .select('id,name')
     .eq('is_online', true)
     .eq('status', 'AVAILABLE')
     .eq('approval_status', 'APPROVED');
 
-  if (error) {
-    console.error('[notify-driver] Error fetching drivers:', error);
+  if (driversError) {
+    console.error('[notify-driver] Error fetching drivers:', driversError);
     return [];
   }
 
-  return (data || []).filter((d: any) => d.web_push_subscription && d.web_push_subscription.endpoint);
+  if (!drivers || drivers.length === 0) return [];
+
+  const driverIds = drivers.map((d: any) => d.id);
+
+  const { data: subscriptions, error: subsError } = await supabase
+    .from('ezz_push_subscriptions')
+    .select('driver_id,endpoint,p256dh,auth')
+    .in('driver_id', driverIds);
+
+  if (subsError) {
+    console.error('[notify-driver] Error fetching push subscriptions:', subsError);
+    return [];
+  }
+
+  const subMap = new Map((subscriptions || []).map((s: any) => [s.driver_id, s]));
+
+  return drivers
+    .map((d: any) => ({
+      id: d.id,
+      name: d.name,
+      web_push_subscription: subMap.get(d.id) || null,
+    }))
+    .filter((d: any) => d.web_push_subscription && d.web_push_subscription.endpoint);
 }
 
 async function sendPushNotification(
@@ -30,6 +54,8 @@ async function sendPushNotification(
   payload: any
 ): Promise<boolean> {
   try {
+    if (!hasWebPush) return false;
+
     webpush.setVapidDetails(
       'mailto:support@captain-ezz.com',
       VAPID_PUBLIC_KEY,
@@ -51,7 +77,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
-      return res.status(500).json({ error: 'VAPID keys not configured' });
+      console.warn('[notify-driver] VAPID keys not configured, skipping push notifications');
+      return res.status(200).json({
+        success: true,
+        message: 'VAPID keys not configured',
+        notificationsSent: 0,
+      });
+    }
+
+    if (!hasWebPush) {
+      console.warn('[notify-driver] web-push not available, skipping push notifications');
+      return res.status(200).json({
+        success: true,
+        message: 'web-push not available',
+        notificationsSent: 0,
+      });
     }
 
     const { tripId, pickup, vehicleType } = req.body || {};
@@ -70,7 +110,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Verify trip exists and is still searching
     const { data: trip, error: tripError } = await supabase
       .from('ezz_active_trip')
       .select('id,status,pickup,dropoff,rider_name,requested_vehicle_type,fare')
