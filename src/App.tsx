@@ -2046,6 +2046,15 @@
       return () => clearInterval(interval);
     }, [activeTrip?.status, activeTrip?.id, activeTrip?.driverId]);
 
+    const saveWithRetry = async (trip: Trip, retries = 2): Promise<boolean> => {
+      for (let i = 0; i < retries; i++) {
+        const ok = await saveActiveTrip(trip);
+        if (ok) return true;
+        await new Promise(resolve => setTimeout(resolve, 600));
+      }
+      return false;
+    };
+
     // Handler: Request Ride with dynamic commission rate calculation by mileage (distance-based commission request)
     const fetchEligibleDriversForRegion = async (regionId?: string): Promise<Driver[]> => {
       const now = Date.now();
@@ -2233,6 +2242,21 @@
 
           setActiveTripWithTracking(newTrip);
 
+          if (supabaseConnected) {
+            const ok = await saveWithRetry(newTrip);
+            if (!ok) {
+              triggerToast(
+                lang === 'ar' ? 'خطأ في حفظ الرحلة' : 'Failed to save trip',
+                lang === 'ar'
+                  ? 'لم يتم حفظ الرحلة على السيرفر. يرجى المحاولة مرة أخرى.'
+                  : 'Trip was not saved to server. Please try again.',
+                'warning'
+              );
+              requestInProgressRef.current = false;
+              return;
+            }
+          }
+
           playNotificationSound('new_trip');
           triggerToast(
             lang === 'ar' ? 'تم طلب الرحلة بنجاح' : 'Ride request sent',
@@ -2250,29 +2274,24 @@
           );
 
           if (supabaseConnected) {
-            saveActiveTrip(newTrip).then((ok) => {
-              console.log('[handleRequestRide] saveActiveTrip result:', ok);
-              if (ok && promoCodeId) {
-                markPromoCodeAsUsed(promoCodeId, newTrip.id).catch(() => {});
-              }
-              if (ok) {
-                fetch('/api/notify-driver', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    tripId: newTrip.id,
-                    pickup: pLoc.nameAr || pLoc.nameEn,
-                    vehicleType: requestedVehicleType,
-                  }),
-                }).catch(() => {});
-              }
-            });
+            if (promoCodeId) {
+              markPromoCodeAsUsed(promoCodeId, newTrip.id).catch(() => {});
+            }
+            fetch('/api/notify-driver', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                tripId: newTrip.id,
+                pickup: pLoc.nameAr || pLoc.nameEn,
+                vehicleType: requestedVehicleType,
+              }),
+            }).catch(() => {});
+          }
 
             const waitingAds = await fetchActiveAdsForPlacement('waiting');
             if (waitingAds && waitingAds.length > 0) {
               setAds(waitingAds);
             }
-          }
         } else {
           setNoAvailableDrivers(true);
           triggerToast(
@@ -2287,15 +2306,6 @@
       } finally {
         requestInProgressRef.current = false;
       }
-    };
-
-    const saveWithRetry = async (trip: Trip, retries = 2): Promise<boolean> => {
-      for (let i = 0; i < retries; i++) {
-        const ok = await saveActiveTrip(trip);
-        if (ok) return true;
-        await new Promise(resolve => setTimeout(resolve, 600));
-      }
-      return false;
     };
 
     // Refresh a waiting trip: re-evaluate eligible drivers and re-dispatch
