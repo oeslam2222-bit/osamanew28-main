@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Driver, Trip, Location, SystemStats, Region } from '../types';
 import { ToggleRight, MapPin, Navigation, DollarSign, Wallet, Check, AlertTriangle, Users, Star, MessageSquare, Bell, ShieldAlert, Loader2, ChevronRight, ChevronLeft, Plus, X } from 'lucide-react';
+import { fetchActiveTrip } from '../supabaseService';
 
 interface DriverViewProps {
   drivers: Driver[];
@@ -30,6 +31,7 @@ interface DriverViewProps {
   driverLat?: number;
   driverLng?: number;
   onOpenGuide?: (tab?: 'rider' | 'driver' | 'about') => void;
+  onUpdateActiveTrip?: (trip: Trip | null) => void;
 }
 
 export const DriverView: React.FC<DriverViewProps> = ({
@@ -60,6 +62,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
   driverLat,
   driverLng,
   onOpenGuide,
+  onUpdateActiveTrip,
 }) => {
   const safeSelectedId = selectedDriverId || '';
   const safeDrivers = Array.isArray(drivers) ? drivers : [];
@@ -178,6 +181,35 @@ export const DriverView: React.FC<DriverViewProps> = ({
     activeTrip.status === 'SEARCHING' &&
     currentDriver.isOnline &&
     currentDriver.status !== 'UNAVAILABLE';
+
+   // Fallback: if realtime hasn't delivered the trip yet, poll Supabase directly
+   // so a single available driver still receives the request even if the channel is delayed
+   useEffect(() => {
+    if (!currentDriverId || activeTrip) return;
+    if (!onUpdateActiveTrip) return;
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const pollForPendingTrip = async () => {
+      try {
+        const trip = await fetchActiveTrip(currentDriverId, 'driver');
+        if (trip && trip.status === 'SEARCHING') {
+          console.log('[DriverViewFallback] Found pending trip:', trip.id, 'for driver:', currentDriverId);
+          onUpdateActiveTrip(trip);
+        }
+      } catch (e) {
+        // best-effort
+      }
+    };
+
+    pollForPendingTrip();
+
+    timeoutId = setInterval(pollForPendingTrip, 8000);
+
+    return () => {
+      if (timeoutId) clearInterval(timeoutId);
+    };
+   }, [currentDriverId, activeTrip, onUpdateActiveTrip]);
 
    useEffect(() => {
      console.log('[DriverView] activeTrip:', activeTrip?.id || 'null', 'status:', activeTrip?.status || 'null',
