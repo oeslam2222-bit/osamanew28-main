@@ -1197,10 +1197,10 @@ GRANT EXECUTE ON FUNCTION admin_set_driver_approval(TEXT, TEXT, TEXT, TEXT) TO s
 
 // --- DRIVER TRANSFORMS ---
 export const mapDriverFromDB = (row: any): Driver => ({
-  id: row.id,
-  name: row.name,
-  phone: row.phone,
-  password: row.password,
+  id: row.id || '',
+  name: row.name || '',
+  phone: row.phone || '',
+  password: row.password || '',
   carModel: row.car_model || '',
   carPlate: row.car_plate || '',
   vehicleType: (row.vehicle_type || 'CAR').toUpperCase(),
@@ -1244,7 +1244,7 @@ export const mapDriverToDB = (drv: Driver) => {
 
   if (drv.id) base.id = drv.id;
   if (drv.name) base.name = drv.name;
-  if (drv.phone) base.phone = drv.phone;
+  base.phone = drv.phone || '';
   if (drv.carModel) base.car_model = drv.carModel;
   if (drv.carPlate) base.car_plate = drv.carPlate;
   if (drv.vehicleType) base.vehicle_type = drv.vehicleType;
@@ -1433,7 +1433,7 @@ export const fetchDriversBasic = async (): Promise<Driver[] | null> => {
     const result = await withRetry<Driver[]>(() =>
       supabase
         .from('ezz_drivers')
-        .select('id,name,status,is_online,approval_status,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen,service_areas')
+        .select('id,name,phone,status,is_online,approval_status,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen,service_areas')
     );
     if (result.error) throw result.error;
     return (result.data || []).map(mapDriverFromDB);
@@ -1449,7 +1449,7 @@ export const fetchDriversPolling = async (): Promise<Driver[] | null> => {
     const result = await withRetry<Driver[]>(() =>
       supabase
         .from('ezz_drivers')
-        .select('id,name,status,is_online,approval_status,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen,service_areas')
+        .select('id,name,phone,status,is_online,approval_status,current_x,current_y,vehicle_type,vehicle_name,rating,total_trips,last_seen,service_areas')
     );
     if (result.error) throw result.error;
     return (result.data || []).map(mapDriverFromDB);
@@ -1476,7 +1476,7 @@ export const fetchDrivers = async (): Promise<Driver[] | null> => {
 // Save Driver
 export const saveDriver = async (driver: Driver): Promise<boolean> => {
   try {
-    if (!driver?.id || !driver?.name || !driver?.phone) {
+    if (!driver?.id || !driver?.name) {
       console.warn('[saveDriver] Refusing to save driver with missing required fields:', {
         id: driver?.id,
         name: driver?.name,
