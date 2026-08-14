@@ -3560,7 +3560,7 @@
         }
 
         // Check for duplicate phone
-        const phoneExists = registeredRiders.some(r => r.phone.trim() === riderFormPhone.trim());
+        const phoneExists = registeredRiders.some(r => (r.phone || '').trim() === riderFormPhone.trim());
         if (phoneExists) {
           setRiderFormError(lang === 'ar' ? 'رقم الهاتف هذا مسجل بالفعل! جرب تسجيل الدخول' : 'This phone number is already registered! Try logging in');
           return;
@@ -3723,7 +3723,7 @@
         }
 
         // Check for duplicate phone
-        const phoneExists = drivers.some(d => d.phone.trim() === drvFormPhone.trim());
+        const phoneExists = drivers.some(d => (d.phone || '').trim() === drvFormPhone.trim());
         if (phoneExists) {
           setDrvFormError(lang === 'ar' ? 'رقم الهاتف هذا مسجل بالفعل لكابتن آخر!' : 'This phone number is already registered for another captain');
           return;
